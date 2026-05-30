@@ -117,6 +117,23 @@ _UID_CPT = "_cpt_uid"
 _UID_MRM = "_mrm_uid"
 
 
+def _persist_count(df: DataFrame) -> DataFrame:
+    """Matérialise df (persist + action) pour figer le plan et éviter les recomputations."""
+    df.persist()
+    df.count()
+    return df
+
+
+def _swap_persist(old: DataFrame, new: DataFrame) -> DataFrame:
+    """Persiste `new`, libère `old` — utilisé entre étapes du waterfall."""
+    _persist_count(new)
+    try:
+        old.unpersist()
+    except Exception:
+        pass
+    return new
+
+
 # ============================================================================
 # ÉTAPE DE MATCHING GÉNÉRIQUE
 # ============================================================================
@@ -184,9 +201,13 @@ def execute_matching_step(
             .transform(drop_duplicate_columns)
         )
 
-    # ── Anti-join basé sur les uids — robuste pour les clés non-uniques ──────
-    matched_cpt_uids = df_matched.select(_UID_CPT).distinct()
-    matched_mrm_uids = df_matched.select(_UID_MRM).distinct()
+    # ── Matérialiser df_matched : il sera lu 3 fois (2 anti-joins + union finale).
+    _persist_count(df_matched)
+
+    # ── Anti-join basé sur les uids — robuste pour les clés non-uniques.
+    # Broadcast : les uids matchés sont par construction petits (~quelques k lignes).
+    matched_cpt_uids = F.broadcast(df_matched.select(_UID_CPT).distinct())
+    matched_mrm_uids = F.broadcast(df_matched.select(_UID_MRM).distinct())
     df_cpt_remaining = df_cpt.join(matched_cpt_uids, on=_UID_CPT, how="left_anti")
     df_mrm_remaining = df_mrm.join(matched_mrm_uids, on=_UID_MRM, how="left_anti")
 
@@ -243,8 +264,9 @@ def execute_ip_step(
         .transform(drop_duplicate_columns)
     )
 
-    matched_cpt_uids = df_matched.select(_UID_CPT).distinct()
-    matched_mrm_uids = df_matched.select(_UID_MRM).distinct()
+    _persist_count(df_matched)
+    matched_cpt_uids = F.broadcast(df_matched.select(_UID_CPT).distinct())
+    matched_mrm_uids = F.broadcast(df_matched.select(_UID_MRM).distinct())
     df_cpt_remaining = df_cpt.join(matched_cpt_uids, on=_UID_CPT, how="left_anti")
     df_mrm_remaining = df_mrm.join(matched_mrm_uids, on=_UID_MRM, how="left_anti")
 
@@ -319,8 +341,9 @@ def execute_rechute_step(
         .transform(drop_duplicate_columns)
     )
 
-    matched_cpt_uids = df_matched.select(_UID_CPT).distinct()
-    matched_mrm_uids = df_matched.select(_UID_MRM).distinct()
+    _persist_count(df_matched)
+    matched_cpt_uids = F.broadcast(df_matched.select(_UID_CPT).distinct())
+    matched_mrm_uids = F.broadcast(df_matched.select(_UID_MRM).distinct())
     df_cpt_remaining = df_cpt.join(matched_cpt_uids, on=_UID_CPT, how="left_anti")
     df_mrm_remaining = df_mrm.join(matched_mrm_uids, on=_UID_MRM, how="left_anti")
 
@@ -391,8 +414,9 @@ def execute_date_retard_step(
         .transform(drop_duplicate_columns)
     )
 
-    matched_cpt_uids = df_matched.select(_UID_CPT).distinct()
-    matched_mrm_uids = df_matched.select(_UID_MRM).distinct()
+    _persist_count(df_matched)
+    matched_cpt_uids = F.broadcast(df_matched.select(_UID_CPT).distinct())
+    matched_mrm_uids = F.broadcast(df_matched.select(_UID_MRM).distinct())
     df_cpt_remaining = df_cpt.join(matched_cpt_uids, on=_UID_CPT, how="left_anti")
     df_mrm_remaining = df_mrm.join(matched_mrm_uids, on=_UID_MRM, how="left_anti")
 
@@ -575,12 +599,13 @@ def recover_late_declarations(
     """
     is_cpt_only = F.col("TYPE_RECONCILIATION") == "CPT_ONLY"
     rest      = df_result.filter(~is_cpt_only)
-    remaining = df_result.filter(is_cpt_only)
+    remaining = _persist_count(df_result.filter(is_cpt_only))
 
     recovered: List[DataFrame] = []
     for tag, df_mrm in inventories:
-        # 1 ligne MRM par clé → pas de fan-out (duplication d'un CPT récupéré)
-        mrm_enrich = (
+        # 1 ligne MRM par clé → pas de fan-out (duplication d'un CPT récupéré).
+        # Broadcast : un inventaire MRM dédoublonné sur la clé est petit.
+        mrm_enrich = F.broadcast(
             df_mrm.filter(F.col(key).isNotNull())
                   .select(key, *[c for c in df_mrm.columns if c.startswith("MRM_")])
                   .dropDuplicates([key])
@@ -590,13 +615,16 @@ def recover_late_declarations(
         remaining_cpt = remaining.select(
             *[c for c in remaining.columns if not c.startswith("MRM_")]
         )
-        hit = (
+        hit = _persist_count(
             remaining_cpt.join(mrm_enrich, on=key, how="inner")
                          .withColumn("TYPE_RECONCILIATION", F.lit("CPT_LATE"))
                          .withColumn("LATE_SOURCE", F.lit(tag))
                          .transform(drop_duplicate_columns)
         )
-        remaining = remaining_cpt.join(mrm_enrich.select(key), on=key, how="left_anti")
+        new_remaining = remaining_cpt.join(
+            F.broadcast(hit.select(key).distinct()), on=key, how="left_anti"
+        )
+        remaining = _swap_persist(remaining, new_remaining)
         recovered.append(hit)
 
     # rest + CPT_ONLY définitifs (sans MRM_*) + CPT_LATE enrichis
@@ -657,39 +685,51 @@ def matching_waterfall(
     results: List[DataFrame] = []
 
     # ── Étapes de matching ──────────────────────────────────────────
+    # À chaque tour : on persiste les nouveaux remaining et on libère les anciens.
+    # Sans ça, le plan logique des anti-joins s'empile sur 7 étapes et explose
+    # le driver (cluster détaché).
     for step in active_steps:
-        df_matched, df_cpt_remaining, df_mrm_remaining = execute_matching_step(
+        df_matched, new_cpt, new_mrm = execute_matching_step(
             df_cpt_remaining, df_mrm_remaining, step=step,
         )
         results.append(df_matched)
+        df_cpt_remaining = _swap_persist(df_cpt_remaining, new_cpt)
+        df_mrm_remaining = _swap_persist(df_mrm_remaining, new_mrm)
 
     # ── Filtrage consignes MRM ──────────────────────────────────────
-    df_mrm_removed, df_mrm_remaining = filter_mrm_by_action(
+    df_mrm_removed, new_mrm = filter_mrm_by_action(
         df_mrm_remaining, conclusion_col=conclusion_col
     )
     results.append(df_mrm_removed)
+    df_mrm_remaining = _swap_persist(df_mrm_remaining, new_mrm)
 
     # ── Passage IT → IP (sur les orphelins, hors MRM_DELETE) ────────
     if ip_offset is not None:
         print(f"[WATERFALL] étape passage IP : offset garantie = {ip_offset}")
-        df_ip_matched, df_cpt_remaining, df_mrm_remaining = execute_ip_step(
+        df_ip_matched, new_cpt, new_mrm = execute_ip_step(
             df_cpt_remaining, df_mrm_remaining, offset=ip_offset,
         )
         results.append(df_ip_matched)
+        df_cpt_remaining = _swap_persist(df_cpt_remaining, new_cpt)
+        df_mrm_remaining = _swap_persist(df_mrm_remaining, new_mrm)
 
     # ── Rechute IT (sur les orphelins restants) ─────────────────────
     print(f"[WATERFALL] étape rechute IT : fenêtre = |datediff| ∈ ]0, {RELAPSE_WINDOW_DAYS}j]")
-    df_rechute, df_cpt_remaining, df_mrm_remaining = execute_rechute_step(
+    df_rechute, new_cpt, new_mrm = execute_rechute_step(
         df_cpt_remaining, df_mrm_remaining,
     )
     results.append(df_rechute)
+    df_cpt_remaining = _swap_persist(df_cpt_remaining, new_cpt)
+    df_mrm_remaining = _swap_persist(df_mrm_remaining, new_mrm)
 
     # ── Date MRM en retard (CPT toujours plus récent, écart > WINDOW_DAYS) ──
     print(f"[WATERFALL] étape date retard MRM : datediff(CPT, MRM) > {WINDOW_DAYS}j")
-    df_date_retard, df_cpt_remaining, df_mrm_remaining = execute_date_retard_step(
+    df_date_retard, new_cpt, new_mrm = execute_date_retard_step(
         df_cpt_remaining, df_mrm_remaining,
     )
     results.append(df_date_retard)
+    df_cpt_remaining = _swap_persist(df_cpt_remaining, new_cpt)
+    df_mrm_remaining = _swap_persist(df_mrm_remaining, new_mrm)
 
     # ── Orphelins finaux ────────────────────────────────────────────
     df_cpt_orphans, df_mrm_critiques = tag_orphans(df_cpt_remaining, df_mrm_remaining)

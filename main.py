@@ -51,4 +51,9 @@ def run(spark: SparkSession) -> DataFrame:
 
 if __name__ == "__main__":
     spark = SparkSession.builder.appName("itip_fiab").getOrCreate()
+    # AQE + skew join : critique pour les theta-joins des étapes windowed
+    # (key + |datediff| <= N) qui sinon partent en shuffle déséquilibré.
+    spark.conf.set("spark.sql.adaptive.enabled", "true")
+    spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
+    spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
     run(spark)
