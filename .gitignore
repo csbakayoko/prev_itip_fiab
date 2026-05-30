@@ -1,0 +1,47 @@
+# =========================
+# Fichiers Python compilés
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# =========================
+# Environnements virtuels
+# =========================
+venv/
+env/
+.venv/
+Pipfile.lock
+
+# =========================
+# Variables d'environnement
+# =========================
+.env
+
+# =========================
+# Distribution et Packages
+# =========================
+build/
+dist/
+*.egg-info/
+*.egg
+
+# =========================
+# Tests et Couverture
+# =========================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# =========================
+# Jupyter Notebook (si tu en utilises)
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# IDE (Éditeurs de code)
+# =========================
+.idea/             # Pour PyCharm
+.vscode/           # Pour VS Code
