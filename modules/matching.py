@@ -356,15 +356,21 @@ def recover_late_declarations(
 
     Chaque inventaire est dédoublonné sur la clé et broadcasté.
     """
+    print("[late] === recovery démarré ===")
     is_cpt_only = F.col("TYPE_RECONCILIATION") == "CPT_ONLY"
-    rest          = df_result.filter(~is_cpt_only)
+    rest = df_result.filter(~is_cpt_only)
+
+    # Cache initial : remaining_cpt est lu 2× par inventaire (join + anti-join).
     remaining_cpt = (
         df_result.filter(is_cpt_only)
                  .select(*[c for c in df_result.columns if not c.startswith("MRM_")])
-    )
+    ).cache()
+    n_init = remaining_cpt.count()
+    print(f"[late] CPT_ONLY initiaux : {n_init:,}")
 
     recovered: List[DataFrame] = []
     for tag, df_mrm in inventories:
+        print(f"[late] ▶ {tag}")
         mrm_enrich = (
             df_mrm.filter(F.col(key).isNotNull())
                   .select(key, *[c for c in df_mrm.columns if c.startswith("MRM_")])
@@ -375,12 +381,22 @@ def recover_late_declarations(
                          .withColumn("TYPE_RECONCILIATION", F.lit("CPT_LATE"))
                          .withColumn("LATE_SOURCE", F.lit(tag))
         ).cache()
+        # count() force la matérialisation : warm cache + visibilité.
+        n_hit = hit.count()
+        print(f"[late]   ↳ {tag} : {n_hit:,} retrouvés")
+
+        # Anti-join broadcast — hit.select(key) reste tout petit même si hit est gros.
         remaining_cpt = remaining_cpt.join(
             F.broadcast(hit.select(key).distinct()), on=key, how="left_anti"
         )
         recovered.append(hit)
 
-    return reduce(
+    # Matérialiser le résultat ici évite de différer le travail au caller (display/write).
+    df_final = reduce(
         lambda a, b: a.unionByName(b, allowMissingColumns=True),
         [rest, remaining_cpt, *recovered],
-    )
+    ).cache()
+    n_final = df_final.count()
+    print(f"[late]   ↳ union : {n_final:,} lignes")
+    print("[late] === recovery terminé ===")
+    return df_final
