@@ -131,6 +131,8 @@ def execute_matching_step(
     df_mrm doit déjà porter les clés aliasées `_mrm_*` (cf. _alias_mrm_keys).
     Retourne (df_matched, df_cpt_remaining, df_mrm_remaining).
     """
+    print(f"[matching] ▶ {label} (clé={key})")
+
     cond = F.col(key) == F.col(f"_mrm_{key}")
     if extra_cond is not None:
         cond = cond & extra_cond()
@@ -141,6 +143,11 @@ def execute_matching_step(
               .transform(_drop_mrm_keys)
               .withColumn("TYPE_RECONCILIATION", F.lit(label))
     ).cache()
+
+    # count() force la matérialisation : on voit la progression en temps réel
+    # et le .cache() est chaud pour les deux anti-joins + l'union finale.
+    n_matched = df_matched.count()
+    print(f"[matching]   ↳ {label} : {n_matched:,} matchs")
 
     df_cpt_rem = df_cpt.join(F.broadcast(df_matched.select(_UID_CPT)), _UID_CPT, "left_anti")
     df_mrm_rem = df_mrm.join(F.broadcast(df_matched.select(_UID_MRM)), _UID_MRM, "left_anti")
@@ -227,6 +234,7 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     la nouvelle clé (et `extra_cond=...` si une condition supplémentaire est
     requise).
     """
+    print("[matching] === waterfall démarré ===")
     df_cpt = df_cpt_clean.withColumn(_UID_CPT, F.monotonically_increasing_id())
     df_mrm = _alias_mrm_keys(df_mrm_clean.withColumn(_UID_MRM, F.monotonically_increasing_id()))
 
@@ -234,6 +242,7 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     cpt_rem, mrm_rem = df_cpt, df_mrm
 
     # === Pre-filter ===
+    print("[matching] -- phase pre-filter --")
 
     # Match exact (date jour + nom complet)
     matched, cpt_rem, mrm_rem = execute_matching_step(
@@ -268,10 +277,12 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     # results.append(matched)
 
     # === Filtrage des consignes MRM (MRM_DELETE écartés) ===
+    print("[matching] -- filtrage MRM_DELETE --")
     mrm_removed, mrm_rem = filter_mrm_by_action(mrm_rem)
     results.append(mrm_removed)
 
     # === Post-filter ===
+    print("[matching] -- phase post-filter --")
 
     # Passage IT → IP : même nom/date, garantie décalée de IP_GARANTIE_OFFSET
     matched, cpt_rem, mrm_rem = execute_matching_step(
@@ -301,11 +312,13 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     # results.append(matched)
 
     # === Orphelins finaux ===
+    print("[matching] -- orphelins --")
     cpt_orphans, mrm_critiques = tag_orphans(cpt_rem, mrm_rem)
     results.extend([cpt_orphans, mrm_critiques])
 
     # === Union finale ===
     df_final = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), results)
+    print("[matching] === waterfall terminé ===")
     return df_final.drop(_UID_CPT, _UID_MRM)
 
 
