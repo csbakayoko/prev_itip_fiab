@@ -235,8 +235,16 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     requise).
     """
     print("[matching] === waterfall démarré ===")
-    df_cpt = df_cpt_clean.withColumn(_UID_CPT, F.monotonically_increasing_id())
-    df_mrm = _alias_mrm_keys(df_mrm_clean.withColumn(_UID_MRM, F.monotonically_increasing_id()))
+
+    # Cache initial CRUCIAL : sans ça, chaque étape re-scanne df_cpt_clean
+    # depuis la source (Parquet/Delta) → 8+ scans complets = des dizaines
+    # de minutes. Un seul cache au début = un seul scan, tout le reste lit
+    # la RAM. monotonically_increasing_id() doit être figé avant cache
+    # (non-déterministe sinon → fuites inter-étapes).
+    df_cpt = df_cpt_clean.withColumn(_UID_CPT, F.monotonically_increasing_id()).cache()
+    df_mrm = _alias_mrm_keys(df_mrm_clean.withColumn(_UID_MRM, F.monotonically_increasing_id())).cache()
+    n_cpt, n_mrm = df_cpt.count(), df_mrm.count()
+    print(f"[matching] entrée : CPT={n_cpt:,} | MRM={n_mrm:,}")
 
     results: List[DataFrame] = []
     cpt_rem, mrm_rem = df_cpt, df_mrm
@@ -317,7 +325,12 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     results.extend([cpt_orphans, mrm_critiques])
 
     # === Union finale ===
-    df_final = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), results)
+    # Matérialiser ici (cache + count) attribue le temps des orphelins et de
+    # l'union au waterfall plutôt qu'à la première action du caller (write…).
+    print("[matching] -- union finale (orphelins + matched) --")
+    df_final = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), results).cache()
+    n_final = df_final.count()
+    print(f"[matching]   ↳ union : {n_final:,} lignes")
     print("[matching] === waterfall terminé ===")
     return df_final.drop(_UID_CPT, _UID_MRM)
 
