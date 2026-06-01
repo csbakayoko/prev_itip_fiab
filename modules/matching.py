@@ -4,22 +4,22 @@ Logique métier de réconciliation en cascade (waterfall).
 Flux :
     CPT + MRM
         │
-        ├─ STEPS_PRE_FILTER   : MATCH_EXACT / WINDOW / TRONC / TRONC_WINDOW
-        ├─ Filtrage MRM       : MRM_DELETE → écarté
-        ├─ STEPS_POST_FILTER  : MATCH_IP / RECHUTE / DATE_RETARD
-        └─ Orphelins          : CPT_ONLY / MRM_MISSING
+        ├─ Pre-filter   : MATCH_EXACT / WINDOW / TRONC / TRONC_WINDOW
+        ├─ Filtrage MRM : MRM_DELETE → écarté
+        ├─ Post-filter  : MATCH_IP / RECHUTE / DATE_RETARD
+        └─ Orphelins    : CPT_ONLY / MRM_MISSING
                 │
                 └─ Union finale → DataFrame réconcilié
 
-Fonctions publiques :
-    matching_waterfall()        — Cascade complète → df_result avec TYPE_RECONCILIATION
-    recover_late_declarations() — Seconde chance des CPT_ONLY sur les MRM N+1, N+2…
-    categorize_mrm_conclusion() — Catégorise la conclusion MRM brute
+Perf : MRM est broadcasté (taille < 100k). Chaque étape devient un broadcast
+hash join sans shuffle. Aucune matérialisation intermédiaire (persist/count) —
+seul .cache() lazy sur le DataFrame matché qui est réutilisé 3x (2 anti-joins
++ union finale).
 
-Note : derive_clause_column / derive_invalidite_column sont dans core/enrich.py.
+Pour ajouter une étape : copier 3 lignes dans matching_waterfall avec la
+nouvelle clé (et extra_cond si besoin).
 """
 
-from dataclasses import dataclass, field
 from functools import reduce
 from typing import Callable, List, Optional, Tuple
 
@@ -33,14 +33,9 @@ from config import WINDOW_DAYS, IP_GARANTIE_OFFSET, RELAPSE_WINDOW_DAYS
 # CONSTANTES INTERNES
 # ============================================================================
 
-# Identifiants de ligne pour anti-join inter-étapes — nécessaires car certaines
-# clés de matching ne sont pas uniques (windowed / tronc partagent une clé).
 _UID_CPT = "_cpt_uid"
 _UID_MRM = "_mrm_uid"
 
-# Toutes les clés de matching présentes des deux côtés (CPT et MRM). Elles sont
-# renommées en _mrm_{key} côté MRM avant chaque join pour éviter les colonnes
-# dupliquées (sans avoir à passer derrière avec un drop_duplicate_columns).
 _MATCHING_KEYS: Tuple[str, ...] = (
     "key_strict",
     "key_no_date",
@@ -49,27 +44,6 @@ _MATCHING_KEYS: Tuple[str, ...] = (
     "key_no_garantie",
     "key_no_date_no_garantie",
 )
-
-
-# ============================================================================
-# MODÈLE D'ÉTAPE DE MATCHING
-# ============================================================================
-
-@dataclass(frozen=True)
-class WaterfallStep:
-    """
-    Étape de matching : égalité sur `join_key` + condition optionnelle `extra_cond`.
-
-    Attributs :
-        label      : valeur posée dans TYPE_RECONCILIATION (ex: "MATCH_EXACT")
-        join_key   : clé d'égalité (présente sur CPT et MRM)
-        extra_cond : fonction renvoyant une Column Spark, évaluée à l'exécution.
-                     Doit référencer les colonnes CPT/MRM telles quelles ; la
-                     comparaison clé MRM est déjà gérée par _execute_step.
-    """
-    label    : str
-    join_key : str
-    extra_cond: Optional[Callable[[], Column]] = field(default=None, compare=False)
 
 
 # ============================================================================
@@ -124,67 +98,11 @@ def _date_retard_cond(min_days: int,
 
 
 # ============================================================================
-# ÉTAPES DÉCLARATIVES
-# ============================================================================
-#
-# Pre-filter : matchs stricts/élargis, lancés avant le filtrage des MRM_DELETE.
-# Post-filter : récupération métier (passage IT→IP, rechute, date en retard).
-# Pour ajouter une étape : ajouter un WaterfallStep dans la bonne liste.
-# ============================================================================
-
-STEPS_PRE_FILTER: List[WaterfallStep] = [
-    # Égalité stricte (date au jour, NOM_PRENOM complet).
-    WaterfallStep("MATCH_EXACT", "key_strict"),
-
-    # Fenêtre ±N jours sur la date de survenance (nom complet).
-    WaterfallStep(
-        "MATCH_WINDOW", "key_no_date",
-        extra_cond=_windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS),
-    ),
-
-    # Troncature CPT 20 chars (date jour). CPT limite NOM_PRENOM à 20 caractères,
-    # la coupure tombe parfois dans le dernier prénom — les deux côtés appliquent
-    # LEFT(20) uppercase + strip espaces.
-    WaterfallStep("MATCH_TRONC", "key_strict_tronc"),
-
-    # Troncature CPT 20 chars + fenêtre ±N jours (cumul des deux anomalies).
-    WaterfallStep(
-        "MATCH_TRONC_WINDOW", "key_no_date_tronc",
-        extra_cond=_windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS),
-    ),
-]
-
-# IP / rechute / date_retard tournent sur les orphelins, après le filtrage MRM.
-# La liste effective est construite dans matching_waterfall (skip MATCH_IP si
-# ip_offset=None).
-STEPS_POST_FILTER: List[WaterfallStep] = [
-    WaterfallStep("MATCH_IP", "key_no_garantie",
-                  extra_cond=_ip_cond(IP_GARANTIE_OFFSET)),
-    WaterfallStep("MATCH_RECHUTE", "key_no_date_no_garantie",
-                  extra_cond=_rechute_cond(RELAPSE_WINDOW_DAYS)),
-    WaterfallStep("MATCH_DATE_RETARD", "key_no_date",
-                  extra_cond=_date_retard_cond(WINDOW_DAYS)),
-]
-
-
-# ============================================================================
 # HELPERS SPARK
 # ============================================================================
 
-def _persist_count(df: DataFrame) -> DataFrame:
-    df.persist()
-    df.count()
-    return df
-
-
-def _swap_persist(old: DataFrame, new: DataFrame) -> DataFrame:
-    _persist_count(new)
-    old.unpersist()
-    return new
-
-
 def _alias_mrm_keys(df_mrm: DataFrame) -> DataFrame:
-    """Préfixe toutes les clés de matching côté MRM (_mrm_*) pour éliminer les collisions de colonnes au join."""
+    """Préfixe les clés MRM (_mrm_*) pour éliminer les collisions de colonnes au join."""
     for k in _MATCHING_KEYS:
         if k in df_mrm.columns:
             df_mrm = df_mrm.withColumnRenamed(k, f"_mrm_{k}")
@@ -196,48 +114,37 @@ def _drop_mrm_keys(df: DataFrame) -> DataFrame:
     return df.drop(*[f"_mrm_{k}" for k in _MATCHING_KEYS if f"_mrm_{k}" in df.columns])
 
 
-def _exclude_matched(df_cpt: DataFrame, df_mrm: DataFrame, df_matched: DataFrame) -> Tuple[DataFrame, DataFrame]:
-    """Retire de df_cpt / df_mrm les lignes présentes dans df_matched (via uids)."""
-    return (
-        df_cpt.join(F.broadcast(df_matched.select(_UID_CPT).distinct()), _UID_CPT, "left_anti"),
-        df_mrm.join(F.broadcast(df_matched.select(_UID_MRM).distinct()), _UID_MRM, "left_anti"),
-    )
-
-
 # ============================================================================
-# EXÉCUTION D'UNE ÉTAPE
+# EXÉCUTION D'UNE ÉTAPE DE MATCHING
 # ============================================================================
 
-def _execute_step(
-    df_cpt: DataFrame,
-    df_mrm: DataFrame,
-    step  : WaterfallStep,
+def execute_matching_step(
+    df_cpt   : DataFrame,
+    df_mrm   : DataFrame,
+    key      : str,
+    label    : str,
+    extra_cond: Optional[Callable[[], Column]] = None,
 ) -> Tuple[DataFrame, DataFrame, DataFrame]:
     """
-    Exécute une étape : égalité sur step.join_key + step.extra_cond optionnelle.
-    Les df_cpt / df_mrm en entrée doivent porter les uids posés par matching_waterfall().
+    Une étape : join sur `key` (+ `extra_cond` optionnelle), MRM broadcasté.
+
+    df_mrm doit déjà porter les clés aliasées `_mrm_*` (cf. _alias_mrm_keys).
+    Retourne (df_matched, df_cpt_remaining, df_mrm_remaining).
     """
-    for side, df in (("CPT", df_cpt), ("MRM", df_mrm)):
-        if step.join_key not in df.columns:
-            raise ValueError(f"Colonne '{step.join_key}' absente du DataFrame {side}.")
-
-    df_cpt_valid = df_cpt.filter(F.col(step.join_key).isNotNull())
-    df_mrm_valid = _alias_mrm_keys(df_mrm.filter(F.col(step.join_key).isNotNull()))
-
-    join_cond = F.col(step.join_key) == F.col(f"_mrm_{step.join_key}")
-    if step.extra_cond is not None:
-        join_cond = join_cond & step.extra_cond()
+    cond = F.col(key) == F.col(f"_mrm_{key}")
+    if extra_cond is not None:
+        cond = cond & extra_cond()
 
     df_matched = (
-        df_cpt_valid
-        .join(df_mrm_valid, on=join_cond, how="inner")
-        .transform(_drop_mrm_keys)
-        .withColumn("TYPE_RECONCILIATION", F.lit(step.label))
-    )
+        df_cpt.join(F.broadcast(df_mrm.filter(F.col(f"_mrm_{key}").isNotNull())),
+                    on=cond, how="inner")
+              .transform(_drop_mrm_keys)
+              .withColumn("TYPE_RECONCILIATION", F.lit(label))
+    ).cache()
 
-    _persist_count(df_matched)
-    df_cpt_remaining, df_mrm_remaining = _exclude_matched(df_cpt, df_mrm, df_matched)
-    return df_matched, df_cpt_remaining, df_mrm_remaining
+    df_cpt_rem = df_cpt.join(F.broadcast(df_matched.select(_UID_CPT)), _UID_CPT, "left_anti")
+    df_mrm_rem = df_mrm.join(F.broadcast(df_matched.select(_UID_MRM)), _UID_MRM, "left_anti")
+    return df_matched, df_cpt_rem, df_mrm_rem
 
 
 # ============================================================================
@@ -267,10 +174,6 @@ def categorize_mrm_conclusion(col: Column) -> Column:
     )
 
 
-# ============================================================================
-# FILTRAGE DES CONSIGNES MRM
-# ============================================================================
-
 def filter_mrm_by_action(
     df_mrm        : DataFrame,
     conclusion_col: str = "MRM_CONCLUSION",
@@ -278,11 +181,8 @@ def filter_mrm_by_action(
     """
     Sépare les MRM selon leur consigne métier.
 
-        MRM_DELETE                       → df_to_remove
-        MRM_KEEP / STUDY / ADD / None    → df_to_process (conservés par défaut)
-
-    Returns:
-        Tuple (df_to_remove, df_to_process)
+        MRM_DELETE                       → df_to_remove (taggué TYPE_RECONCILIATION=MRM_DELETE)
+        MRM_KEEP / STUDY / ADD / None    → df_to_process
     """
     if conclusion_col not in df_mrm.columns:
         raise ValueError(f"Colonne '{conclusion_col}' absente du DataFrame MRM.")
@@ -295,14 +195,11 @@ def filter_mrm_by_action(
         .withColumn("TYPE_RECONCILIATION", F.lit("MRM_DELETE"))
         .drop("MRM_ACTION")
     )
-
-    # "!= MRM_DELETE" évalue NULL pour les MRM_ACTION nulles → Spark les exclut
-    # silencieusement. On ajoute isNull explicite pour les conserver.
+    # "!= MRM_DELETE" évalue NULL pour les MRM_ACTION nulles → exclus silencieusement.
     df_to_process = (
         df_categorized.filter(~is_delete | F.col("MRM_ACTION").isNull())
         .drop("MRM_ACTION")
     )
-
     return df_to_remove, df_to_process
 
 
@@ -319,6 +216,100 @@ def tag_orphans(df_cpt: DataFrame, df_mrm: DataFrame) -> Tuple[DataFrame, DataFr
 
 
 # ============================================================================
+# WATERFALL PRINCIPAL
+# ============================================================================
+
+def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> DataFrame:
+    """
+    Cascade de réconciliation CPT/MRM complète.
+
+    Pour ajouter une étape : copier 3 lignes dans la zone correspondante avec
+    la nouvelle clé (et `extra_cond=...` si une condition supplémentaire est
+    requise).
+    """
+    df_cpt = df_cpt_clean.withColumn(_UID_CPT, F.monotonically_increasing_id())
+    df_mrm = _alias_mrm_keys(df_mrm_clean.withColumn(_UID_MRM, F.monotonically_increasing_id()))
+
+    results: List[DataFrame] = []
+    cpt_rem, mrm_rem = df_cpt, df_mrm
+
+    # === Pre-filter ===
+
+    # Match exact (date jour + nom complet)
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_strict", "MATCH_EXACT",
+    )
+    results.append(matched)
+
+    # Fenêtre ±N jours sur la date (nom complet)
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_no_date", "MATCH_WINDOW",
+        extra_cond=_windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS),
+    )
+    results.append(matched)
+
+    # Troncature 20 chars du nom (date jour)
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_strict_tronc", "MATCH_TRONC",
+    )
+    results.append(matched)
+
+    # Troncature 20 chars + fenêtre ±N jours
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_no_date_tronc", "MATCH_TRONC_WINDOW",
+        extra_cond=_windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS),
+    )
+    results.append(matched)
+
+    # === Zone d'ajout d'étapes pre-filter ===
+    # matched, cpt_rem, mrm_rem = execute_matching_step(
+    #     cpt_rem, mrm_rem, "ma_cle", "MON_LABEL",
+    # )
+    # results.append(matched)
+
+    # === Filtrage des consignes MRM (MRM_DELETE écartés) ===
+    mrm_removed, mrm_rem = filter_mrm_by_action(mrm_rem)
+    results.append(mrm_removed)
+
+    # === Post-filter ===
+
+    # Passage IT → IP : même nom/date, garantie décalée de IP_GARANTIE_OFFSET
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_no_garantie", "MATCH_IP",
+        extra_cond=_ip_cond(IP_GARANTIE_OFFSET),
+    )
+    results.append(matched)
+
+    # Rechute : même garantie, écart de date ≤ RELAPSE_WINDOW_DAYS (et > 0)
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_no_date_no_garantie", "MATCH_RECHUTE",
+        extra_cond=_rechute_cond(RELAPSE_WINDOW_DAYS),
+    )
+    results.append(matched)
+
+    # Date MRM en retard : CPT strictement plus récente de > WINDOW_DAYS
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_no_date", "MATCH_DATE_RETARD",
+        extra_cond=_date_retard_cond(WINDOW_DAYS),
+    )
+    results.append(matched)
+
+    # === Zone d'ajout d'étapes post-filter ===
+    # matched, cpt_rem, mrm_rem = execute_matching_step(
+    #     cpt_rem, mrm_rem, "ma_cle", "MON_LABEL", extra_cond=...,
+    # )
+    # results.append(matched)
+
+    # === Orphelins finaux ===
+    cpt_orphans, mrm_critiques = tag_orphans(cpt_rem, mrm_rem)
+    results.extend([cpt_orphans, mrm_critiques])
+
+    # === Union finale ===
+    df_final = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), results)
+    return df_final.drop(_UID_CPT, _UID_MRM)
+
+
+# ============================================================================
 # DÉCLARATIONS TARDIVES (MRM N+1, N+2, …)
 # ============================================================================
 
@@ -330,123 +321,40 @@ def recover_late_declarations(
     """
     Donne une seconde chance aux CPT_ONLY sur des inventaires MRM ultérieurs.
 
-    Cascade : chaque CPT_ONLY est testé contre les inventaires dans l'ordre fourni.
+    Cascade : chaque CPT_ONLY est testé contre les inventaires dans l'ordre.
     Le premier inventaire qui contient la clé récupère le dossier :
         - TYPE_RECONCILIATION → "CPT_LATE"
-        - LATE_SOURCE         → tag de l'inventaire trouveur (ex: "MRM_N1")
-        - colonnes MRM_*      → enrichies par l'inventaire (PM, conclusion, …)
+        - LATE_SOURCE         → tag de l'inventaire (ex: "MRM_N1")
+        - colonnes MRM_*      → enrichies depuis l'inventaire
     Les non retrouvés restent CPT_ONLY.
 
-    Clé : `key_no_date` (rpp + dob + garantie + nom). Chaque inventaire est
-    dédoublonné sur la clé pour éviter un fan-out.
-
-    Args:
-        df_result   : DataFrame réconcilié (sortie de matching_waterfall)
-        inventories : liste ORDONNÉE de (tag, df_mrm_clean)
-        key         : colonne clé de rapprochement
+    Chaque inventaire est dédoublonné sur la clé et broadcasté.
     """
     is_cpt_only = F.col("TYPE_RECONCILIATION") == "CPT_ONLY"
-    rest      = df_result.filter(~is_cpt_only)
-    remaining = _persist_count(df_result.filter(is_cpt_only))
+    rest          = df_result.filter(~is_cpt_only)
+    remaining_cpt = (
+        df_result.filter(is_cpt_only)
+                 .select(*[c for c in df_result.columns if not c.startswith("MRM_")])
+    )
 
     recovered: List[DataFrame] = []
     for tag, df_mrm in inventories:
-        mrm_enrich = F.broadcast(
+        mrm_enrich = (
             df_mrm.filter(F.col(key).isNotNull())
                   .select(key, *[c for c in df_mrm.columns if c.startswith("MRM_")])
                   .dropDuplicates([key])
         )
-        remaining_cpt = remaining.select(*[c for c in remaining.columns if not c.startswith("MRM_")])
-        hit = _persist_count(
-            remaining_cpt.join(mrm_enrich, on=key, how="inner")
+        hit = (
+            remaining_cpt.join(F.broadcast(mrm_enrich), on=key, how="inner")
                          .withColumn("TYPE_RECONCILIATION", F.lit("CPT_LATE"))
                          .withColumn("LATE_SOURCE", F.lit(tag))
-        )
-        new_remaining = remaining_cpt.join(
+        ).cache()
+        remaining_cpt = remaining_cpt.join(
             F.broadcast(hit.select(key).distinct()), on=key, how="left_anti"
         )
-        remaining = _swap_persist(remaining, new_remaining)
         recovered.append(hit)
 
     return reduce(
         lambda a, b: a.unionByName(b, allowMissingColumns=True),
-        [rest, remaining, *recovered],
+        [rest, remaining_cpt, *recovered],
     )
-
-
-# ============================================================================
-# WATERFALL PRINCIPAL
-# ============================================================================
-
-def matching_waterfall(
-    df_cpt_clean  : DataFrame,
-    df_mrm_clean  : DataFrame,
-    pre_steps     : Optional[List[WaterfallStep]] = None,
-    post_steps    : Optional[List[WaterfallStep]] = None,
-    conclusion_col: str = "MRM_CONCLUSION",
-    ip_offset     : Optional[int] = IP_GARANTIE_OFFSET,
-) -> DataFrame:
-    """
-    Cascade de réconciliation CPT/MRM complète.
-
-    Ordre :
-        1. pre_steps    — matchs stricts/élargis (défaut: STEPS_PRE_FILTER)
-        2. Filtrage MRM — écarte les MRM_DELETE
-        3. post_steps   — IP / rechute / date_retard (défaut: STEPS_POST_FILTER)
-        4. Orphelins    — CPT_ONLY + MRM_MISSING
-
-    Anti-régression : chaque ligne CPT (resp. MRM) reçoit un uid unique en
-    entrée. Les étapes anti-joinent sur ces uids — un dossier matché à l'étape K
-    est garanti exclu des étapes K+1..N même si la clé devient moins discriminante.
-
-    Args:
-        df_cpt_clean   : DataFrame CPT nettoyé et préfixé (CPT_*)
-        df_mrm_clean   : DataFrame MRM nettoyé et préfixé (MRM_*)
-        pre_steps      : Étapes pré-filtrage MRM (défaut: STEPS_PRE_FILTER)
-        post_steps     : Étapes post-filtrage MRM (défaut: STEPS_POST_FILTER)
-        conclusion_col : Colonne conclusion MRM
-        ip_offset      : Si None, l'étape MATCH_IP est retirée des post_steps.
-    """
-    pre  = list(pre_steps  if pre_steps  is not None else STEPS_PRE_FILTER)
-    post = list(post_steps if post_steps is not None else STEPS_POST_FILTER)
-    if ip_offset is None:
-        post = [s for s in post if s.label != "MATCH_IP"]
-
-    print(f"\n[WATERFALL] pre  : {[s.label for s in pre]}")
-    print(f"[WATERFALL] post : {[s.label for s in post]}")
-
-    # monotonically_increasing_id() est non-déterministe → matérialiser pour
-    # figer la valeur (sinon l'anti-join inter-étapes laisse fuiter des dossiers).
-    df_cpt_remaining = _persist_count(df_cpt_clean.withColumn(_UID_CPT, F.monotonically_increasing_id()))
-    df_mrm_remaining = _persist_count(df_mrm_clean.withColumn(_UID_MRM, F.monotonically_increasing_id()))
-
-    results: List[DataFrame] = []
-
-    def _run(steps: List[WaterfallStep]) -> None:
-        nonlocal df_cpt_remaining, df_mrm_remaining
-        for step in steps:
-            df_matched, new_cpt, new_mrm = _execute_step(df_cpt_remaining, df_mrm_remaining, step)
-            results.append(df_matched)
-            df_cpt_remaining = _swap_persist(df_cpt_remaining, new_cpt)
-            df_mrm_remaining = _swap_persist(df_mrm_remaining, new_mrm)
-
-    _run(pre)
-
-    # Filtrage consignes MRM (entre les deux phases).
-    df_mrm_removed, new_mrm = filter_mrm_by_action(df_mrm_remaining, conclusion_col)
-    results.append(df_mrm_removed)
-    df_mrm_remaining = _swap_persist(df_mrm_remaining, new_mrm)
-
-    _run(post)
-
-    # Orphelins finaux.
-    df_cpt_orphans, df_mrm_critiques = tag_orphans(df_cpt_remaining, df_mrm_remaining)
-    results.extend([df_cpt_orphans, df_mrm_critiques])
-
-    df_final = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), results)
-    for c in (_UID_CPT, _UID_MRM):
-        if c in df_final.columns:
-            df_final = df_final.drop(c)
-
-    print("[WATERFALL] union terminée — métriques calculées en aval")
-    return df_final
