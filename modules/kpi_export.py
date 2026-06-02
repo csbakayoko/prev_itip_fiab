@@ -24,6 +24,7 @@ from config import (
     MATCH_LABELS,
     MATCH_PRINCIPALE,
     MATCH_AFFINEE,
+    MATCH_RECUPERATION,
 )
 from modules.matching import categorize_mrm_conclusion
 from modules._timing import timed_fn
@@ -60,7 +61,10 @@ def compute_synthese(df_result: DataFrame) -> dict:
         .collect()
     )
 
-    princ, aff, match = set(MATCH_PRINCIPALE), set(MATCH_AFFINEE), set(MATCH_LABELS)
+    princ = set(MATCH_PRINCIPALE)
+    aff   = set(MATCH_AFFINEE)
+    recup = set(MATCH_RECUPERATION)
+    match = set(MATCH_LABELS)
     T = lambda r: r["TYPE_RECONCILIATION"]
     A = lambda r: r["MRM_ACTION"]
 
@@ -73,21 +77,19 @@ def compute_synthese(df_result: DataFrame) -> dict:
     def cpt(pred):   # → (nb, pm_cpt)
         return agg("nb", pred), agg("pm_cpt", pred)
 
-    matched = match | {"MATCH_IP"}
+    nb_princ, pm_princ      = mrm(lambda r: T(r) in princ)
+    nb_aff,   pm_aff_mrm    = mrm(lambda r: T(r) in aff)
+    _,        pm_aff_cpt    = cpt(lambda r: T(r) in aff)
+    nb_recup, pm_recup_mrm  = mrm(lambda r: T(r) in recup)
+    _,        pm_recup_cpt  = cpt(lambda r: T(r) in recup)
+    nb_del,   pm_del        = mrm(lambda r: T(r) == "MRM_DELETE")
+    nb_miss,  pm_miss       = mrm(lambda r: T(r) == "MRM_MISSING")
+    nb_def,   pm_def        = cpt(lambda r: T(r) == "CPT_ONLY")
+    nb_late,  pm_late       = cpt(lambda r: T(r) == "CPT_LATE")
 
-    nb_princ, pm_princ    = mrm(lambda r: T(r) in princ)
-    nb_aff,   pm_aff_mrm  = mrm(lambda r: T(r) in aff)
-    _,        pm_aff_cpt  = cpt(lambda r: T(r) in aff)
-    nb_ip,    pm_ip_mrm   = mrm(lambda r: T(r) == "MATCH_IP")
-    _,        pm_ip_cpt   = cpt(lambda r: T(r) == "MATCH_IP")
-    nb_del,   pm_del      = mrm(lambda r: T(r) == "MRM_DELETE")
-    nb_miss,  pm_miss     = mrm(lambda r: T(r) == "MRM_MISSING")
-    nb_def,   pm_def      = cpt(lambda r: T(r) == "CPT_ONLY")
-    nb_late,  pm_late     = cpt(lambda r: T(r) == "CPT_LATE")
-
-    nb_match     = nb_princ + nb_aff + nb_ip
-    pm_match_mrm = agg("pm_mrm", lambda r: T(r) in matched)
-    pm_match_cpt = agg("pm_cpt", lambda r: T(r) in matched)
+    nb_match     = nb_princ + nb_aff + nb_recup
+    pm_match_mrm = agg("pm_mrm", lambda r: T(r) in match)
+    pm_match_cpt = agg("pm_cpt", lambda r: T(r) in match)
 
     def miss(action):
         return mrm(lambda r: T(r) == "MRM_MISSING" and A(r) == action)
@@ -104,7 +106,7 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "a_comparer_nb"   : nb_match + nb_miss, "a_comparer_pm"  : pm_match_mrm + pm_miss,
         "principale_nb"   : nb_princ,          "principale_pm"   : pm_princ,
         "affinee_nb"      : nb_aff,            "affinee_pm_mrm"  : pm_aff_mrm,
-        "ip_nb"           : nb_ip,             "ip_pm_mrm"       : pm_ip_mrm,
+        "recup_nb"        : nb_recup,          "recup_pm_mrm"    : pm_recup_mrm,
         "non_mappes_nb"   : nb_miss,           "non_mappes_pm"   : pm_miss,
         "keep_nb"  : keep_nb,  "keep_pm"  : keep_pm,
         "study_nb" : study_nb, "study_pm" : study_pm,
@@ -116,10 +118,10 @@ def compute_synthese(df_result: DataFrame) -> dict:
         # ── Bulle COMPTE ──
         "cpt_nb"          : nb_match + nb_def + nb_late,
         "cpt_pm"          : agg("pm_cpt", lambda r: True),
-        "non_retrouves_nb": nb_aff + nb_ip + nb_def + nb_late,
-        "non_retrouves_pm": pm_aff_cpt + pm_ip_cpt + pm_def + pm_late,
+        "non_retrouves_nb": nb_aff + nb_recup + nb_def + nb_late,
+        "non_retrouves_pm": pm_aff_cpt + pm_recup_cpt + pm_def + pm_late,
         "affinee_cpt_pm"  : pm_aff_cpt,
-        "ip_cpt_pm"       : pm_ip_cpt,
+        "recup_cpt_pm"    : pm_recup_cpt,
         "late_nb" : nb_late, "late_pm" : pm_late,
         "def_nb"  : nb_def,  "def_pm"  : pm_def,
         # ── Entête ──
@@ -176,7 +178,7 @@ def render_synthese(d: dict, client: str = CLIENT_NAME) -> str:
             f"     / PM {_n(d['mrm_pm'])} €",
         )
         + _bubble(
-            f"MATCHÉS = {_n(d['match_nb'])} ({_n(d['principale_nb'])}+{_n(d['affinee_nb'])}+{_n(d['ip_nb'])})",
+            f"MATCHÉS = {_n(d['match_nb'])} ({_n(d['principale_nb'])}+{_n(d['affinee_nb'])}+{_n(d['recup_nb'])})",
             f" PM MRM   {_n(d['match_pm_mrm'])} €",
             f" PM CPT   {_n(d['match_pm_cpt'])} €",
             f" Δ PM     {_n(d['match_pm_mrm'] - d['match_pm_cpt'])} €",
@@ -193,7 +195,7 @@ def render_synthese(d: dict, client: str = CLIENT_NAME) -> str:
         _row("À comparer",            d["a_comparer_nb"],  d["a_comparer_pm"]),
         _row("Mappés clé principale", d["principale_nb"],  d["principale_pm"]),
         _row("Mappés clé affinée",    d["affinee_nb"],     d["affinee_pm_mrm"]),
-        _row("Mappés passage IP",     d["ip_nb"],          d["ip_pm_mrm"]),
+        _row("Mappés récupération",   d["recup_nb"],       d["recup_pm_mrm"]),
         _row("Non mappés (MISSING)",  d["non_mappes_nb"],  d["non_mappes_pm"]),
         _row("├ à conserver",         d["keep_nb"],        d["keep_pm"]),
         _row("├ à étudier",           d["study_nb"],       d["study_pm"]),
@@ -201,7 +203,7 @@ def render_synthese(d: dict, client: str = CLIENT_NAME) -> str:
         "",
         _row("Dossiers CPT non retrouvés", d["non_retrouves_nb"], d["non_retrouves_pm"]),
         _row("├ récupérés clé affinée",    d["affinee_nb"],       d["affinee_cpt_pm"]),
-        _row("├ récupérés passage IP",     d["ip_nb"],            d["ip_cpt_pm"]),
+        _row("├ récupérés récupération",   d["recup_nb"],         d["recup_cpt_pm"]),
         _row("├ déclarations tardives",    d["late_nb"],          d["late_pm"]),
         _row("└ CPT_ONLY définitifs",      d["def_nb"],           d["def_pm"]),
         "",

@@ -15,18 +15,17 @@ from typing import Tuple
 
 WINDOW_DAYS = 7                              # tolérance ±jours pour les étapes "window"
 
-# Labels posés dans TYPE_RECONCILIATION par le waterfall (ordre = cascade)
-MATCH_LABELS = (
-    "MATCH_EXACT",                           # égalité key_strict (date jour, nom complet)
-    "MATCH_WINDOW",                          # key_no_date + ±WINDOW_DAYS jours
-    "MATCH_TRONC",                           # key_strict_tronc (NOM LEFT 20)
-    "MATCH_TRONC_WINDOW",                    # key_no_date_tronc + ±WINDOW_DAYS
-)
-
 # Regroupement pour la synthèse SODEXO :
-#   principale = clé nominale complète   |  affinée = troncature CPT 20 chars
-MATCH_PRINCIPALE = ("MATCH_EXACT", "MATCH_WINDOW")
-MATCH_AFFINEE    = ("MATCH_TRONC", "MATCH_TRONC_WINDOW")
+#   principale   = clé nominale complète (date jour ou ±WINDOW_DAYS)
+#   affinée      = clé nominale tronquée CPT 20 chars
+#   récupération = matchs métier de rattrapage (IP, rechute, date en retard)
+MATCH_PRINCIPALE   = ("MATCH_EXACT", "MATCH_WINDOW")
+MATCH_AFFINEE      = ("MATCH_TRONC", "MATCH_TRONC_WINDOW")
+MATCH_RECUPERATION = ("MATCH_IP", "MATCH_RECHUTE", "MATCH_RECHUTE_TRONC", "MATCH_DATE_RETARD")
+
+# Labels posés dans TYPE_RECONCILIATION par le waterfall (ordre = cascade).
+# = tous les matchs confondus, dérivés des 3 sous-catégories ci-dessus.
+MATCH_LABELS = MATCH_PRINCIPALE + MATCH_AFFINEE + MATCH_RECUPERATION
 
 
 # ============================================================================

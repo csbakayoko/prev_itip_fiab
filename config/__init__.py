@@ -17,6 +17,7 @@ import logging
 from .profile import (
     CLIENT_NAME,
     CLIENT_CPT_VISION,
+    CLIENT_MRM_STATUT_INV,
     DATE_INVENTAIRE,
     CLIENT_CLAUSES,
     CLIENT_TYPE_CLAUSES,
@@ -40,6 +41,7 @@ from .params import (
     MATCH_LABELS,
     MATCH_PRINCIPALE,
     MATCH_AFFINEE,
+    MATCH_RECUPERATION,
     IP_GARANTIE_OFFSET,
     RELAPSE_WINDOW_DAYS,
 )

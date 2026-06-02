@@ -48,7 +48,6 @@ _MATCHING_KEYS: Tuple[str, ...] = (
     "key_strict_tronc",
     "key_no_date_tronc",
     "key_no_garantie",
-    "key_no_date_no_garantie",
 )
 
 
@@ -282,8 +281,21 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     )
     results.append(matched)
 
+    # MATCH_RECHUTE : même clé que MATCH_WINDOW (rpp+dob+garantie+nom) — la
+    # contrainte garantie est désormais portée par la clé. _rechute_cond ne
+    # filtre plus que sur la fenêtre de jours (la check garantie reste mais
+    # devient redondante, inoffensive).
     matched, cpt_rem, mrm_rem = execute_matching_step(
-        cpt_rem, mrm_rem, "key_no_date_no_garantie", "MATCH_RECHUTE",
+        cpt_rem, mrm_rem, "key_no_date", "MATCH_RECHUTE",
+        extra_cond=_rechute_cond(RELAPSE_WINDOW_DAYS),
+    )
+    results.append(matched)
+
+    # MATCH_RECHUTE_TRONC : variante de MATCH_RECHUTE sur la clé tronquée
+    # (nom CPT coupé à 20 caractères) pour rattraper les rechutes dont le
+    # prénom long fait tomber la clé full out.
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_no_date_tronc", "MATCH_RECHUTE_TRONC",
         extra_cond=_rechute_cond(RELAPSE_WINDOW_DAYS),
     )
     results.append(matched)

@@ -107,11 +107,10 @@ def add_matching_keys(
     │ Clé                       │ D_SURVENANCE              │ Identité                │ Usage                                                │
     ├───────────────────────────┼───────────────────────────┼─────────────────────────┼──────────────────────────────────────────────────────┤
     │ key_strict                │ jour (exact)              │ NOM_PRENOM complet      │ MATCH_EXACT — matching nominal                       │
-    │ key_no_date               │ —                         │ NOM_PRENOM complet      │ MATCH_WINDOW (+ tolérance ±N jours)                  │
+    │ key_no_date               │ —                         │ NOM_PRENOM complet      │ MATCH_WINDOW / RECHUTE / DATE_RETARD (avec garantie) │
     │ key_strict_tronc          │ jour (exact)              │ LEFT(NOM_PRENOM, 20)    │ MATCH_TRONC — troncature CPT 20 chars                │
     │ key_no_date_tronc         │ —                         │ LEFT(NOM_PRENOM, 20)    │ MATCH_TRONC_WINDOW (troncature + fenêtre)            │
     │ key_no_garantie           │ jour (exact)              │ NOM_PRENOM complet      │ MATCH_IP — passage IT→IP (offset garantie)           │
-    │ key_no_date_no_garantie   │ —                         │ NOM_PRENOM complet      │ MATCH_RECHUTE — rechute IT (même garantie, J2 > J1)  │
     └───────────────────────────┴───────────────────────────┴─────────────────────────┴──────────────────────────────────────────────────────┘
 
     "Tronqué" (key_*_tronc) : le CPT est limité à 20 caractères dans NOM_PRENOM.
@@ -151,9 +150,7 @@ def add_matching_keys(
         .withColumn("key_strict_tronc",  _key(rpp, dob, dos_strict, garantie, nom_tronc))
         .withColumn("key_no_date_tronc", _key(rpp, dob,             garantie, nom_tronc))
         # Clé sans garantie (survenance au jour) — étape passage IT → IP
-        .withColumn("key_no_garantie",         _key(rpp, dob, dos_strict, nom_full))
-        # Clé sans date ni garantie — étape rechute IT (même garantie, J2 > J1)
-        .withColumn("key_no_date_no_garantie", _key(rpp, dob,             nom_full))
+        .withColumn("key_no_garantie",   _key(rpp, dob, dos_strict, nom_full))
     )
 
 
@@ -265,7 +262,7 @@ def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     df = add_matching_keys(df, rpp_col="RPP")
     df = prefix_columns(
         df, prefix="CPT_",
-        keep=["key_strict", "key_no_date", "key_strict_tronc", "key_no_date_tronc", "key_no_garantie", "key_no_date_no_garantie"],
+        keep=["key_strict", "key_no_date", "key_strict_tronc", "key_no_date_tronc", "key_no_garantie"],
     )
     return df
 
@@ -299,6 +296,6 @@ def clean_mrm(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     df = add_matching_keys(df, rpp_col="IDCORP")
     df = prefix_columns(
         df, prefix="MRM_",
-        keep=["key_strict", "key_no_date", "key_strict_tronc", "key_no_date_tronc", "key_no_garantie", "key_no_date_no_garantie"],
+        keep=["key_strict", "key_no_date", "key_strict_tronc", "key_no_date_tronc", "key_no_garantie"],
     )
     return df

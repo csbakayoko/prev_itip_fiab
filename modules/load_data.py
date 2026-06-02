@@ -24,6 +24,7 @@ from config import (
     DatabaseConfig,
     RUN_PARAMS,
     CLIENT_CPT_VISION,
+    CLIENT_MRM_STATUT_INV,
     CLIENT_CLAUSES,
     CLIENT_TYPE_CLAUSES,
     TYPE_CLAUSE_CPT_PREFIX,
@@ -120,7 +121,8 @@ def load_mrm_raw(
         "fichier_mrm_n1" → MRM N+1, pour la détection des déclarations tardives
 
     Filtres appliqués dans l'ordre :
-        1. Statut actif (Statut_INV == "OUI") — obligatoire
+        1. Statut inventaire (Statut_INV) si CLIENT_MRM_STATUT_INV est défini
+           (sinon aucun filtre statut, aucun count, aucun log).
         2. Type de compte (CLIENT_TYPE_CLAUSES) :
                traduit "PB" → valeur CSV MRM (ex: "CPB") via TYPE_CLAUSE_MRM_VALUE.
                Garantit que MRM et CPT couvrent le même périmètre de types.
@@ -149,7 +151,7 @@ def load_mrm_raw(
     # Fix T-02 : inferSchema=false → toutes colonnes en string, casts ciblés
     # dans clean_mrm (to_date pour les dates, regexp_replace+cast double pour PM/PSAP).
     # Évite : (1) double-pass du CSV, (2) dates inférées comme string aléatoirement.
-    df_raw = (
+    df = (
         spark.read
              .option("header",      True)
              .option("delimiter",   cfg.mrm_delimiter)
@@ -158,13 +160,16 @@ def load_mrm_raw(
              .option("nullValue",   "")
              .csv(mrm_path)
     )
-    n_total  = df_raw.count()
-    df       = df_raw.filter(F.col("Statut_INV") == "OUI")
-    n_actifs = df.count()
-    logger.info(
-        "MRM Statut_INV : %d lignes totales → %d actives (OUI) / %d écartées",
-        n_total, n_actifs, n_total - n_actifs,
-    )
+
+    # ── Filtre 0 : statut inventaire (optionnel) ──────────────────────────────
+    if CLIENT_MRM_STATUT_INV:
+        n_total  = df.count()
+        df       = df.filter(F.col("Statut_INV") == CLIENT_MRM_STATUT_INV)
+        n_actifs = df.count()
+        logger.info(
+            "MRM Statut_INV=%s : %d lignes totales → %d retenues / %d écartées",
+            CLIENT_MRM_STATUT_INV, n_total, n_actifs, n_total - n_actifs,
+        )
 
     # ── Filtre 1 : type de compte ─────────────────────────────────────────────
     if CLIENT_TYPE_CLAUSES:
