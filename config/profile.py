@@ -17,12 +17,11 @@ CLIENT_CLAUSES      = ["121981"]  # numéros sans préfixe
 CLIENT_TYPE_CLAUSES = ["PB"]      # "PB" / "HPB"
 
 # ── Chemins source MRM (CSV DBFS) ───────────────────────────────────────────
-# Principal = inventaire de référence (ex: 31/12/2023). N+1, N+2 = inventaires
-# postérieurs (ex: 30/06/2024, 31/12/2024) pour récupérer les déclarations
-# tardives parmi les CPT_ONLY, en cascade (N+1 puis N+2). None si absent.
-FICHIER_MRM    = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_Fiab_31_12_23_V3.csv"
+# Principal = inventaire de référence (ex: 31/12/2023). N+1 = inventaire
+# postérieur (ex: 30/06/2024) pour récupérer les déclarations tardives parmi
+# les CPT_ONLY. None si absent.
+FICHIER_MRM    = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_31_12_23_V3.csv"
 FICHIER_MRM_N1 = None             # MRM N+1 (ex: 30/06/2024)
-FICHIER_MRM_N2 = None             # MRM N+2 (ex: 31/12/2024)
 
 # ── Mode d'exécution ────────────────────────────────────────────────────────
 DEV_MODE = True                   # False en prod (Job Databricks remplit RUN_PARAMS)

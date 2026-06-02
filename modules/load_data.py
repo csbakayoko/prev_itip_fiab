@@ -31,6 +31,7 @@ from config import (
     MRM_TYPE_CLAUSE_COL,
     DEV_MODE,
 )
+from modules._timing import timed_fn
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 # CHARGEMENT CPT
 # ============================================================================
 
+@timed_fn("load_cpt_raw")
 def load_cpt_raw(spark: SparkSession, cfg: DatabaseConfig) -> DataFrame:
     """
     Charge les données CPT et applique les filtres en une seule passe.
@@ -104,6 +106,7 @@ def load_cpt_raw(spark: SparkSession, cfg: DatabaseConfig) -> DataFrame:
 # CHARGEMENT MRM
 # ============================================================================
 
+@timed_fn("load_mrm_raw")
 def load_mrm_raw(
     spark   : SparkSession,
     cfg     : DatabaseConfig,
@@ -115,7 +118,6 @@ def load_mrm_raw(
     `path_key` choisit la source dans RUN_PARAMS :
         "fichier_mrm"    → MRM de l'inventaire courant (défaut)
         "fichier_mrm_n1" → MRM N+1, pour la détection des déclarations tardives
-        "fichier_mrm_n2" → MRM N+2, seconde chance de récupération des tardifs
 
     Filtres appliqués dans l'ordre :
         1. Statut actif (Statut_INV == "OUI") — obligatoire

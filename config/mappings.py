@@ -41,7 +41,7 @@ MAPPING_MRM = {
     "n_clause_ratta1"     : "CLAUSE",
     "TYPE_CLAUSE"         : "TYPE_CLAUSE",
     "IDSIX"               : "NUM_SINISTRE",
-    "DTRIRDI"             : "D_INVENTAIRE",
+    "DTIRDI"             : "D_INVENTAIRE",
     "DDRIAT"              : "D_INVALIDITE",
 }
 

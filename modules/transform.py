@@ -11,6 +11,7 @@ from pyspark.sql.window import Window
 from typing import Dict, List, Optional, Tuple
 
 from config import MAPPING_CPT, MAPPING_MRM, TechnicalConfig, tech_cfg
+from modules._timing import timed_fn
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,7 @@ def drop_duplicate_columns(df: DataFrame) -> DataFrame:
 # PIPELINES DE NETTOYAGE CPT / MRM (point d'entrée depuis api.py)
 # ============================================================================
 
+@timed_fn("clean_cpt")
 def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     """
     Pipeline complet de nettoyage CPT :
@@ -268,6 +270,7 @@ def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     return df
 
 
+@timed_fn("clean_mrm")
 def clean_mrm(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     """
     Pipeline complet de nettoyage MRM :

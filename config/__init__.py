@@ -22,7 +22,6 @@ from .profile import (
     CLIENT_TYPE_CLAUSES,
     FICHIER_MRM,
     FICHIER_MRM_N1,
-    FICHIER_MRM_N2,
     DEV_MODE,
 )
 from .mappings import (
@@ -61,8 +60,6 @@ if DEV_MODE:
         RUN_PARAMS.setdefault("fichier_mrm", FICHIER_MRM)
     if FICHIER_MRM_N1:
         RUN_PARAMS.setdefault("fichier_mrm_n1", FICHIER_MRM_N1)
-    if FICHIER_MRM_N2:
-        RUN_PARAMS.setdefault("fichier_mrm_n2", FICHIER_MRM_N2)
 
 
 _clauses = ", ".join(CLIENT_CLAUSES)      if CLIENT_CLAUSES      else "TOUTES"

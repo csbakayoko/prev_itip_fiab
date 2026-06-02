@@ -11,13 +11,18 @@ Flux :
                 │
                 └─ Union finale → DataFrame réconcilié
 
-Perf : MRM est broadcasté (taille < 100k). Chaque étape devient un broadcast
-hash join sans shuffle. Aucune matérialisation intermédiaire (persist/count) —
-seul .cache() lazy sur le DataFrame matché qui est réutilisé 3x (2 anti-joins
-+ union finale).
+Architecture des joins :
+- Join classique sur la clé courante (df_cpt.join(df_mrm, on=key, how="inner")).
+- MRM est dédoublonné sur la clé avant chaque join (dropDuplicates([key])) →
+  un CPT donné matche au plus 1 MRM (pas de fan-out côté MRM).
+- Anti-join sur la clé : les lignes dont la clé apparaît dans matched sont
+  retirées de remaining et passent à l'étape suivante.
+- MRM broadcasté (taille modérée) → joins sans shuffle.
+- Cache + count sur df_cpt/df_mrm en entrée, sur chaque matched, sur df_final
+  → matérialisation contrôlée, visibilité dans les logs.
 
-Pour ajouter une étape : copier 3 lignes dans matching_waterfall avec la
-nouvelle clé (et extra_cond si besoin).
+Pour ajouter une étape : copier 3-5 lignes dans la zone correspondante avec
+la nouvelle clé (et `extra_cond=...` si une condition supplémentaire est requise).
 """
 
 from functools import reduce
@@ -27,15 +32,16 @@ from pyspark.sql import Column, DataFrame
 import pyspark.sql.functions as F
 
 from config import WINDOW_DAYS, IP_GARANTIE_OFFSET, RELAPSE_WINDOW_DAYS
+from modules._timing import timed_fn
 
 
 # ============================================================================
 # CONSTANTES INTERNES
 # ============================================================================
 
-_UID_CPT = "_cpt_uid"
-_UID_MRM = "_mrm_uid"
-
+# Toutes les clés de matching présentes des deux côtés (CPT et MRM). Sert à
+# nettoyer côté MRM les clés non utilisées par le join courant (sinon collision
+# de colonnes dupliquées dans le résultat).
 _MATCHING_KEYS: Tuple[str, ...] = (
     "key_strict",
     "key_no_date",
@@ -47,7 +53,7 @@ _MATCHING_KEYS: Tuple[str, ...] = (
 
 
 # ============================================================================
-# CONDITIONS RÉUTILISABLES
+# CONDITIONS RÉUTILISABLES (appliquées en .filter() après le join)
 # ============================================================================
 
 def _windowed(date_cpt: str, date_mrm: str, max_days: int) -> Callable[[], Column]:
@@ -98,59 +104,50 @@ def _date_retard_cond(min_days: int,
 
 
 # ============================================================================
-# HELPERS SPARK
-# ============================================================================
-
-def _alias_mrm_keys(df_mrm: DataFrame) -> DataFrame:
-    """Préfixe les clés MRM (_mrm_*) pour éliminer les collisions de colonnes au join."""
-    for k in _MATCHING_KEYS:
-        if k in df_mrm.columns:
-            df_mrm = df_mrm.withColumnRenamed(k, f"_mrm_{k}")
-    return df_mrm
-
-
-def _drop_mrm_keys(df: DataFrame) -> DataFrame:
-    """Supprime les clés MRM aliassées une fois le join effectué."""
-    return df.drop(*[f"_mrm_{k}" for k in _MATCHING_KEYS if f"_mrm_{k}" in df.columns])
-
-
-# ============================================================================
 # EXÉCUTION D'UNE ÉTAPE DE MATCHING
 # ============================================================================
 
 def execute_matching_step(
-    df_cpt   : DataFrame,
-    df_mrm   : DataFrame,
-    key      : str,
-    label    : str,
+    df_cpt    : DataFrame,
+    df_mrm    : DataFrame,
+    key       : str,
+    label     : str,
     extra_cond: Optional[Callable[[], Column]] = None,
 ) -> Tuple[DataFrame, DataFrame, DataFrame]:
     """
-    Une étape : join sur `key` (+ `extra_cond` optionnelle), MRM broadcasté.
+    Join classique sur `key` + filtre `extra_cond` optionnel.
 
-    df_mrm doit déjà porter les clés aliasées `_mrm_*` (cf. _alias_mrm_keys).
-    Retourne (df_matched, df_cpt_remaining, df_mrm_remaining).
+    - MRM dédoublonné sur `key` avant le join → un CPT matche au plus 1 MRM.
+    - Les autres clés de matching côté MRM sont retirées avant le join (sinon
+      collision de colonnes dupliquées sur les clés non utilisées ici).
+    - Anti-join sur `key` : toute ligne dont la clé apparaît dans matched
+      sort du remaining.
     """
     print(f"[matching] ▶ {label} (clé={key})")
 
-    cond = F.col(key) == F.col(f"_mrm_{key}")
+    # Retirer les autres clés côté MRM pour éviter les ambiguïtés de colonnes.
+    other_keys = [k for k in _MATCHING_KEYS if k != key and k in df_mrm.columns]
+    df_mrm_join = (
+        df_mrm.filter(F.col(key).isNotNull())
+              .dropDuplicates([key])
+    )
+    if other_keys:
+        df_mrm_join = df_mrm_join.drop(*other_keys)
+
+    df_matched = df_cpt.join(F.broadcast(df_mrm_join), on=key, how="inner")
     if extra_cond is not None:
-        cond = cond & extra_cond()
+        df_matched = df_matched.filter(extra_cond())
+    df_matched = df_matched.withColumn("TYPE_RECONCILIATION", F.lit(label)).cache()
 
-    df_matched = (
-        df_cpt.join(F.broadcast(df_mrm.filter(F.col(f"_mrm_{key}").isNotNull())),
-                    on=cond, how="inner")
-              .transform(_drop_mrm_keys)
-              .withColumn("TYPE_RECONCILIATION", F.lit(label))
-    ).cache()
-
-    # count() force la matérialisation : on voit la progression en temps réel
-    # et le .cache() est chaud pour les deux anti-joins + l'union finale.
+    # count() force la matérialisation : warm cache + visibilité.
     n_matched = df_matched.count()
     print(f"[matching]   ↳ {label} : {n_matched:,} matchs")
 
-    df_cpt_rem = df_cpt.join(F.broadcast(df_matched.select(_UID_CPT)), _UID_CPT, "left_anti")
-    df_mrm_rem = df_mrm.join(F.broadcast(df_matched.select(_UID_MRM)), _UID_MRM, "left_anti")
+    # Anti-join sur la clé : on retire des remaining toutes les lignes dont
+    # la clé est dans matched.
+    matched_keys = F.broadcast(df_matched.select(key).distinct())
+    df_cpt_rem = df_cpt.join(matched_keys, on=key, how="left_anti")
+    df_mrm_rem = df_mrm.join(matched_keys, on=key, how="left_anti")
     return df_matched, df_cpt_rem, df_mrm_rem
 
 
@@ -188,7 +185,7 @@ def filter_mrm_by_action(
     """
     Sépare les MRM selon leur consigne métier.
 
-        MRM_DELETE                       → df_to_remove (taggué TYPE_RECONCILIATION=MRM_DELETE)
+        MRM_DELETE                       → df_to_remove (TYPE_RECONCILIATION=MRM_DELETE)
         MRM_KEEP / STUDY / ADD / None    → df_to_process
     """
     if conclusion_col not in df_mrm.columns:
@@ -226,23 +223,20 @@ def tag_orphans(df_cpt: DataFrame, df_mrm: DataFrame) -> Tuple[DataFrame, DataFr
 # WATERFALL PRINCIPAL
 # ============================================================================
 
+@timed_fn("matching_waterfall")
 def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> DataFrame:
     """
     Cascade de réconciliation CPT/MRM complète.
 
-    Pour ajouter une étape : copier 3 lignes dans la zone correspondante avec
-    la nouvelle clé (et `extra_cond=...` si une condition supplémentaire est
-    requise).
+    À chaque étape, les lignes matchées sortent et les lignes non matchées
+    (remaining) passent à l'étape suivante. Les résiduels finaux deviennent
+    des orphelins CPT_ONLY / MRM_MISSING.
     """
     print("[matching] === waterfall démarré ===")
 
-    # Cache initial CRUCIAL : sans ça, chaque étape re-scanne df_cpt_clean
-    # depuis la source (Parquet/Delta) → 8+ scans complets = des dizaines
-    # de minutes. Un seul cache au début = un seul scan, tout le reste lit
-    # la RAM. monotonically_increasing_id() doit être figé avant cache
-    # (non-déterministe sinon → fuites inter-étapes).
-    df_cpt = df_cpt_clean.withColumn(_UID_CPT, F.monotonically_increasing_id()).cache()
-    df_mrm = _alias_mrm_keys(df_mrm_clean.withColumn(_UID_MRM, F.monotonically_increasing_id())).cache()
+    # Cache initial : sinon chaque étape re-scanne df_cpt_clean depuis la source.
+    df_cpt = df_cpt_clean.cache()
+    df_mrm = df_mrm_clean.cache()
     n_cpt, n_mrm = df_cpt.count(), df_mrm.count()
     print(f"[matching] entrée : CPT={n_cpt:,} | MRM={n_mrm:,}")
 
@@ -252,39 +246,29 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     # === Pre-filter ===
     print("[matching] -- phase pre-filter --")
 
-    # Match exact (date jour + nom complet)
     matched, cpt_rem, mrm_rem = execute_matching_step(
         cpt_rem, mrm_rem, "key_strict", "MATCH_EXACT",
     )
     results.append(matched)
 
-    # Fenêtre ±N jours sur la date (nom complet)
     matched, cpt_rem, mrm_rem = execute_matching_step(
         cpt_rem, mrm_rem, "key_no_date", "MATCH_WINDOW",
         extra_cond=_windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS),
     )
     results.append(matched)
 
-    # Troncature 20 chars du nom (date jour)
     matched, cpt_rem, mrm_rem = execute_matching_step(
         cpt_rem, mrm_rem, "key_strict_tronc", "MATCH_TRONC",
     )
     results.append(matched)
 
-    # Troncature 20 chars + fenêtre ±N jours
     matched, cpt_rem, mrm_rem = execute_matching_step(
         cpt_rem, mrm_rem, "key_no_date_tronc", "MATCH_TRONC_WINDOW",
         extra_cond=_windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS),
     )
     results.append(matched)
 
-    # === Zone d'ajout d'étapes pre-filter ===
-    # matched, cpt_rem, mrm_rem = execute_matching_step(
-    #     cpt_rem, mrm_rem, "ma_cle", "MON_LABEL",
-    # )
-    # results.append(matched)
-
-    # === Filtrage des consignes MRM (MRM_DELETE écartés) ===
+    # === Filtrage MRM_DELETE ===
     print("[matching] -- filtrage MRM_DELETE --")
     mrm_removed, mrm_rem = filter_mrm_by_action(mrm_rem)
     results.append(mrm_removed)
@@ -292,32 +276,23 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     # === Post-filter ===
     print("[matching] -- phase post-filter --")
 
-    # Passage IT → IP : même nom/date, garantie décalée de IP_GARANTIE_OFFSET
     matched, cpt_rem, mrm_rem = execute_matching_step(
         cpt_rem, mrm_rem, "key_no_garantie", "MATCH_IP",
         extra_cond=_ip_cond(IP_GARANTIE_OFFSET),
     )
     results.append(matched)
 
-    # Rechute : même garantie, écart de date ≤ RELAPSE_WINDOW_DAYS (et > 0)
     matched, cpt_rem, mrm_rem = execute_matching_step(
         cpt_rem, mrm_rem, "key_no_date_no_garantie", "MATCH_RECHUTE",
         extra_cond=_rechute_cond(RELAPSE_WINDOW_DAYS),
     )
     results.append(matched)
 
-    # Date MRM en retard : CPT strictement plus récente de > WINDOW_DAYS
     matched, cpt_rem, mrm_rem = execute_matching_step(
         cpt_rem, mrm_rem, "key_no_date", "MATCH_DATE_RETARD",
         extra_cond=_date_retard_cond(WINDOW_DAYS),
     )
     results.append(matched)
-
-    # === Zone d'ajout d'étapes post-filter ===
-    # matched, cpt_rem, mrm_rem = execute_matching_step(
-    #     cpt_rem, mrm_rem, "ma_cle", "MON_LABEL", extra_cond=...,
-    # )
-    # results.append(matched)
 
     # === Orphelins finaux ===
     print("[matching] -- orphelins --")
@@ -325,20 +300,21 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     results.extend([cpt_orphans, mrm_critiques])
 
     # === Union finale ===
-    # Matérialiser ici (cache + count) attribue le temps des orphelins et de
-    # l'union au waterfall plutôt qu'à la première action du caller (write…).
-    print("[matching] -- union finale (orphelins + matched) --")
-    df_final = reduce(lambda a, b: a.unionByName(b, allowMissingColumns=True), results).cache()
+    print("[matching] -- union finale --")
+    df_final = reduce(
+        lambda a, b: a.unionByName(b, allowMissingColumns=True), results
+    ).cache()
     n_final = df_final.count()
     print(f"[matching]   ↳ union : {n_final:,} lignes")
     print("[matching] === waterfall terminé ===")
-    return df_final.drop(_UID_CPT, _UID_MRM)
+    return df_final
 
 
 # ============================================================================
 # DÉCLARATIONS TARDIVES (MRM N+1, N+2, …)
 # ============================================================================
 
+@timed_fn("recover_late_declarations")
 def recover_late_declarations(
     df_result  : DataFrame,
     inventories: List[Tuple[str, DataFrame]],
@@ -352,7 +328,6 @@ def recover_late_declarations(
         - TYPE_RECONCILIATION → "CPT_LATE"
         - LATE_SOURCE         → tag de l'inventaire (ex: "MRM_N1")
         - colonnes MRM_*      → enrichies depuis l'inventaire
-    Les non retrouvés restent CPT_ONLY.
 
     Chaque inventaire est dédoublonné sur la clé et broadcasté.
     """
@@ -360,7 +335,6 @@ def recover_late_declarations(
     is_cpt_only = F.col("TYPE_RECONCILIATION") == "CPT_ONLY"
     rest = df_result.filter(~is_cpt_only)
 
-    # Cache initial : remaining_cpt est lu 2× par inventaire (join + anti-join).
     remaining_cpt = (
         df_result.filter(is_cpt_only)
                  .select(*[c for c in df_result.columns if not c.startswith("MRM_")])
@@ -381,17 +355,14 @@ def recover_late_declarations(
                          .withColumn("TYPE_RECONCILIATION", F.lit("CPT_LATE"))
                          .withColumn("LATE_SOURCE", F.lit(tag))
         ).cache()
-        # count() force la matérialisation : warm cache + visibilité.
         n_hit = hit.count()
         print(f"[late]   ↳ {tag} : {n_hit:,} retrouvés")
 
-        # Anti-join broadcast — hit.select(key) reste tout petit même si hit est gros.
         remaining_cpt = remaining_cpt.join(
             F.broadcast(hit.select(key).distinct()), on=key, how="left_anti"
         )
         recovered.append(hit)
 
-    # Matérialiser le résultat ici évite de différer le travail au caller (display/write).
     df_final = reduce(
         lambda a, b: a.unionByName(b, allowMissingColumns=True),
         [rest, remaining_cpt, *recovered],

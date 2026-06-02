@@ -26,6 +26,7 @@ from config import (
     MATCH_AFFINEE,
 )
 from modules.matching import categorize_mrm_conclusion
+from modules._timing import timed_fn
 
 
 # ============================================================================
@@ -223,6 +224,7 @@ def render_synthese(d: dict, client: str = CLIENT_NAME) -> str:
     return "\n".join(out)
 
 
+@timed_fn("print_synthese")
 def print_synthese(df_result: DataFrame) -> dict:
     """Calcule + affiche la synthèse. Retourne les scalaires."""
     d = compute_synthese(df_result)
