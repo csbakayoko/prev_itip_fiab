@@ -684,8 +684,13 @@ def ventilate_cpt_only(
     Vue de pilotage : où se concentre la PM des dossiers CPT sans contrepartie
     MRM (ni à l'inventaire courant, ni dans le N+1).
 
+    Le JOUR (= jour du mois de survenance) est résumé par croisement :
+        JOUR_MODE = jour le plus fréquent parmi les dossiers du croisement
+        JOUR_MIN  = jour le plus précoce
+    Utile pour repérer un effet "bloc" (ex. déclarations groupées un 31).
+
     Colonnes : ANNEE_SURVENANCE, MOIS_SURVENANCE, GARANTIE,
-               NB_DOSSIERS, PM_CPT_TOTAL, PM_CPT_MOYEN
+               NB_DOSSIERS, PM_CPT_TOTAL, PM_CPT_MOYEN, JOUR_MODE, JOUR_MIN
 
     Args:
         df_result    : DataFrame résultat (sortie waterfall + recovery)
@@ -695,10 +700,13 @@ def ventilate_cpt_only(
 
     Returns:
         DataFrame ventilé, trié PM décroissant.
+
+    Note : F.mode() requiert Spark 3.4+ (Databricks Runtime 13+).
     """
     return (
         df_result
         .filter(F.col("TYPE_RECONCILIATION") == "CPT_ONLY")
+        .withColumn("_JOUR", F.dayofmonth(F.col(date_col)))
         .groupBy(
             F.year(F.col(date_col)).alias("ANNEE_SURVENANCE"),
             F.month(F.col(date_col)).alias("MOIS_SURVENANCE"),
@@ -708,6 +716,8 @@ def ventilate_cpt_only(
             F.count("*").alias("NB_DOSSIERS"),
             F.round(F.coalesce(F.sum(pm_col), F.lit(0.0)), 2).alias("PM_CPT_TOTAL"),
             F.round(F.coalesce(F.avg(pm_col), F.lit(0.0)), 2).alias("PM_CPT_MOYEN"),
+            F.mode(F.col("_JOUR")).alias("JOUR_MODE"),
+            F.min(F.col("_JOUR")).alias("JOUR_MIN"),
         )
         .orderBy(F.desc("PM_CPT_TOTAL"))
     )

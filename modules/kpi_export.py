@@ -100,17 +100,27 @@ def compute_synthese(df_result: DataFrame) -> dict:
     pm_match_mrm = agg("pm_mrm", lambda r: T(r) in match)
     pm_match_cpt = agg("pm_cpt", lambda r: T(r) in match)
 
-    # ── Ventilation par consigne (nb, PM, et volumétrie PM≠0) ────────────────
+    # ── Ventilation par consigne ─────────────────────────────────────────────
+    # nb / conformité : sur TOUS les dossiers de la consigne.
+    # PM (MRM, Compte, Δ) + volumétrie PM≠0 : sur les dossiers MATCHÉS seulement
+    # (seuls comparables — un dossier non matché n'a pas de PM compte en face).
     def consigne(action):
-        nb  = agg("nb",          lambda r: A(r) == action)
-        pm  = agg("pm_mrm",      lambda r: A(r) == action)
-        nz  = agg("nb_pm_mrm_nz", lambda r: A(r) == action)
+        nb = agg("nb", lambda r: A(r) == action)
         # conforme = matché pour KEEP/ADD/STUDY ; non matché pour DELETE
         if action == "MRM_DELETE":
             conf = agg("nb", lambda r: A(r) == action and T(r) not in match)
         else:
             conf = agg("nb", lambda r: A(r) == action and T(r) in match)
-        return {"nb": nb, "pm": pm, "nz": nz, "conf": conf, "pct": _pct(conf, nb)}
+        is_m = lambda r: A(r) == action and T(r) in match
+        nb_m     = agg("nb",           is_m)
+        pm_mrm_m = agg("pm_mrm",       is_m)
+        pm_cpt_m = agg("pm_cpt",       is_m)
+        nz_m     = agg("nb_pm_mrm_nz", is_m)
+        return {
+            "nb": nb, "conf": conf, "pct": _pct(conf, nb),
+            "nb_match": nb_m, "nz": nz_m,
+            "pm_mrm": pm_mrm_m, "pm_cpt": pm_cpt_m, "delta": pm_mrm_m - pm_cpt_m,
+        }
 
     keep   = consigne("MRM_KEEP")
     study  = consigne("MRM_STUDY")
@@ -287,12 +297,21 @@ def _render_indicateurs(d: dict) -> str:
 
 
 def _render_consignes(d: dict) -> str:
-    """Bloc suivi des consignes : conformité + volumétrie PM≠0 par consigne."""
-    head = f"  {'Consigne':<14}{'nb':>7}{'conf.':>8}{'%conf':>8}{'PM≠0':>8}   PM (€)"
-    lines = ["SUIVI DES CONSIGNES (conformité + volumétrie PM non nulle)", head]
+    """
+    Suivi des consignes :
+      - nb / %conf : sur tous les dossiers de la consigne
+      - matchés / PM≠0 / PM MRM / PM CPT / Δ PM : sur les dossiers matchés
+    """
+    head = (f"  {'Consigne':<13}{'nb':>6}{'%conf':>7}{'match.':>7}{'PM≠0':>7}"
+            f"{'PM MRM':>14}{'PM CPT':>14}{'Δ PM':>13}")
+    lines = [
+        "SUIVI DES CONSIGNES — conformité (tous dossiers) + PM (dossiers matchés)",
+        head,
+    ]
     for label, c in d["consignes"].items():
         lines.append(
-            f"  {label:<14}{_n(c['nb']):>7}{_n(c['conf']):>8}{c['pct']:>7} %{_n(c['nz']):>8}   {_n(c['pm'])} €"
+            f"  {label:<13}{_n(c['nb']):>6}{c['pct']:>6} %{_n(c['nb_match']):>7}{_n(c['nz']):>7}"
+            f"{_n(c['pm_mrm']):>12} €{_n(c['pm_cpt']):>12} €{_n(c['delta']):>11} €"
         )
     return "\n".join(lines)
 

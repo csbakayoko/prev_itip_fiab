@@ -6,12 +6,10 @@ SODEXO = clause 121981, type PB, vision CC2023.
 """
 
 # ── Identité du client ──────────────────────────────────────────────────────
-CLIENT_NAME            = "SODEXO"   # libellé affiché dans la synthèse
-CLIENT_CPT_VISION      = "CC2023"   # vision comptable CPT (filtre obligatoire)
-CLIENT_MRM_STATUT_INV  = "OUI"      # statut inventaire MRM à conserver. None = pas de filtre.
-
-# "auto" → max(MRM_D_INVENTAIRE) calculé au run ; ou date figée "31/12/2023"
-DATE_INVENTAIRE = "auto"
+CLIENT_NAME            = "SODEXO"      # libellé affiché dans la synthèse
+CLIENT_CPT_VISION      = "CC2023"      # vision comptable CPT (filtre obligatoire)
+DATE_INVENTAIRE        = "31/12/2023"  # date d'inventaire (en dur). "auto" = max(MRM_D_INVENTAIRE).
+CLIENT_MRM_STATUT_INV  = "OUI"         # statut inventaire MRM à conserver. None = pas de filtre.
 
 # ── Filtres de périmètre (None = pas de filtre) ─────────────────────────────
 CLIENT_CLAUSES      = ["121981"]  # numéros sans préfixe
