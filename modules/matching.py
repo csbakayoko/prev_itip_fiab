@@ -122,13 +122,13 @@ def execute_matching_step(
     - Anti-join sur `key` : toute ligne dont la clé apparaît dans matched
       sort du remaining.
 
-    Les remaining sont cache()+count() pour TRONQUER LA LIGNÉE : sans ça, le
-    plan logique de cpt_rem/mrm_rem s'empile à chaque étape (8 joins/anti-joins
-    imbriqués) jusqu'à l'OutOfMemoryError driver lors de la sérialisation du
-    plan (AdaptiveSparkPlanExec.onUpdatePlan). Le coût mémoire est négligeable
-    (données de quelques milliers de lignes), on ne matérialise que pour couper
-    la lignée. Les df_cpt/df_mrm en entrée sont libérés (unpersist) une fois
-    les nouveaux remaining matérialisés.
+    Les remaining sont localCheckpoint(eager=True) pour TRONQUER LA LIGNÉE.
+    Attention : cache()/persist() ne suffit PAS — un InMemoryRelation expose son
+    plan caché comme "inner child", donc la sérialisation du plan
+    (AdaptiveSparkPlanExec.onUpdatePlan → explainStringLocal) ré-expose toute la
+    chaîne précédente et le plan-string explose quand même (OutOfMemoryError
+    driver). localCheckpoint matérialise puis remplace la lignée par une feuille
+    RDD opaque, sans plan interne → le plan reste plat à chaque étape.
     """
     print(f"[matching] ▶ {label} (clé={key})")
 
@@ -144,24 +144,20 @@ def execute_matching_step(
     df_matched = df_cpt.join(F.broadcast(df_mrm_join), on=key, how="inner")
     if extra_cond is not None:
         df_matched = df_matched.filter(extra_cond())
-    df_matched = df_matched.withColumn("TYPE_RECONCILIATION", F.lit(label)).cache()
-
-    # count() force la matérialisation : warm cache + visibilité.
+    # Checkpoint du matched : matérialise + coupe la lignée (réutilisé pour
+    # l'anti-join et l'union finale, sans ré-exposer le plan amont).
+    df_matched = (
+        df_matched.withColumn("TYPE_RECONCILIATION", F.lit(label))
+                  .localCheckpoint(eager=True)
+    )
     n_matched = df_matched.count()
     print(f"[matching]   ↳ {label} : {n_matched:,} matchs")
 
-    # Anti-join sur la clé : on retire des remaining toutes les lignes dont
-    # la clé est dans matched. cache()+count() coupe la lignée (cf. docstring).
+    # Anti-join sur la clé : on retire des remaining les lignes dont la clé est
+    # dans matched. localCheckpoint coupe la lignée (cf. docstring).
     matched_keys = F.broadcast(df_matched.select(key).distinct())
-    df_cpt_rem = df_cpt.join(matched_keys, on=key, how="left_anti").cache()
-    df_mrm_rem = df_mrm.join(matched_keys, on=key, how="left_anti").cache()
-    df_cpt_rem.count()
-    df_mrm_rem.count()
-
-    # Les remaining d'entrée ne sont plus référencés (les nouveaux sont
-    # matérialisés et indépendants) → libérer leur cache.
-    df_cpt.unpersist()
-    df_mrm.unpersist()
+    df_cpt_rem = df_cpt.join(matched_keys, on=key, how="left_anti").localCheckpoint(eager=True)
+    df_mrm_rem = df_mrm.join(matched_keys, on=key, how="left_anti").localCheckpoint(eager=True)
 
     return df_matched, df_cpt_rem, df_mrm_rem
 
@@ -249,9 +245,19 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     """
     print("[matching] === waterfall démarré ===")
 
-    # Cache initial : sinon chaque étape re-scanne df_cpt_clean depuis la source.
-    df_cpt = df_cpt_clean.cache()
-    df_mrm = df_mrm_clean.cache()
+    spark = df_cpt_clean.sparkSession
+    # Filet de sécurité : plafonne la taille du plan-string sérialisé par AQE
+    # (cause directe de l'OOM driver dans explainStringLocal). Databricks
+    # recommande explicitement ce réglage pour les OutOfMemory sur plan.
+    try:
+        spark.conf.set("spark.sql.maxPlanStringLength", "8k")
+    except Exception:
+        pass
+
+    # Checkpoint initial : matérialise depuis la source + lignée propre pour la
+    # cascade (les étapes suivantes localCheckpoint à leur tour).
+    df_cpt = df_cpt_clean.localCheckpoint(eager=True)
+    df_mrm = df_mrm_clean.localCheckpoint(eager=True)
     n_cpt, n_mrm = df_cpt.count(), df_mrm.count()
     print(f"[matching] entrée : CPT={n_cpt:,} | MRM={n_mrm:,}")
 
