@@ -88,9 +88,7 @@ def compute_synthese(df_result: DataFrame) -> dict:
 
     nb_princ, pm_princ      = mrm(lambda r: T(r) in princ)
     nb_aff,   pm_aff_mrm    = mrm(lambda r: T(r) in aff)
-    _,        pm_aff_cpt    = cpt(lambda r: T(r) in aff)
     nb_recup, pm_recup_mrm  = mrm(lambda r: T(r) in recup)
-    _,        pm_recup_cpt  = cpt(lambda r: T(r) in recup)
     nb_del,   pm_del        = mrm(lambda r: T(r) == "MRM_DELETE")
     nb_miss,  pm_miss       = mrm(lambda r: T(r) == "MRM_MISSING")
     nb_def,   pm_def        = cpt(lambda r: T(r) == "CPT_ONLY")
@@ -100,18 +98,32 @@ def compute_synthese(df_result: DataFrame) -> dict:
     pm_match_mrm = agg("pm_mrm", lambda r: T(r) in match)
     pm_match_cpt = agg("pm_cpt", lambda r: T(r) in match)
 
-    # ── Ventilation par consigne ─────────────────────────────────────────────
-    # nb / conformité : sur TOUS les dossiers de la consigne.
-    # PM (MRM, Compte, Δ) + volumétrie PM≠0 : sur les dossiers MATCHÉS seulement
-    # (seuls comparables — un dossier non matché n'a pas de PM compte en face).
+    # Univers MRM principal = matchés + à supprimer + manquants. On EXCLUT
+    # CPT_LATE : rattachés au MRM N+1, leur PM/consigne ne doit pas polluer les
+    # totaux de l'inventaire courant (nb_match/nb_del/nb_miss l'excluent déjà).
+    mrm_pm_total = pm_match_mrm + pm_del + pm_miss
+    cpt_pm_total = pm_match_cpt + pm_def + pm_late   # MRM-only → CPT_PM nul
+
+    # ── Sous-ventilation de "Non mappés" : MISSING ∩ consigne ────────────────
+    def miss(action):
+        return mrm(lambda r: T(r) == "MRM_MISSING" and A(r) == action)
+    keep_miss_nb,  keep_miss_pm  = miss("MRM_KEEP")
+    study_miss_nb, study_miss_pm = miss("MRM_STUDY")
+    add_miss_nb,   add_miss_pm   = miss("MRM_ADD")
+
+    # ── Suivi des consignes (univers MRM principal, CPT_LATE exclu) ───────────
+    # nb / conformité : tous les dossiers principaux de la consigne.
+    # PM (MRM, Compte, Δ) + volumétrie PM≠0 : dossiers MATCHÉS seulement (seuls
+    # comparables — un dossier non matché n'a pas de PM compte en face).
     def consigne(action):
-        nb = agg("nb", lambda r: A(r) == action)
+        in_act = lambda r: A(r) == action and T(r) != "CPT_LATE"
+        nb = agg("nb", in_act)
         # conforme = matché pour KEEP/ADD/STUDY ; non matché pour DELETE
         if action == "MRM_DELETE":
-            conf = agg("nb", lambda r: A(r) == action and T(r) not in match)
+            conf = agg("nb", lambda r: in_act(r) and T(r) not in match)
         else:
-            conf = agg("nb", lambda r: A(r) == action and T(r) in match)
-        is_m = lambda r: A(r) == action and T(r) in match
+            conf = agg("nb", lambda r: in_act(r) and T(r) in match)
+        is_m = lambda r: in_act(r) and T(r) in match
         nb_m     = agg("nb",           is_m)
         pm_mrm_m = agg("pm_mrm",       is_m)
         pm_cpt_m = agg("pm_cpt",       is_m)
@@ -127,29 +139,27 @@ def compute_synthese(df_result: DataFrame) -> dict:
     add    = consigne("MRM_ADD")
     delete = consigne("MRM_DELETE")
 
-    # ── Conformité globale (KEEP + ADD + STUDY) ──────────────────────────────
-    total_kas = agg("nb", lambda r: A(r) in _KAS)
-    conf_kas  = agg("nb", lambda r: A(r) in _KAS and T(r) in match)
-
-    # ── Taux de chute global (matchés KEEP/ADD/STUDY) ────────────────────────
+    # ── Conformité + taux de chute globaux (KEEP+ADD+STUDY, univers principal) ─
+    total_kas  = agg("nb",     lambda r: A(r) in _KAS and T(r) != "CPT_LATE")
+    conf_kas   = agg("nb",     lambda r: A(r) in _KAS and T(r) in match)
     pm_mrm_kas = agg("pm_mrm", lambda r: A(r) in _KAS and T(r) in match)
     pm_cpt_kas = agg("pm_cpt", lambda r: A(r) in _KAS and T(r) in match)
 
-    nb_trouves = nb_match + nb_late   # tout ce qui est rattaché à un MRM
+    nb_trouves = nb_match + nb_late   # CPT rattachés à un MRM (courant ou N+1)
 
     return {
         # ── Bulle MRM ──
         "mrm_nb"          : nb_match + nb_del + nb_miss,
-        "mrm_pm"          : agg("pm_mrm", lambda r: True),
+        "mrm_pm"          : mrm_pm_total,
         "a_supprimer_nb"  : nb_del,             "a_supprimer_pm"  : pm_del,
         "a_comparer_nb"   : nb_match + nb_miss, "a_comparer_pm"   : pm_match_mrm + pm_miss,
         "principale_nb"   : nb_princ,           "principale_pm"   : pm_princ,
         "affinee_nb"      : nb_aff,             "affinee_pm_mrm"  : pm_aff_mrm,
         "recup_nb"        : nb_recup,           "recup_pm_mrm"    : pm_recup_mrm,
         "non_mappes_nb"   : nb_miss,            "non_mappes_pm"   : pm_miss,
-        "keep_nb"  : keep["nb"],   "keep_pm"  : keep["pm"],
-        "study_nb" : study["nb"],  "study_pm" : study["pm"],
-        "add_nb"   : add["nb"],    "add_pm"   : add["pm"],
+        "keep_nb"  : keep_miss_nb,   "keep_pm"  : keep_miss_pm,
+        "study_nb" : study_miss_nb,  "study_pm" : study_miss_pm,
+        "add_nb"   : add_miss_nb,    "add_pm"   : add_miss_pm,
         # ── Bulle MATCHÉS ──
         "match_nb"        : nb_match,
         "match_pm_mrm"    : pm_match_mrm,
@@ -157,12 +167,8 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "match_pm_ecart"  : pm_match_mrm - pm_match_cpt,
         # ── Bulle COMPTE ──
         "cpt_nb"          : nb_match + nb_def + nb_late,
-        "cpt_pm"          : agg("pm_cpt", lambda r: True),
+        "cpt_pm"          : cpt_pm_total,
         "trouves_nb"      : nb_trouves,
-        "non_retrouves_nb": nb_aff + nb_recup + nb_def + nb_late,
-        "non_retrouves_pm": pm_aff_cpt + pm_recup_cpt + pm_def + pm_late,
-        "affinee_cpt_pm"  : pm_aff_cpt,
-        "recup_cpt_pm"    : pm_recup_cpt,
         "late_nb" : nb_late, "late_pm" : pm_late,
         "def_nb"  : nb_def,  "def_pm"  : pm_def,
         # ── Indicateurs (taux) ──
@@ -256,10 +262,10 @@ def _render_box(d: dict, client: str) -> str:
         _row("├ à étudier",           d["study_nb"],       d["study_pm"]),
         _row("└ à ajouter",           d["add_nb"],         d["add_pm"]),
         "",
-        _row("CPT trouvés (match+tardifs)", d["trouves_nb"], d["match_pm_cpt"] + d["late_pm"]),
-        _row("├ matchés inventaire",        d["match_nb"],   d["match_pm_cpt"]),
-        _row("├ récupérés tardifs (N+1)",   d["late_nb"],    d["late_pm"]),
-        _row("└ CPT_ONLY définitifs",       d["def_nb"],     d["def_pm"]),
+        _row("Total CPT (compte)",          d["cpt_nb"],   d["cpt_pm"]),
+        _row("├ matchés inventaire",        d["match_nb"], d["match_pm_cpt"]),
+        _row("├ récupérés tardifs (N+1)",   d["late_nb"],  d["late_pm"]),
+        _row("└ CPT_ONLY définitifs",       d["def_nb"],   d["def_pm"]),
         "",
     ]
 
