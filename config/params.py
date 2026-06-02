@@ -42,6 +42,17 @@ RELAPSE_WINDOW_DAYS  = 30   # fenêtre max (jours) pour rattacher une rechute IT
 
 
 # ============================================================================
+# ENTREPÔT DE DONNÉES (investigations orphelins)
+# ============================================================================
+# Lecture des gros fichiers Excel de l'entrepôt via spark-excel
+# (com.crealytics.spark.excel, à installer sur le cluster Databricks).
+
+EXCEL_FORMAT = "com.crealytics.spark.excel"
+EXCEL_SHEET  = None   # None = 1re feuille ; sinon nom d'onglet (ex: "Feuil1")
+EXCEL_DATE_FORMAT = "dd/MM/yyyy"   # format des dates dans l'Excel entrepôt
+
+
+# ============================================================================
 # BASE DE DONNÉES
 # ============================================================================
 

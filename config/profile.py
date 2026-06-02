@@ -24,5 +24,13 @@ CLIENT_TYPE_CLAUSES = ["PB"]      # "PB" / "HPB"
 FICHIER_MRM    = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_31_12_23_V3.csv"
 FICHIER_MRM_N1 = None             # MRM N+1 (ex: 30/06/2024)
 
+# ── Entrepôt de données (investigations orphelins) ──────────────────────────
+# Gros fichiers Excel où chaque dossier apparaît à PLUSIEURS dates d'inventaire
+# (historique). Même schéma de colonnes brutes que les sources (MAPPING_CPT /
+# MAPPING_MRM). Servent à tracer l'historique des orphelins CPT_ONLY / MRM_MISSING
+# dans investigations/. None = pas d'investigation pour cette base.
+FICHIER_ENTREPOT_CPT = None       # ex: "dbfs:/FileStore/.../entrepot_cpt.xlsx"
+FICHIER_ENTREPOT_MRM = None       # ex: "dbfs:/FileStore/.../entrepot_mrm.xlsx"
+
 # ── Mode d'exécution ────────────────────────────────────────────────────────
 DEV_MODE = True                   # False en prod (Job Databricks remplit RUN_PARAMS)

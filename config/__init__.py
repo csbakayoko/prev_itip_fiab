@@ -23,6 +23,8 @@ from .profile import (
     CLIENT_TYPE_CLAUSES,
     FICHIER_MRM,
     FICHIER_MRM_N1,
+    FICHIER_ENTREPOT_CPT,
+    FICHIER_ENTREPOT_MRM,
     DEV_MODE,
 )
 from .mappings import (
@@ -44,6 +46,9 @@ from .params import (
     MATCH_RECUPERATION,
     IP_GARANTIE_OFFSET,
     RELAPSE_WINDOW_DAYS,
+    EXCEL_FORMAT,
+    EXCEL_SHEET,
+    EXCEL_DATE_FORMAT,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +67,10 @@ if DEV_MODE:
         RUN_PARAMS.setdefault("fichier_mrm", FICHIER_MRM)
     if FICHIER_MRM_N1:
         RUN_PARAMS.setdefault("fichier_mrm_n1", FICHIER_MRM_N1)
+    if FICHIER_ENTREPOT_CPT:
+        RUN_PARAMS.setdefault("entrepot_cpt", FICHIER_ENTREPOT_CPT)
+    if FICHIER_ENTREPOT_MRM:
+        RUN_PARAMS.setdefault("entrepot_mrm", FICHIER_ENTREPOT_MRM)
 
 
 _clauses = ", ".join(CLIENT_CLAUSES)      if CLIENT_CLAUSES      else "TOUTES"
