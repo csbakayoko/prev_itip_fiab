@@ -121,6 +121,14 @@ def execute_matching_step(
       collision de colonnes dupliquées sur les clés non utilisées ici).
     - Anti-join sur `key` : toute ligne dont la clé apparaît dans matched
       sort du remaining.
+
+    Les remaining sont cache()+count() pour TRONQUER LA LIGNÉE : sans ça, le
+    plan logique de cpt_rem/mrm_rem s'empile à chaque étape (8 joins/anti-joins
+    imbriqués) jusqu'à l'OutOfMemoryError driver lors de la sérialisation du
+    plan (AdaptiveSparkPlanExec.onUpdatePlan). Le coût mémoire est négligeable
+    (données de quelques milliers de lignes), on ne matérialise que pour couper
+    la lignée. Les df_cpt/df_mrm en entrée sont libérés (unpersist) une fois
+    les nouveaux remaining matérialisés.
     """
     print(f"[matching] ▶ {label} (clé={key})")
 
@@ -143,10 +151,18 @@ def execute_matching_step(
     print(f"[matching]   ↳ {label} : {n_matched:,} matchs")
 
     # Anti-join sur la clé : on retire des remaining toutes les lignes dont
-    # la clé est dans matched.
+    # la clé est dans matched. cache()+count() coupe la lignée (cf. docstring).
     matched_keys = F.broadcast(df_matched.select(key).distinct())
-    df_cpt_rem = df_cpt.join(matched_keys, on=key, how="left_anti")
-    df_mrm_rem = df_mrm.join(matched_keys, on=key, how="left_anti")
+    df_cpt_rem = df_cpt.join(matched_keys, on=key, how="left_anti").cache()
+    df_mrm_rem = df_mrm.join(matched_keys, on=key, how="left_anti").cache()
+    df_cpt_rem.count()
+    df_mrm_rem.count()
+
+    # Les remaining d'entrée ne sont plus référencés (les nouveaux sont
+    # matérialisés et indépendants) → libérer leur cache.
+    df_cpt.unpersist()
+    df_mrm.unpersist()
+
     return df_matched, df_cpt_rem, df_mrm_rem
 
 
