@@ -668,6 +668,52 @@ def analyze_mrm_missing(
 
 
 # ============================================================================
+# VENTILATION CPT_ONLY (synthèse main — survenance × garantie, PM décroissant)
+# ============================================================================
+
+def ventilate_cpt_only(
+    df_result   : DataFrame,
+    date_col    : str = "CPT_D_SURVENANCE",
+    garantie_col: str = "CPT_GARANTIE",
+    pm_col      : str = "CPT_PM",
+) -> DataFrame:
+    """
+    Ventile les dossiers CPT_ONLY définitifs par (année, mois de survenance,
+    garantie), triés par PM total décroissant.
+
+    Vue de pilotage : où se concentre la PM des dossiers CPT sans contrepartie
+    MRM (ni à l'inventaire courant, ni dans le N+1).
+
+    Colonnes : ANNEE_SURVENANCE, MOIS_SURVENANCE, GARANTIE,
+               NB_DOSSIERS, PM_CPT_TOTAL, PM_CPT_MOYEN
+
+    Args:
+        df_result    : DataFrame résultat (sortie waterfall + recovery)
+        date_col     : Colonne date de survenance CPT
+        garantie_col : Colonne garantie CPT
+        pm_col       : Colonne PM CPT
+
+    Returns:
+        DataFrame ventilé, trié PM décroissant.
+    """
+    return (
+        df_result
+        .filter(F.col("TYPE_RECONCILIATION") == "CPT_ONLY")
+        .groupBy(
+            F.year(F.col(date_col)).alias("ANNEE_SURVENANCE"),
+            F.month(F.col(date_col)).alias("MOIS_SURVENANCE"),
+            F.col(garantie_col).alias("GARANTIE"),
+        )
+        .agg(
+            F.count("*").alias("NB_DOSSIERS"),
+            F.round(F.coalesce(F.sum(pm_col), F.lit(0.0)), 2).alias("PM_CPT_TOTAL"),
+            F.round(F.coalesce(F.avg(pm_col), F.lit(0.0)), 2).alias("PM_CPT_MOYEN"),
+        )
+        .orderBy(F.desc("PM_CPT_TOTAL"))
+    )
+
+
+# ============================================================================
 # POINT D'ENTRÉE : RUN FULL ANALYSIS
 # ============================================================================
 

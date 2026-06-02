@@ -16,6 +16,7 @@ from config import db_cfg, tech_cfg, RUN_PARAMS
 from modules.load_data import load_cpt_raw, load_mrm_raw
 from modules.transform import clean_cpt, clean_mrm
 from modules.matching import matching_waterfall, recover_late_declarations
+from modules.analysis import ventilate_cpt_only
 from modules.kpi_export import print_synthese
 from modules._timing import timed
 
@@ -39,6 +40,12 @@ def run(spark: SparkSession) -> DataFrame:
             df_result.count()  # force la matérialisation pour un timing fiable
 
         print_synthese(df_result)
+
+        # Ventilation des CPT_ONLY définitifs par survenance × garantie,
+        # PM décroissant — où se concentre la PM non réconciliée.
+        with timed("ventilation CPT_ONLY"):
+            print("\n[CPT_ONLY] ventilation par survenance × garantie (PM décroissant) :")
+            ventilate_cpt_only(df_result).show(50, truncate=False)
     return df_result
 
 
