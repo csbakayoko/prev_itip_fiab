@@ -44,6 +44,7 @@ from .params import (
     MATCH_RECUPERATION,
     IP_GARANTIE_OFFSET,
     RELAPSE_WINDOW_DAYS,
+    RETARD_MAX_DAYS,
 )
 
 logger = logging.getLogger(__name__)

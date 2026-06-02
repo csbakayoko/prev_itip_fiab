@@ -38,7 +38,10 @@ MATCH_LABELS = MATCH_PRINCIPALE + MATCH_AFFINEE + MATCH_RECUPERATION
 # Sinon le rapprochement est cassé (faux positif) → les dossiers restent orphelins.
 # Mettre None pour désactiver complètement l'étape IP.
 IP_GARANTIE_OFFSET   = 4
-RELAPSE_WINDOW_DAYS  = 30   # fenêtre max (jours) pour rattacher une rechute IT
+RELAPSE_WINDOW_DAYS  = 30    # fenêtre max (jours) pour rattacher une rechute IT
+RETARD_MAX_DAYS      = 365   # plafond (jours) pour MATCH_DATE_RETARD : au-delà,
+                             # l'écart de date traduit deux sinistres distincts,
+                             # pas une erreur de saisie → on n'apparie plus.
 
 
 # ============================================================================

@@ -28,10 +28,10 @@ la nouvelle clé (et `extra_cond=...` si une condition supplémentaire est requi
 from functools import reduce
 from typing import Callable, List, Optional, Tuple
 
-from pyspark.sql import Column, DataFrame
+from pyspark.sql import Column, DataFrame, Window
 import pyspark.sql.functions as F
 
-from config import WINDOW_DAYS, IP_GARANTIE_OFFSET, RELAPSE_WINDOW_DAYS
+from config import WINDOW_DAYS, IP_GARANTIE_OFFSET, RELAPSE_WINDOW_DAYS, RETARD_MAX_DAYS
 from modules._timing import timed_fn
 
 
@@ -91,15 +91,9 @@ def _rechute_cond(relapse_days: int,
     return build
 
 
-def _date_retard_cond(min_days: int,
-                      date_cpt: str = "CPT_D_SURVENANCE",
-                      date_mrm: str = "MRM_D_SURVENANCE") -> Callable[[], Column]:
-    """Date MRM en retard : datediff(CPT, MRM) > min_days (CPT strictement plus récent)."""
-    return lambda: (
-        (F.datediff(F.col(date_cpt), F.col(date_mrm)) > F.lit(min_days))
-        & F.col(date_cpt).isNotNull()
-        & F.col(date_mrm).isNotNull()
-    )
+# Note : MATCH_DATE_RETARD n'utilise pas le mécanisme extra_cond générique mais
+# execute_closest_date_step (ci-dessous) — il faut borner l'écart ET choisir le
+# MRM le plus proche, ce que le dropDuplicates([key]) arbitraire ne permet pas.
 
 
 # ============================================================================
@@ -155,6 +149,62 @@ def execute_matching_step(
 
     # Anti-join sur la clé : on retire des remaining les lignes dont la clé est
     # dans matched. localCheckpoint coupe la lignée (cf. docstring).
+    matched_keys = F.broadcast(df_matched.select(key).distinct())
+    df_cpt_rem = df_cpt.join(matched_keys, on=key, how="left_anti").localCheckpoint(eager=True)
+    df_mrm_rem = df_mrm.join(matched_keys, on=key, how="left_anti").localCheckpoint(eager=True)
+
+    return df_matched, df_cpt_rem, df_mrm_rem
+
+
+def execute_closest_date_step(
+    df_cpt  : DataFrame,
+    df_mrm  : DataFrame,
+    key     : str,
+    label   : str,
+    min_days: int,
+    max_days: int,
+    date_cpt: str = "CPT_D_SURVENANCE",
+    date_mrm: str = "MRM_D_SURVENANCE",
+) -> Tuple[DataFrame, DataFrame, DataFrame]:
+    """
+    Étape « date en retard » bornée + appariement au plus proche.
+
+    Contrairement à execute_matching_step (dedup MRM arbitraire par clé), on
+    joint TOUS les MRM candidats de la clé, on borne l'écart de survenance
+    (`min_days < datediff(CPT, MRM) <= max_days`, CPT strictement postérieur),
+    puis on garde pour chaque CPT le MRM dont la date est LA PLUS PROCHE
+    (row_number sur |datediff| croissant). Évite d'apparier un sinistre distant
+    (faux positif) et de tirer un MRM au hasard parmi plusieurs candidats.
+
+    Partition du choix : (clé, date CPT) — identifie le dossier CPT sans uid,
+    puisque la clé fige rpp/dob/garantie/nom et la date fige le sinistre côté CPT.
+    """
+    print(f"[matching] ▶ {label} (clé={key}, ≤{max_days}j, plus proche)")
+
+    other_keys = [k for k in _MATCHING_KEYS if k != key and k in df_mrm.columns]
+    df_mrm_join = df_mrm.filter(F.col(key).isNotNull())
+    if other_keys:
+        df_mrm_join = df_mrm_join.drop(*other_keys)
+
+    diff = F.datediff(F.col(date_cpt), F.col(date_mrm))
+    cond = (
+        (diff > F.lit(min_days)) & (diff <= F.lit(max_days))
+        & F.col(date_cpt).isNotNull() & F.col(date_mrm).isNotNull()
+    )
+
+    w = Window.partitionBy(key, date_cpt).orderBy(F.abs(diff).asc(), F.col(date_mrm).asc())
+    df_matched = (
+        df_cpt.join(F.broadcast(df_mrm_join), on=key, how="inner")
+              .filter(cond)
+              .withColumn("_rn", F.row_number().over(w))
+              .filter(F.col("_rn") == 1)
+              .drop("_rn")
+              .withColumn("TYPE_RECONCILIATION", F.lit(label))
+              .localCheckpoint(eager=True)
+    )
+    n_matched = df_matched.count()
+    print(f"[matching]   ↳ {label} : {n_matched:,} matchs")
+
     matched_keys = F.broadcast(df_matched.select(key).distinct())
     df_cpt_rem = df_cpt.join(matched_keys, on=key, how="left_anti").localCheckpoint(eager=True)
     df_mrm_rem = df_mrm.join(matched_keys, on=key, how="left_anti").localCheckpoint(eager=True)
@@ -322,9 +372,11 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     )
     results.append(matched)
 
-    matched, cpt_rem, mrm_rem = execute_matching_step(
+    # Date en retard : CPT postérieur de WINDOW_DAYS < écart ≤ RETARD_MAX_DAYS,
+    # appariement au MRM le plus proche (cf. execute_closest_date_step).
+    matched, cpt_rem, mrm_rem = execute_closest_date_step(
         cpt_rem, mrm_rem, "key_no_date", "MATCH_DATE_RETARD",
-        extra_cond=_date_retard_cond(WINDOW_DAYS),
+        min_days=WINDOW_DAYS, max_days=RETARD_MAX_DAYS,
     )
     results.append(matched)
 
