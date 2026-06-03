@@ -794,6 +794,78 @@ def ventilate_cpt_only(
 
 
 # ============================================================================
+# ÉTUDE DU PROVISIONNEMENT (matchés hors "à supprimer") — stats pour graphiques
+# ============================================================================
+
+def study_provisionnement(
+    df_result     : DataFrame,
+    conclusion_col: str = "MRM_CONCLUSION",
+) -> DataFrame:
+    """
+    Étude du provisionnement sur les dossiers MATCHÉS (hors consigne à supprimer).
+
+    Compare la provision comptable (CPT_PM) à la référence MRM (MRM_PM) :
+        SOUS_PROVISIONNE : CPT_PM < MRM_PM  (risque — provision insuffisante)
+        SUR_PROVISIONNE  : CPT_PM > MRM_PM  (marge de sécurité)
+        CONFORME         : CPT_PM = MRM_PM
+
+    NB : convention intuitive (sous-prov = on a provisionné MOINS que le besoin).
+    Écart = MRM_PM − CPT_PM (positif = sous-provisionnement). Taux de chute =
+    Σécart / ΣMRM_PM × 100, cohérent avec la synthèse.
+
+    Univers : matchs légitimes (MATCH_LABELS) + déclarations tardives (CPT_LATE),
+    consigne MRM_DELETE exclue. PM nulles ramenées à 0 pour la comparaison.
+
+    Colonnes (une ligne par catégorie, + tri par nb décroissant) :
+        CATEGORIE_PROVISION, NB_DOSSIERS, PCT_NB,
+        PM_MRM, PM_CPT, PCT_PM_MRM,
+        ECART_SIGNE, ECART_ABS_TOTAL, ECART_ABS_MOYEN, ECART_ABS_MAX,
+        TAUX_CHUTE
+
+    Returns:
+        DataFrame de stats par catégorie, prêt pour visualisation.
+    """
+    matched = list(MATCH_LABELS) + ["CPT_LATE"]
+    pm_mrm  = F.coalesce(F.col("MRM_PM"), F.lit(0.0))
+    pm_cpt  = F.coalesce(F.col("CPT_PM"), F.lit(0.0))
+
+    df = (
+        df_result
+        .filter(F.col("TYPE_RECONCILIATION").isin(matched))
+        .withColumn("_ACTION", categorize_mrm_conclusion(F.col(conclusion_col)))
+        .filter(F.col("_ACTION").isNull() | (F.col("_ACTION") != "MRM_DELETE"))
+        .withColumn("ECART", pm_mrm - pm_cpt)            # > 0 → sous-provisionné
+        .withColumn("ECART_ABS", F.abs(pm_mrm - pm_cpt))
+        .withColumn("CATEGORIE_PROVISION",
+            F.when(pm_cpt < pm_mrm, "SOUS_PROVISIONNE")
+             .when(pm_cpt > pm_mrm, "SUR_PROVISIONNE")
+             .otherwise("CONFORME"))
+    )
+
+    w = Window.partitionBy()   # totaux globaux pour les pourcentages
+    return (
+        df.groupBy("CATEGORIE_PROVISION")
+        .agg(
+            F.count("*").alias("NB_DOSSIERS"),
+            F.round(F.sum("MRM_PM"), 2).alias("PM_MRM"),
+            F.round(F.sum("CPT_PM"), 2).alias("PM_CPT"),
+            F.round(F.sum("ECART"), 2).alias("ECART_SIGNE"),
+            F.round(F.sum("ECART_ABS"), 2).alias("ECART_ABS_TOTAL"),
+            F.round(F.avg("ECART_ABS"), 2).alias("ECART_ABS_MOYEN"),
+            F.round(F.max("ECART_ABS"), 2).alias("ECART_ABS_MAX"),
+        )
+        .withColumn("PCT_NB",
+            F.round(F.col("NB_DOSSIERS") / F.sum("NB_DOSSIERS").over(w) * 100, 1))
+        .withColumn("PCT_PM_MRM",
+            F.round(F.col("PM_MRM") / F.sum("PM_MRM").over(w) * 100, 1))
+        .withColumn("TAUX_CHUTE",
+            F.round(F.when(F.col("PM_MRM") != 0,
+                           F.col("ECART_SIGNE") / F.col("PM_MRM") * 100).otherwise(0.0), 2))
+        .orderBy(F.desc("NB_DOSSIERS"))
+    )
+
+
+# ============================================================================
 # POINT D'ENTRÉE : RUN FULL ANALYSIS
 # ============================================================================
 

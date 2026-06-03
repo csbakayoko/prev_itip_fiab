@@ -142,7 +142,8 @@ def compute_synthese(df_result: DataFrame) -> dict:
     # ── Suivi des consignes (univers MRM principal : matchés légitimes + MISSING) ─
     # EXCLUT anomalies (DATE_RETARD) et tardifs (CPT_LATE, consigne issue du N+1).
     # nb / conformité : tous les dossiers principaux de la consigne.
-    # PM (MRM, Compte, Δ) + volumétrie PM≠0 : dossiers MATCHÉS seulement.
+    # PM (MRM, Compte, Δ), taux de chute, volumétrie PM nulle/non-nulle : dossiers
+    # MATCHÉS seulement. Pour "à supprimer", l'analyse PM n'est pas pertinente.
     def consigne(action):
         if action == "MRM_DELETE":
             univ = lambda r: A(r) == action and (T(r) in match or T(r) == "MRM_DELETE")
@@ -156,11 +157,17 @@ def compute_synthese(df_result: DataFrame) -> dict:
         nb_m     = agg("nb",           is_m)
         pm_mrm_m = agg("pm_mrm",       is_m)
         pm_cpt_m = agg("pm_cpt",       is_m)
-        nz_m     = agg("nb_pm_mrm_nz", is_m)
+        nz       = agg("nb_pm_mrm_nz", is_m)   # PM MRM ≠ 0
+        nz0      = nb_m - nz                    # PM MRM nulle (null ou 0)
+        delta    = pm_mrm_m - pm_cpt_m
         return {
             "nb": nb, "conf": conf_nb, "pct": _pct(conf_nb, nb),
-            "nb_match": nb_m, "nz": nz_m,
-            "pm_mrm": pm_mrm_m, "pm_cpt": pm_cpt_m, "delta": pm_mrm_m - pm_cpt_m,
+            "nb_match": nb_m,
+            "nz": nz,   "pct_nz":  _pct(nz, nb_m),
+            "nz0": nz0, "pct_nz0": _pct(nz0, nb_m),
+            "pm_mrm": pm_mrm_m, "pm_cpt": pm_cpt_m, "delta": delta,
+            "taux_chute": _pct(delta, pm_mrm_m),
+            "pertinent": action != "MRM_DELETE",
         }
 
     keep   = consigne("MRM_KEEP")
@@ -209,6 +216,7 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "cpt_pm"          : cpt_pm_total,
         "trouves_nb"      : nb_trouves,
         "late_nb" : nb_late, "late_pm" : pm_late_cpt,
+        "late_pm_mrm" : pm_late_mrm, "late_pm_cpt" : pm_late_cpt,
         "def_nb"  : nb_def,  "def_pm"  : pm_def,
         # ── Indicateurs (taux) ──
         "taux_couverture_mrm" : _pct(nb_match, nb_match + nb_miss),
@@ -345,6 +353,9 @@ def _render_indicateurs(d: dict) -> str:
         f"  PM CPT   : {_n(d['metrics_pm_cpt']):>15} €",
         f"  Écart    : {_n(d['metrics_pm_ecart']):>15} €  ({d['metrics_pm_pct']} %)",
         "",
+        f"DÉCLARATIONS TARDIVES (N+1, {_n(d['late_nb'])} dossiers, incluses dans les métriques)",
+        f"  PM MRM {_n(d['late_pm_mrm'])} €  |  PM CPT {_n(d['late_pm_cpt'])} €",
+        "",
         f"ANOMALIES — MATCH_DATE_RETARD ({_n(d['anomalie_nb'])} dossiers, exclus des métriques)",
         f"  Écart survenance CPT vs MRM : moy {d['ecart_jours_moy']} j  "
         f"(min {d['ecart_jours_min']} j, max {d['ecart_jours_max']} j)",
@@ -353,23 +364,34 @@ def _render_indicateurs(d: dict) -> str:
     return "\n".join(lines)
 
 
+def _np(n, p) -> str:
+    """Formate 'n (p%)' — volumétrie avec pourcentage entre parenthèses."""
+    return f"{_n(n)} ({p}%)"
+
+
 def _render_consignes(d: dict) -> str:
     """
     Suivi des consignes :
       - nb / %conf : sur tous les dossiers de la consigne
-      - matchés / PM≠0 / PM MRM / PM CPT / Δ PM : sur les dossiers matchés
+      - matchés, PM nulle/non-nulle (avec %), PM MRM/CPT, taux de chute :
+        sur les dossiers matchés. "À supprimer" → analyse PM non pertinente.
     """
-    head = (f"  {'Consigne':<13}{'nb':>6}{'%conf':>7}{'match.':>7}{'PM≠0':>7}"
-            f"{'PM MRM':>14}{'PM CPT':>14}{'Δ PM':>13}")
+    head = (f"  {'Consigne':<13}{'nb':>6}{'%conf':>8}{'match.':>7}"
+            f"{'PM nulle':>13}{'PM≠0':>14}{'PM MRM':>15}{'PM CPT':>15}{'chute':>8}")
     lines = [
-        "SUIVI DES CONSIGNES — conformité (tous dossiers) + PM (dossiers matchés)",
+        "SUIVI DES CONSIGNES — conformité (tous dossiers) ; PM & chute (dossiers matchés)",
         head,
     ]
     for label, c in d["consignes"].items():
-        lines.append(
-            f"  {label:<13}{_n(c['nb']):>6}{c['pct']:>6} %{_n(c['nb_match']):>7}{_n(c['nz']):>7}"
-            f"{_n(c['pm_mrm']):>12} €{_n(c['pm_cpt']):>12} €{_n(c['delta']):>11} €"
-        )
+        base = f"  {label:<13}{_n(c['nb']):>6}{c['pct']:>6} %{_n(c['nb_match']):>7}"
+        if not c["pertinent"]:
+            lines.append(base + "   — analyse PM non pertinente (consigne à supprimer) —")
+        else:
+            lines.append(
+                base
+                + f"{_np(c['nz0'], c['pct_nz0']):>13}{_np(c['nz'], c['pct_nz']):>14}"
+                + f"{_n(c['pm_mrm']):>13} €{_n(c['pm_cpt']):>13} €{c['taux_chute']:>6} %"
+            )
     return "\n".join(lines)
 
 

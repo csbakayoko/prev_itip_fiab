@@ -16,7 +16,7 @@ from config import db_cfg, tech_cfg, RUN_PARAMS
 from modules.load_data import load_cpt_raw, load_mrm_raw
 from modules.transform import clean_cpt, clean_mrm
 from modules.matching import matching_waterfall, recover_late_declarations
-from modules.analysis import ventilate_cpt_only, enrich_result_tags
+from modules.analysis import ventilate_cpt_only, enrich_result_tags, study_provisionnement
 from modules.kpi_export import print_synthese
 from modules._timing import timed
 import pyspark.sql.functions as F
@@ -59,6 +59,11 @@ def run(spark: SparkSession) -> DataFrame:
                            F.round(F.sum("CPT_PM"), 2).alias("PM_CPT_TOTAL"))
                       .orderBy(F.desc("PM_CPT_TOTAL"))
                       .show(truncate=False))
+
+        # Étude du provisionnement (matchés hors à supprimer) : sur/sous/conforme.
+        with timed("étude provisionnement"):
+            print("\n[PROVISIONNEMENT] sur/sous/conforme (matchés hors à supprimer) :")
+            study_provisionnement(df_result).show(truncate=False)
     return df_result
 
 
