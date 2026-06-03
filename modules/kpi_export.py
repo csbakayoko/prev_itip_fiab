@@ -377,7 +377,7 @@ def _render_consignes(d: dict) -> str:
         sur les dossiers matchés. "À supprimer" → analyse PM non pertinente.
     """
     head = (f"  {'Consigne':<13}{'nb':>6}{'%conf':>8}{'match.':>7}"
-            f"{'PM nulle':>13}{'PM≠0':>14}{'PM MRM':>15}{'PM CPT':>15}{'chute':>8}")
+            f"{'PM MRM nulle':>13}{'PM MRM≠0':>14}{'PM MRM':>15}{'PM CPT':>15}{'chute':>8}")
     lines = [
         "SUIVI DES CONSIGNES — conformité (tous dossiers) ; PM & chute (dossiers matchés)",
         head,

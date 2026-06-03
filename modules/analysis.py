@@ -228,8 +228,8 @@ def calculate_taux_chute(
         .withColumn("ecart_pm",     F.col("MRM_PM") - F.col("CPT_PM"))
         .withColumn("ecart_pm_abs", F.abs(F.col("ecart_pm")))
         .withColumn("categorie_provision",
-            F.when(F.col("CPT_PM") > F.col("MRM_PM"), "SOUS")
-             .when(F.col("CPT_PM") < F.col("MRM_PM"), "SUR")
+            F.when(F.col("CPT_PM") < F.col("MRM_PM"), "SOUS")
+             .when(F.col("CPT_PM") > F.col("MRM_PM"), "SUR")
              .otherwise("CONFORME")
         )
     )
@@ -298,9 +298,9 @@ def analyze_provisionnement(
     ┌──────────────────┬──────────────────────────────────────┐
     │ Catégorie        │ Condition                            │
     ├──────────────────┼──────────────────────────────────────┤
-    │ SOUS_PROVISIONNE │ PM_CPT > PM_MRM  (risque financier)  │
+    │ SOUS_PROVISIONNE │ PM_CPT < PM_MRM  (risque financier)  │
     │ CONFORME         │ PM_CPT = PM_MRM  (situation idéale)  │
-    │ SUR_PROVISIONNE  │ PM_CPT < PM_MRM  (marge de sécurité) │
+    │ SUR_PROVISIONNE  │ PM_CPT > PM_MRM  (marge de sécurité) │
     └──────────────────┴──────────────────────────────────────┘
 
     Colonnes :
@@ -322,8 +322,8 @@ def analyze_provisionnement(
         _filter_matched_keep_add_study(_with_mrm_action(df_result, conclusion_col))
         .withColumn("ecart_pm_abs", F.abs(F.col("MRM_PM") - F.col("CPT_PM")))
         .withColumn("CATEGORIE_PROVISION",
-            F.when(F.col("CPT_PM") > F.col("MRM_PM"), "SOUS_PROVISIONNE")
-             .when(F.col("CPT_PM") < F.col("MRM_PM"), "SUR_PROVISIONNE")
+            F.when(F.col("CPT_PM") < F.col("MRM_PM"), "SOUS_PROVISIONNE")
+             .when(F.col("CPT_PM") > F.col("MRM_PM"), "SUR_PROVISIONNE")
              .otherwise("CONFORME")
         )
         .groupBy(clause_col, "TYPE_CLAUSE", "MRM_ACTION", "CATEGORIE_PROVISION")
@@ -402,8 +402,8 @@ def analyze_ecarts_tranches(
         .withColumn("ecart_pm_abs",  F.abs(F.col("MRM_PM") - F.col("CPT_PM")))
         .withColumn("ecart_pm_signe", F.col("MRM_PM") - F.col("CPT_PM"))
         .withColumn("CATEGORIE_PROVISION",
-            F.when(F.col("CPT_PM") > F.col("MRM_PM"), "SOUS_PROVISIONNE")
-             .when(F.col("CPT_PM") < F.col("MRM_PM"), "SUR_PROVISIONNE")
+            F.when(F.col("CPT_PM") < F.col("MRM_PM"), "SOUS_PROVISIONNE")
+             .when(F.col("CPT_PM") > F.col("MRM_PM"), "SUR_PROVISIONNE")
              .otherwise("CONFORME")
         )
         # Conforme = écart nul → pas pertinent pour analyse par tranches
