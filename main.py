@@ -16,9 +16,10 @@ from config import db_cfg, tech_cfg, RUN_PARAMS
 from modules.load_data import load_cpt_raw, load_mrm_raw
 from modules.transform import clean_cpt, clean_mrm
 from modules.matching import matching_waterfall, recover_late_declarations
-from modules.analysis import ventilate_cpt_only
+from modules.analysis import ventilate_cpt_only, enrich_result_tags
 from modules.kpi_export import print_synthese
 from modules._timing import timed
+import pyspark.sql.functions as F
 
 
 def run(spark: SparkSession) -> DataFrame:
@@ -35,6 +36,10 @@ def run(spark: SparkSession) -> DataFrame:
             mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
             df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1)])
 
+        # Colonnes persistantes : consigne reformatée (MRM_ACTION) + tag des
+        # orphelins CPT_ONLY (TAG_CPT_ONLY).
+        df_result = enrich_result_tags(df_result)
+
         with timed("persist df_result"):
             df_result = df_result.persist()
             df_result.count()  # force la matérialisation pour un timing fiable
@@ -46,6 +51,14 @@ def run(spark: SparkSession) -> DataFrame:
         with timed("ventilation CPT_ONLY"):
             print("\n[CPT_ONLY] ventilation par survenance × garantie (PM décroissant) :")
             ventilate_cpt_only(df_result).show(50, truncate=False)
+
+            print("\n[CPT_ONLY] répartition par tag :")
+            (df_result.filter(F.col("TYPE_RECONCILIATION") == "CPT_ONLY")
+                      .groupBy("TAG_CPT_ONLY")
+                      .agg(F.count("*").alias("NB_DOSSIERS"),
+                           F.round(F.sum("CPT_PM"), 2).alias("PM_CPT_TOTAL"))
+                      .orderBy(F.desc("PM_CPT_TOTAL"))
+                      .show(truncate=False))
     return df_result
 
 

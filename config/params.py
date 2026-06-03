@@ -48,6 +48,13 @@ RETARD_MAX_DAYS      = 365   # plafond (jours) pour MATCH_DATE_RETARD : au-delà
                              # l'écart de date traduit deux sinistres distincts,
                              # pas une erreur de saisie → on n'apparie plus.
 
+# Segmentation des orphelins CPT_ONLY définitifs (tag TAG_CPT_ONLY) :
+#   - fin d'année d'inventaire (mois ∈ ORPHAN_FIN_ANNEE_MOIS) → tardif probable
+#   - PM > ORPHAN_PM_THRESHOLD                                → orphelin montant élevé
+#   - sinon                                                   → à analyser
+ORPHAN_PM_THRESHOLD   = 20_000
+ORPHAN_FIN_ANNEE_MOIS = (11, 12)
+
 
 # ============================================================================
 # BASE DE DONNÉES

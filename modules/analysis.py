@@ -24,7 +24,13 @@ from pyspark.sql import DataFrame, Window
 import pyspark.sql.functions as F
 from typing import Dict, List, Optional, Tuple
 
-from config import MATCH_LABELS, MATCH_ANOMALIE
+from config import (
+    MATCH_LABELS,
+    MATCH_ANOMALIE,
+    DATE_INVENTAIRE,
+    ORPHAN_PM_THRESHOLD,
+    ORPHAN_FIN_ANNEE_MOIS,
+)
 from modules.matching import categorize_mrm_conclusion
 
 
@@ -667,6 +673,67 @@ def analyze_mrm_missing(
             F.round(F.avg(pm_col), 2).alias("PM_MRM_MOYEN"),
         )
         .orderBy("CLAUSE", "TYPE_CLAUSE", "MRM_ACTION", "ANNEE_SURVENANCE", "MOIS_SURVENANCE", "ORDRE_TRANCHE")
+    )
+
+
+# ============================================================================
+# ENRICHISSEMENT DU RÉSULTAT : consigne reformatée + tag des orphelins
+# ============================================================================
+
+def _inventory_year() -> Optional[int]:
+    """Année d'inventaire dérivée de DATE_INVENTAIRE ('dd/MM/yyyy'). None si 'auto'."""
+    try:
+        return int(str(DATE_INVENTAIRE).split("/")[-1])
+    except (ValueError, AttributeError):
+        return None
+
+
+def enrich_result_tags(
+    df_result     : DataFrame,
+    conclusion_col: str = "MRM_CONCLUSION",
+    date_col      : str = "CPT_D_SURVENANCE",
+    pm_col        : str = "CPT_PM",
+) -> DataFrame:
+    """
+    Ajoute deux colonnes persistantes au résultat de réconciliation :
+
+    1. MRM_ACTION  : consigne MRM reformatée (MRM_KEEP / MRM_ADD / MRM_STUDY /
+                     MRM_DELETE), null si pas de conclusion. Conservée pour le
+                     reporting et Power BI (évite de recalculer ailleurs).
+
+    2. TAG_CPT_ONLY : segmentation actionnable des CPT_ONLY définitifs —
+                      DECLA_TARDIVE_PROBABLE  : survenance en fin d'année
+                          d'inventaire (mois ∈ ORPHAN_FIN_ANNEE_MOIS) → sinistre
+                          probablement déclaré après la clôture MRM.
+                      ORPHELIN_MONTANT_ELEVE  : PM CPT > ORPHAN_PM_THRESHOLD.
+                      ORPHELIN_A_ANALYSER     : les autres orphelins.
+                      null pour les lignes non CPT_ONLY.
+
+    Args:
+        df_result      : DataFrame réconcilié (sortie waterfall + recovery)
+        conclusion_col : Colonne conclusion MRM brute
+        date_col       : Colonne date de survenance CPT
+        pm_col         : Colonne PM CPT
+
+    Returns:
+        df_result enrichi de MRM_ACTION et TAG_CPT_ONLY.
+    """
+    df = df_result.withColumn("MRM_ACTION", categorize_mrm_conclusion(F.col(conclusion_col)))
+
+    is_cpt_only = F.col("TYPE_RECONCILIATION") == "CPT_ONLY"
+    inv_year    = _inventory_year()
+    fin_annee   = (
+        is_cpt_only
+        & F.month(F.col(date_col)).isin(*ORPHAN_FIN_ANNEE_MOIS)
+        & (F.year(F.col(date_col)) == F.lit(inv_year) if inv_year is not None else F.lit(True))
+    )
+
+    return df.withColumn(
+        "TAG_CPT_ONLY",
+        F.when(fin_annee,                                       "DECLA_TARDIVE_PROBABLE")
+         .when(is_cpt_only & (F.col(pm_col) > ORPHAN_PM_THRESHOLD), "ORPHELIN_MONTANT_ELEVE")
+         .when(is_cpt_only,                                     "ORPHELIN_A_ANALYSER")
+         .otherwise(None)
     )
 
 
