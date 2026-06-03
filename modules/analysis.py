@@ -24,7 +24,7 @@ from pyspark.sql import DataFrame, Window
 import pyspark.sql.functions as F
 from typing import Dict, List, Optional, Tuple
 
-from config import MATCH_LABELS
+from config import MATCH_LABELS, MATCH_ANOMALIE
 from modules.matching import categorize_mrm_conclusion
 
 
@@ -90,6 +90,9 @@ def analyze_suivi_consignes(
     df_audit = (
         _with_mrm_action(df_result, conclusion_col)
         .filter(F.col("MRM_ACTION").isNotNull())
+        # Anomalies (MATCH_DATE_RETARD) exclues : appariement à risque, ne doit
+        # pas peser dans l'audit de conformité (ni conforme, ni non-conforme).
+        .filter(~F.col("TYPE_RECONCILIATION").isin(list(MATCH_ANOMALIE)))
         .withColumn(
             "RESULTAT_AUDIT",
             F.when(is_matched  & (F.col("MRM_ACTION") == "MRM_KEEP"),   "CONFORME")

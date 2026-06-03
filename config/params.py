@@ -18,13 +18,18 @@ WINDOW_DAYS = 7                              # tolérance ±jours pour les étap
 # Regroupement pour la synthèse SODEXO :
 #   principale   = clé nominale complète (date jour ou ±WINDOW_DAYS)
 #   affinée      = clé nominale tronquée CPT 20 chars
-#   récupération = matchs métier de rattrapage (IP, rechute, date en retard)
+#   récupération = matchs métier fiables (passage IP, rechute)
 MATCH_PRINCIPALE   = ("MATCH_EXACT", "MATCH_WINDOW")
 MATCH_AFFINEE      = ("MATCH_TRONC", "MATCH_TRONC_WINDOW")
-MATCH_RECUPERATION = ("MATCH_IP", "MATCH_RECHUTE", "MATCH_RECHUTE_TRONC", "MATCH_DATE_RETARD")
+MATCH_RECUPERATION = ("MATCH_IP", "MATCH_RECHUTE", "MATCH_RECHUTE_TRONC")
 
-# Labels posés dans TYPE_RECONCILIATION par le waterfall (ordre = cascade).
-# = tous les matchs confondus, dérivés des 3 sous-catégories ci-dessus.
+# Anomalies : MATCH_DATE_RETARD est un appariement à risque (faux positif
+# possible). Exclu des matchs légitimes → exclu des calculs de PM et du suivi
+# des consignes. Reporté à part avec l'écart de jours entre survenances.
+MATCH_ANOMALIE     = ("MATCH_DATE_RETARD",)
+
+# Matchs LÉGITIMES posés par le waterfall (anomalies exclues). Sert de référence
+# "matché" partout (synthèse, audit consignes, taux de chute).
 MATCH_LABELS = MATCH_PRINCIPALE + MATCH_AFFINEE + MATCH_RECUPERATION
 
 

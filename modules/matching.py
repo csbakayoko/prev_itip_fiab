@@ -200,6 +200,8 @@ def execute_closest_date_step(
               .filter(F.col("_rn") == 1)
               .drop("_rn")
               .withColumn("TYPE_RECONCILIATION", F.lit(label))
+              # Écart de jours entre survenances (anomalie → diagnostic).
+              .withColumn("ECART_JOURS_SURVENANCE", diff)
               .localCheckpoint(eager=True)
     )
     n_matched = df_matched.count()

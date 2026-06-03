@@ -289,10 +289,14 @@ def clean_mrm(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
         if date_col in df.columns:
             df = df.withColumn(date_col, F.to_date(F.col(date_col), "dd/MM/yyyy"))
     df = cast_mrm_amounts(df, cols=["PM", "PSAP"])
-    # Fix T-01 : dédoublonnage MRM symétrique au dédoublonnage CPT
-    dup_keys = [k for k in cfg.mrm_dup_keys if k in df.columns]
-    if dup_keys:
-        df = df.dropDuplicates(dup_keys)
+    # Dédoublonnage MRM désactivé : dropDuplicates(mrm_dup_keys) était non
+    # déterministe (ligne gardée arbitraire → PM/consigne/nom instables d'un run
+    # à l'autre). Le fan-out du join est déjà géré par dropDuplicates([key]) dans
+    # execute_matching_step. À réactiver via un keep_latest_by_keys ordonné si on
+    # veut éviter le double-comptage des doublons MRM en MRM_MISSING.
+    # dup_keys = [k for k in cfg.mrm_dup_keys if k in df.columns]
+    # if dup_keys:
+    #     df = df.dropDuplicates(dup_keys)
     df = add_matching_keys(df, rpp_col="IDCORP")
     df = prefix_columns(
         df, prefix="MRM_",
