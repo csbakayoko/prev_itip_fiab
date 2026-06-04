@@ -23,13 +23,8 @@ MATCH_PRINCIPALE   = ("MATCH_EXACT", "MATCH_WINDOW")
 MATCH_AFFINEE      = ("MATCH_TRONC", "MATCH_TRONC_WINDOW")
 MATCH_RECUPERATION = ("MATCH_IP", "MATCH_RECHUTE", "MATCH_RECHUTE_TRONC")
 
-# Anomalies : MATCH_DATE_RETARD est un appariement à risque (faux positif
-# possible). Exclu des matchs légitimes → exclu des calculs de PM et du suivi
-# des consignes. Reporté à part avec l'écart de jours entre survenances.
-MATCH_ANOMALIE     = ("MATCH_DATE_RETARD",)
-
-# Matchs LÉGITIMES posés par le waterfall (anomalies exclues). Sert de référence
-# "matché" partout (synthèse, audit consignes, taux de chute).
+# Matchs LÉGITIMES posés par le waterfall. Sert de référence "matché" partout
+# (synthèse, audit consignes, taux de chute).
 MATCH_LABELS = MATCH_PRINCIPALE + MATCH_AFFINEE + MATCH_RECUPERATION
 
 
@@ -44,9 +39,13 @@ MATCH_LABELS = MATCH_PRINCIPALE + MATCH_AFFINEE + MATCH_RECUPERATION
 # Mettre None pour désactiver complètement l'étape IP.
 IP_GARANTIE_OFFSET   = 4
 RELAPSE_WINDOW_DAYS  = 30    # fenêtre max (jours) pour rattacher une rechute IT
-RETARD_MAX_DAYS      = 365   # plafond (jours) pour MATCH_DATE_RETARD : au-delà,
-                             # l'écart de date traduit deux sinistres distincts,
-                             # pas une erreur de saisie → on n'apparie plus.
+
+# Déclarations tardives IT : un CPT_ONLY resté orphelin (absent du MRM courant ET
+# du N+1, donc « pas dans deux exercices successifs ») dont la survenance tombe en
+# fin d'année (mois ∈ ORPHAN_FIN_ANNEE_MOIS) et dont la garantie vaut LATE_IT_GARANTIE
+# (incapacité de travail) est calé en CPT_LATE : observation tardive d'un IT dont la
+# couverture a vraisemblablement pris fin avant l'inventaire de l'exercice suivant.
+LATE_IT_GARANTIE      = 60
 
 # Segmentation des orphelins CPT_ONLY définitifs (tag TAG_CPT_ONLY) :
 #   - fin d'année d'inventaire (mois ∈ ORPHAN_FIN_ANNEE_MOIS) → tardif probable

@@ -9,7 +9,10 @@ SODEXO = clause 121981, type PB, vision CC2023.
 CLIENT_NAME            = "SODEXO"      # libellé affiché dans la synthèse
 CLIENT_CPT_VISION      = "CC2023"      # vision comptable CPT (filtre obligatoire)
 DATE_INVENTAIRE        = "31/12/2023"  # date d'inventaire (en dur). "auto" = max(MRM_D_INVENTAIRE).
-CLIENT_MRM_STATUT_INV  = "OUI"         # statut inventaire MRM à conserver. None = pas de filtre.
+CLIENT_MRM_STATUT_INV  = None          # filtre statut inventaire au chargement. None = charge
+                                       # OUI+NON (un MRM NON n'est pas remonté à la direction
+                                       # financière mais reste mappable). La distinction est
+                                       # portée par la colonne MRM_STATUT_INV (exploitable export).
 
 # ── Filtres de périmètre (None = pas de filtre) ─────────────────────────────
 CLIENT_CLAUSES      = ["121981"]  # numéros sans préfixe

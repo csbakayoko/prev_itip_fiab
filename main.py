@@ -16,7 +16,12 @@ from config import db_cfg, tech_cfg, RUN_PARAMS
 from modules.load_data import load_cpt_raw, load_mrm_raw
 from modules.transform import clean_cpt, clean_mrm
 from modules.matching import matching_waterfall, recover_late_declarations
-from modules.analysis import ventilate_cpt_only, enrich_result_tags, study_provisionnement
+from modules.analysis import (
+    ventilate_cpt_only,
+    flag_late_it_observations,
+    enrich_result_tags,
+    study_provisionnement,
+)
 from modules.kpi_export import print_synthese
 from modules._timing import timed
 import pyspark.sql.functions as F
@@ -35,6 +40,10 @@ def run(spark: SparkSession) -> DataFrame:
         if RUN_PARAMS.get("fichier_mrm_n1"):
             mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
             df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1)])
+
+        # Observations tardives IT : CPT_ONLY garantie 60 survenus en fin d'année,
+        # absents du MRM courant et du N+1 → calés en CPT_LATE (LATE_SOURCE=OBS_TARDIVE_IT).
+        df_result = flag_late_it_observations(df_result)
 
         # Colonnes persistantes : consigne reformatée (MRM_ACTION) + tag des
         # orphelins CPT_ONLY (TAG_CPT_ONLY).

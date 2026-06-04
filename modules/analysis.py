@@ -26,8 +26,8 @@ from typing import Dict, List, Optional, Tuple
 
 from config import (
     MATCH_LABELS,
-    MATCH_ANOMALIE,
     DATE_INVENTAIRE,
+    LATE_IT_GARANTIE,
     ORPHAN_PM_THRESHOLD,
     ORPHAN_FIN_ANNEE_MOIS,
 )
@@ -44,6 +44,18 @@ def _with_mrm_action(df: DataFrame, conclusion_col: str) -> DataFrame:
         "MRM_ACTION",
         categorize_mrm_conclusion(F.col(conclusion_col))
     )
+
+
+def _statut_inv_dim(df: DataFrame, col: str = "MRM_STATUT_INV") -> List[str]:
+    """
+    Renvoie [col] si la colonne statut inventaire est présente, sinon [].
+
+    Permet d'ajouter MRM_STATUT_INV comme dimension de ventilation (OUI/NON) dans
+    les agrégats exportés sans casser quand la source ne fournit pas la colonne.
+    Un MRM avec statut NON n'est pas remonté à la direction financière : la
+    dissociation OUI/NON est portée par cette dimension côté Power BI.
+    """
+    return [col] if col in df.columns else []
 
 
 def _filter_matched_keep_add_study(df: DataFrame) -> DataFrame:
@@ -96,9 +108,6 @@ def analyze_suivi_consignes(
     df_audit = (
         _with_mrm_action(df_result, conclusion_col)
         .filter(F.col("MRM_ACTION").isNotNull())
-        # Anomalies (MATCH_DATE_RETARD) exclues : appariement à risque, ne doit
-        # pas peser dans l'audit de conformité (ni conforme, ni non-conforme).
-        .filter(~F.col("TYPE_RECONCILIATION").isin(list(MATCH_ANOMALIE)))
         .withColumn(
             "RESULTAT_AUDIT",
             F.when(is_matched  & (F.col("MRM_ACTION") == "MRM_KEEP"),   "CONFORME")
@@ -113,12 +122,15 @@ def analyze_suivi_consignes(
         )
     )
 
-    # Fenêtre partitionnée par (clause, type_clause, consigne) pour les pourcentages
-    window_consigne = Window.partitionBy(clause_col, "TYPE_CLAUSE", "MRM_ACTION")
+    # Dimension statut inventaire (OUI/NON) si disponible — ventilation exportable.
+    statut_dim = _statut_inv_dim(df_audit)
+
+    # Fenêtre partitionnée par (clause, type_clause, [statut], consigne) pour les pourcentages
+    window_consigne = Window.partitionBy(clause_col, "TYPE_CLAUSE", *statut_dim, "MRM_ACTION")
 
     df_audit_summary = (
         df_audit
-        .groupBy(clause_col, "TYPE_CLAUSE", "MRM_ACTION", "RESULTAT_AUDIT")
+        .groupBy(clause_col, "TYPE_CLAUSE", *statut_dim, "MRM_ACTION", "RESULTAT_AUDIT")
         .agg(
             F.count("*").alias("nb_dossiers"),
             F.sum("MRM_PM").alias("pm_mrm"),
@@ -639,6 +651,9 @@ def analyze_mrm_missing(
         DataFrame agrégé — une ligne par (CLAUSE × MRM_ACTION × mois × tranche PM)
     """
     tranche_col, ordre_col = _pm_tranche_expr(pm_col)
+    # Dimension statut inventaire (OUI/NON) si dispo — les MRM_MISSING statut NON
+    # ne sont pas remontés à la direction financière (ventilation exportable).
+    statut_dim = _statut_inv_dim(df_result)
 
     return (
         _with_mrm_action(
@@ -659,6 +674,7 @@ def analyze_mrm_missing(
         .groupBy(
             F.col(clause_col).alias("CLAUSE"),
             "TYPE_CLAUSE",
+            *statut_dim,
             "MRM_ACTION",
             "ANNEE_SURVENANCE",
             "MOIS_SURVENANCE",
@@ -672,7 +688,7 @@ def analyze_mrm_missing(
             F.round(F.sum(pm_col), 2).alias("PM_MRM_TOTAL"),
             F.round(F.avg(pm_col), 2).alias("PM_MRM_MOYEN"),
         )
-        .orderBy("CLAUSE", "TYPE_CLAUSE", "MRM_ACTION", "ANNEE_SURVENANCE", "MOIS_SURVENANCE", "ORDRE_TRANCHE")
+        .orderBy("CLAUSE", "TYPE_CLAUSE", *statut_dim, "MRM_ACTION", "ANNEE_SURVENANCE", "MOIS_SURVENANCE", "ORDRE_TRANCHE")
     )
 
 
@@ -686,6 +702,58 @@ def _inventory_year() -> Optional[int]:
         return int(str(DATE_INVENTAIRE).split("/")[-1])
     except (ValueError, AttributeError):
         return None
+
+
+def flag_late_it_observations(
+    df_result   : DataFrame,
+    garantie_col: str = "CPT_GARANTIE",
+    date_col    : str = "CPT_D_SURVENANCE",
+) -> DataFrame:
+    """
+    Reclasse en CPT_LATE les CPT_ONLY qui sont des observations tardives d'IT.
+
+    Un CPT_ONLY resté orphelin après la récupération N+1 (donc absent du MRM
+    courant ET du N+1 → « pas dans deux exercices successifs ») est calé en
+    déclaration tardive lorsque :
+        - garantie == LATE_IT_GARANTIE (incapacité de travail),
+        - survenance en fin d'année (mois ∈ ORPHAN_FIN_ANNEE_MOIS),
+        - année de survenance == année d'inventaire (si dérivable de DATE_INVENTAIRE).
+
+    Hypothèse métier : la couverture IT a vraisemblablement pris fin avant la date
+    d'inventaire de l'exercice suivant (inventaire MRM réalisé 2× par an), d'où
+    l'absence de contrepartie MRM. Ces lignes n'ont donc pas de colonnes MRM_*.
+
+    Lignes reclassées :
+        TYPE_RECONCILIATION → "CPT_LATE"
+        LATE_SOURCE         → "OBS_TARDIVE_IT"  (distingue des CPT_LATE retrouvés
+                                                  en N+1, tagués "MRM_N1")
+
+    À appeler APRÈS recover_late_declarations et AVANT enrich_result_tags (pour
+    que ces dossiers ne soient plus comptés/tagués comme CPT_ONLY).
+    """
+    inv_year    = _inventory_year()
+    is_cpt_only = F.col("TYPE_RECONCILIATION") == "CPT_ONLY"
+    eligible = (
+        is_cpt_only
+        & (F.col(garantie_col).cast("int") == F.lit(LATE_IT_GARANTIE))
+        & F.month(F.col(date_col)).isin(*ORPHAN_FIN_ANNEE_MOIS)
+        & (F.year(F.col(date_col)) == F.lit(inv_year) if inv_year is not None else F.lit(True))
+    )
+
+    df = df_result
+    if "LATE_SOURCE" not in df.columns:
+        df = df.withColumn("LATE_SOURCE", F.lit(None).cast("string"))
+
+    return (
+        df.withColumn(
+            "TYPE_RECONCILIATION",
+            F.when(eligible, F.lit("CPT_LATE")).otherwise(F.col("TYPE_RECONCILIATION")),
+        )
+        .withColumn(
+            "LATE_SOURCE",
+            F.when(eligible, F.lit("OBS_TARDIVE_IT")).otherwise(F.col("LATE_SOURCE")),
+        )
+    )
 
 
 def enrich_result_tags(

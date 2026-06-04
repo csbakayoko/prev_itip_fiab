@@ -107,7 +107,7 @@ def add_matching_keys(
     │ Clé                       │ D_SURVENANCE              │ Identité                │ Usage                                                │
     ├───────────────────────────┼───────────────────────────┼─────────────────────────┼──────────────────────────────────────────────────────┤
     │ key_strict                │ jour (exact)              │ NOM_PRENOM complet      │ MATCH_EXACT — matching nominal                       │
-    │ key_no_date               │ —                         │ NOM_PRENOM complet      │ MATCH_WINDOW / RECHUTE / DATE_RETARD (avec garantie) │
+    │ key_no_date               │ —                         │ NOM_PRENOM complet      │ MATCH_WINDOW / MATCH_RECHUTE (avec garantie)         │
     │ key_strict_tronc          │ jour (exact)              │ LEFT(NOM_PRENOM, 20)    │ MATCH_TRONC — troncature CPT 20 chars                │
     │ key_no_date_tronc         │ —                         │ LEFT(NOM_PRENOM, 20)    │ MATCH_TRONC_WINDOW (troncature + fenêtre)            │
     │ key_no_garantie           │ jour (exact)              │ NOM_PRENOM complet      │ MATCH_IP — passage IT→IP (offset garantie)           │

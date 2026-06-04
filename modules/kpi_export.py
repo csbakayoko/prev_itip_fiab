@@ -13,7 +13,7 @@ Décodage des grandeurs (depuis df_result + TYPE_RECONCILIATION) :
 
     MRM      = MATCHÉS + à supprimer + non mappés (total dossiers MRM en entrée)
     MATCHÉS  = clé principale (EXACT + WINDOW) + clé affinée (TRONC + TRONC_WINDOW)
-               + récupération (IP / rechute / date_retard)
+               + récupération (IP / rechute / rechute tronquée)
     COMPTE   = MATCHÉS + récupérés tardifs (CPT_LATE) + CPT_ONLY définitifs
 
     PM : côté MRM (MRM_PM) pour les ventilations MRM, côté CPT (CPT_PM) pour les CPT.
@@ -29,7 +29,6 @@ from config import (
     MATCH_PRINCIPALE,
     MATCH_AFFINEE,
     MATCH_RECUPERATION,
-    MATCH_ANOMALIE,
 )
 from modules.matching import categorize_mrm_conclusion
 from modules._timing import timed_fn
@@ -57,11 +56,12 @@ def compute_synthese(df_result: DataFrame) -> dict:
     df = df_result.withColumn(
         "MRM_ACTION", categorize_mrm_conclusion(F.col("MRM_CONCLUSION"))
     )
-    if "ECART_JOURS_SURVENANCE" not in df.columns:  # absent si aucun DATE_RETARD
-        df = df.withColumn("ECART_JOURS_SURVENANCE", F.lit(None).cast("int"))
+    # LATE_SOURCE absent si aucune récupération tardive n'a tourné → colonne neutre.
+    if "LATE_SOURCE" not in df.columns:
+        df = df.withColumn("LATE_SOURCE", F.lit(None).cast("string"))
 
     rows = (
-        df.groupBy("TYPE_RECONCILIATION", "MRM_ACTION")
+        df.groupBy("TYPE_RECONCILIATION", "MRM_ACTION", "LATE_SOURCE")
         .agg(
             F.count("*").alias("nb"),
             F.coalesce(F.sum("MRM_PM"), F.lit(0.0)).alias("pm_mrm"),
@@ -69,11 +69,6 @@ def compute_synthese(df_result: DataFrame) -> dict:
             # Volumétrie des dossiers dont la PM est non nulle (non-null ET ≠ 0)
             F.sum(F.when(F.col("MRM_PM").isNotNull() & (F.col("MRM_PM") != 0), 1).otherwise(0)).alias("nb_pm_mrm_nz"),
             F.sum(F.when(F.col("CPT_PM").isNotNull() & (F.col("CPT_PM") != 0), 1).otherwise(0)).alias("nb_pm_cpt_nz"),
-            # Écart de jours entre survenances (renseigné pour les anomalies)
-            F.sum(F.coalesce(F.col("ECART_JOURS_SURVENANCE"), F.lit(0))).alias("ecart_j_sum"),
-            F.min("ECART_JOURS_SURVENANCE").alias("ecart_j_min"),
-            F.max("ECART_JOURS_SURVENANCE").alias("ecart_j_max"),
-            F.sum(F.when(F.col("ECART_JOURS_SURVENANCE").isNotNull(), 1).otherwise(0)).alias("ecart_n"),
         )
         .collect()
     )
@@ -81,10 +76,10 @@ def compute_synthese(df_result: DataFrame) -> dict:
     princ    = set(MATCH_PRINCIPALE)
     aff      = set(MATCH_AFFINEE)
     recup    = set(MATCH_RECUPERATION)
-    match    = set(MATCH_LABELS)       # matchs LÉGITIMES (anomalies exclues)
-    anomalie = set(MATCH_ANOMALIE)     # MATCH_DATE_RETARD
+    match    = set(MATCH_LABELS)       # matchs LÉGITIMES de l'inventaire courant
     T = lambda r: r["TYPE_RECONCILIATION"]
     A = lambda r: r["MRM_ACTION"]
+    S = lambda r: r["LATE_SOURCE"]
 
     def agg(field, pred):
         return sum(r[field] for r in rows if pred(r))
@@ -98,39 +93,40 @@ def compute_synthese(df_result: DataFrame) -> dict:
     nb_princ, pm_princ      = mrm(lambda r: T(r) in princ)
     nb_aff,   pm_aff_mrm    = mrm(lambda r: T(r) in aff)
     nb_recup, pm_recup_mrm  = mrm(lambda r: T(r) in recup)
-    nb_anom,  pm_anom_mrm   = mrm(lambda r: T(r) in anomalie)
-    _,        pm_anom_cpt   = cpt(lambda r: T(r) in anomalie)
     nb_del,   pm_del        = mrm(lambda r: T(r) == "MRM_DELETE")
     nb_miss,  pm_miss       = mrm(lambda r: T(r) == "MRM_MISSING")
     nb_def,   pm_def        = cpt(lambda r: T(r) == "CPT_ONLY")
     nb_late,  pm_late_cpt   = cpt(lambda r: T(r) == "CPT_LATE")
     pm_late_mrm             = agg("pm_mrm", lambda r: T(r) == "CPT_LATE")
 
-    # Matchés légitimes de l'inventaire (anomalies exclues).
+    # Ventilation des CPT_LATE par origine : retrouvés dans un inventaire ultérieur
+    # (LATE_SOURCE commençant par "MRM_") vs observations tardives IT heuristiques
+    # (LATE_SOURCE == "OBS_TARDIVE_IT", sans contrepartie MRM).
+    is_late      = lambda r: T(r) == "CPT_LATE"
+    is_late_n1   = lambda r: is_late(r) and (S(r) or "").startswith("MRM_")
+    is_late_obs  = lambda r: is_late(r) and not (S(r) or "").startswith("MRM_")
+    nb_late_n1   = agg("nb",     is_late_n1)
+    nb_late_obs  = agg("nb",     is_late_obs)
+    pm_late_obs  = agg("pm_cpt", is_late_obs)
+
+    # Matchés légitimes de l'inventaire courant.
     nb_match     = nb_princ + nb_aff + nb_recup
     pm_match_mrm = agg("pm_mrm", lambda r: T(r) in match)
     pm_match_cpt = agg("pm_cpt", lambda r: T(r) in match)
 
-    # Univers MÉTRIQUES PM = matchés légitimes + déclarations tardives (CPT_LATE).
-    # Les anomalies (DATE_RETARD) en sont EXCLUES (faux positifs possibles).
-    in_metrics    = lambda r: T(r) in match or T(r) == "CPT_LATE"
+    # Univers MÉTRIQUES PM = matchés légitimes + déclarations tardives (CPT_LATE,
+    # toutes origines : retrouvées en N+1 ou observations tardives IT).
+    in_metrics     = lambda r: T(r) in match or T(r) == "CPT_LATE"
     pm_metrics_mrm = pm_match_mrm + pm_late_mrm
     pm_metrics_cpt = pm_match_cpt + pm_late_cpt
     nb_metrics     = nb_match + nb_late
 
-    # Totaux exhaustifs (incluent les anomalies, qui sont de vrais dossiers).
-    mrm_pm_total = pm_match_mrm + pm_anom_mrm + pm_del + pm_miss
-    cpt_pm_total = pm_match_cpt + pm_anom_cpt + pm_def + pm_late_cpt
-
-    # ── Anomalies DATE_RETARD : écart de jours entre survenances ──────────────
-    anom_rows  = [r for r in rows if T(r) in anomalie]
-    ecart_n    = sum(r["ecart_n"] for r in anom_rows)
-    ecart_sum  = sum(r["ecart_j_sum"] for r in anom_rows)
-    _mins      = [r["ecart_j_min"] for r in anom_rows if r["ecart_j_min"] is not None]
-    _maxs      = [r["ecart_j_max"] for r in anom_rows if r["ecart_j_max"] is not None]
-    ecart_moy  = round(ecart_sum / ecart_n, 1) if ecart_n else 0.0
-    ecart_min  = min(_mins) if _mins else 0
-    ecart_max  = max(_maxs) if _maxs else 0
+    # Totaux exhaustifs des deux univers d'entrée.
+    #   MRM en entrée   = matchés + à supprimer + non mappés (CPT_LATE exclu : il
+    #                     provient d'un autre inventaire ou n'a pas de contrepartie MRM).
+    #   COMPTE en entrée = matchés + récupérés tardifs + CPT_ONLY définitifs.
+    mrm_pm_total = pm_match_mrm + pm_del + pm_miss
+    cpt_pm_total = pm_match_cpt + pm_def + pm_late_cpt
 
     # ── Sous-ventilation de "Non mappés" : MISSING ∩ consigne ────────────────
     def miss(action):
@@ -140,7 +136,7 @@ def compute_synthese(df_result: DataFrame) -> dict:
     add_miss_nb,   add_miss_pm   = miss("MRM_ADD")
 
     # ── Suivi des consignes (univers MRM principal : matchés légitimes + MISSING) ─
-    # EXCLUT anomalies (DATE_RETARD) et tardifs (CPT_LATE, consigne issue du N+1).
+    # EXCLUT les tardifs (CPT_LATE : consigne issue d'un autre inventaire ou absente).
     # nb / conformité : tous les dossiers principaux de la consigne.
     # PM (MRM, Compte, Δ), taux de chute, volumétrie PM nulle/non-nulle : dossiers
     # MATCHÉS seulement. Pour "à supprimer", l'analyse PM n'est pas pertinente.
@@ -184,11 +180,21 @@ def compute_synthese(df_result: DataFrame) -> dict:
     pm_mrm_kas = agg("pm_mrm", in_kas_metrics)
     pm_cpt_kas = agg("pm_cpt", in_kas_metrics)
 
-    nb_trouves = nb_match + nb_late   # CPT rattachés à un MRM (courant ou N+1)
+    nb_trouves = nb_match + nb_late   # matchés inventaire + récupérés tardifs
+
+    # ── Invariant de cohérence ────────────────────────────────────────────────
+    # Toute ligne de df_result doit tomber dans exactement une catégorie connue.
+    # Les lignes matchées sont physiquement uniques (CPT joint à MRM) → on les
+    # compte une fois. classified < total_rows ⇒ un TYPE_RECONCILIATION inattendu
+    # (label orphelin, étape oubliée) n'est pas pris en compte par la synthèse.
+    total_rows      = sum(r["nb"] for r in rows)
+    classified_rows = nb_match + nb_del + nb_miss + nb_def + nb_late
+    labels_connus   = match | {"MRM_DELETE", "MRM_MISSING", "CPT_ONLY", "CPT_LATE"}
+    labels_inconnus = sorted({T(r) for r in rows if T(r) not in labels_connus})
 
     return {
         # ── Bulle MRM ──
-        "mrm_nb"          : nb_match + nb_anom + nb_del + nb_miss,
+        "mrm_nb"          : nb_match + nb_del + nb_miss,
         "mrm_pm"          : mrm_pm_total,
         "a_supprimer_nb"  : nb_del,             "a_supprimer_pm"  : pm_del,
         "a_comparer_nb"   : nb_match + nb_miss, "a_comparer_pm"   : pm_match_mrm + pm_miss,
@@ -204,19 +210,14 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "match_pm_mrm"    : pm_match_mrm,
         "match_pm_cpt"    : pm_match_cpt,
         "match_pm_ecart"  : pm_match_mrm - pm_match_cpt,
-        # ── Anomalies (DATE_RETARD, exclues des métriques) ──
-        "anomalie_nb"     : nb_anom,
-        "anomalie_pm_mrm" : pm_anom_mrm,
-        "anomalie_pm_cpt" : pm_anom_cpt,
-        "ecart_jours_moy" : ecart_moy,
-        "ecart_jours_min" : ecart_min,
-        "ecart_jours_max" : ecart_max,
         # ── Bulle COMPTE ──
-        "cpt_nb"          : nb_match + nb_anom + nb_def + nb_late,
+        "cpt_nb"          : nb_match + nb_def + nb_late,
         "cpt_pm"          : cpt_pm_total,
         "trouves_nb"      : nb_trouves,
         "late_nb" : nb_late, "late_pm" : pm_late_cpt,
         "late_pm_mrm" : pm_late_mrm, "late_pm_cpt" : pm_late_cpt,
+        "late_n1_nb"  : nb_late_n1,
+        "late_obs_nb" : nb_late_obs, "late_obs_pm" : pm_late_obs,
         "def_nb"  : nb_def,  "def_pm"  : pm_def,
         # ── Indicateurs (taux) ──
         "taux_couverture_mrm" : _pct(nb_match, nb_match + nb_miss),
@@ -224,7 +225,7 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "taux_recup_globale"  : _pct(nb_trouves, nb_match + nb_late + nb_def),
         "taux_chute_global"   : _pct(pm_mrm_kas - pm_cpt_kas, pm_mrm_kas),
         "conformite_globale"  : _pct(conf_kas, total_kas),
-        # ── Niveaux de PM (matchés légitimes + tardifs, anomalies exclues) ──
+        # ── Niveaux de PM (matchés légitimes + tardifs) ──
         "metrics_pm_mrm"   : pm_metrics_mrm,
         "metrics_pm_cpt"   : pm_metrics_cpt,
         "metrics_pm_ecart" : pm_metrics_mrm - pm_metrics_cpt,
@@ -237,6 +238,11 @@ def compute_synthese(df_result: DataFrame) -> dict:
             "À ajouter"   : add,
             "À supprimer" : delete,
         },
+        # ── Invariant de cohérence ──
+        "total_rows"      : total_rows,
+        "classified_rows" : classified_rows,
+        "coherent"        : total_rows == classified_rows,
+        "labels_inconnus" : labels_inconnus,
         # ── Entête ──
         "date_inventaire" : _resolve_date_inventaire(df_result),
     }
@@ -270,8 +276,12 @@ def _n(x) -> str:
 
 
 def _row(label: str, nb, pm) -> str:
-    """Ligne latérale : 'libellé : nb  PM €' (nb et PM alignés à droite)."""
-    return f"{label:<{_LBL}}: {_n(nb):>6}  {_n(pm):>11} €"
+    """Ligne latérale : 'libellé : nb  PM €' (nb et PM alignés à droite).
+
+    pm=None → colonne PM laissée vide (sous-total sans contrepartie PM pertinente).
+    """
+    pm_txt = " " * 13 if pm is None else f"{_n(pm):>11} €"
+    return f"{label:<{_LBL}}: {_n(nb):>6}  {pm_txt}"
 
 
 def _bubble(*lines: str) -> list:
@@ -309,7 +319,6 @@ def _render_box(d: dict, client: str) -> str:
         _row("Mappés clé principale", d["principale_nb"],  d["principale_pm"]),
         _row("Mappés clé affinée",    d["affinee_nb"],     d["affinee_pm_mrm"]),
         _row("Mappés récupération",   d["recup_nb"],       d["recup_pm_mrm"]),
-        _row("Anomalies (date retard)", d["anomalie_nb"],  d["anomalie_pm_mrm"]),
         _row("Non mappés (MISSING)",  d["non_mappes_nb"],  d["non_mappes_pm"]),
         _row("├ à conserver",         d["keep_nb"],        d["keep_pm"]),
         _row("├ à étudier",           d["study_nb"],       d["study_pm"]),
@@ -317,8 +326,9 @@ def _render_box(d: dict, client: str) -> str:
         "",
         _row("Total CPT (compte)",          d["cpt_nb"],     d["cpt_pm"]),
         _row("├ matchés inventaire",        d["match_nb"],   d["match_pm_cpt"]),
-        _row("├ récupérés tardifs (N+1)",   d["late_nb"],    d["late_pm"]),
-        _row("├ anomalies (date retard)",   d["anomalie_nb"], d["anomalie_pm_cpt"]),
+        _row("├ récupérés tardifs",         d["late_nb"],    d["late_pm"]),
+        _row("│  ├ retrouvés N+1",          d["late_n1_nb"], None),
+        _row("│  └ observ. tardive IT",     d["late_obs_nb"], d["late_obs_pm"]),
         _row("└ CPT_ONLY définitifs",       d["def_nb"],     d["def_pm"]),
         "",
     ]
@@ -340,6 +350,12 @@ def _render_box(d: dict, client: str) -> str:
 
 def _render_indicateurs(d: dict) -> str:
     """Bloc des taux globaux + niveaux de PM (univers : matchés légitimes + tardifs)."""
+    coh = "✔ cohérent" if d["coherent"] else "✘ INCOHÉRENT"
+    detail_coh = (
+        f"{_n(d['classified_rows'])} / {_n(d['total_rows'])} lignes classées"
+        + ("" if d["coherent"]
+           else f" — labels non pris en compte : {', '.join(d['labels_inconnus']) or 'n/d'}")
+    )
     lines = [
         "INDICATEURS",
         f"  Taux de couverture MRM (matchés / à comparer) : {d['taux_couverture_mrm']:>5} %",
@@ -348,18 +364,18 @@ def _render_indicateurs(d: dict) -> str:
         f"  Taux de chute global (KEEP/ADD/STUDY)         : {d['taux_chute_global']:>5} %",
         f"  Conformité globale des consignes              : {d['conformite_globale']:>5} %",
         "",
-        f"NIVEAUX DE PM (matchés + tardifs, {_n(d['metrics_nb'])} dossiers — anomalies exclues)",
+        f"NIVEAUX DE PM (matchés + tardifs, {_n(d['metrics_nb'])} dossiers)",
         f"  PM MRM   : {_n(d['metrics_pm_mrm']):>15} €",
         f"  PM CPT   : {_n(d['metrics_pm_cpt']):>15} €",
         f"  Écart    : {_n(d['metrics_pm_ecart']):>15} €  ({d['metrics_pm_pct']} %)",
         "",
-        f"DÉCLARATIONS TARDIVES (N+1, {_n(d['late_nb'])} dossiers, incluses dans les métriques)",
-        f"  PM MRM {_n(d['late_pm_mrm'])} €  |  PM CPT {_n(d['late_pm_cpt'])} €",
+        f"DÉCLARATIONS TARDIVES ({_n(d['late_nb'])} dossiers, incluses dans les métriques)",
+        f"  ├ retrouvées N+1        : {_n(d['late_n1_nb'])} dossiers  "
+        f"(PM MRM {_n(d['late_pm_mrm'])} € | PM CPT {_n(d['late_pm_cpt'])} €)",
+        f"  └ observations tardives IT (garantie 60, fin d'année) : "
+        f"{_n(d['late_obs_nb'])} dossiers  (PM CPT {_n(d['late_obs_pm'])} €)",
         "",
-        f"ANOMALIES — MATCH_DATE_RETARD ({_n(d['anomalie_nb'])} dossiers, exclus des métriques)",
-        f"  Écart survenance CPT vs MRM : moy {d['ecart_jours_moy']} j  "
-        f"(min {d['ecart_jours_min']} j, max {d['ecart_jours_max']} j)",
-        f"  PM MRM {_n(d['anomalie_pm_mrm'])} €  |  PM CPT {_n(d['anomalie_pm_cpt'])} €",
+        f"CONTRÔLE DE COHÉRENCE : {coh} — {detail_coh}",
     ]
     return "\n".join(lines)
 
