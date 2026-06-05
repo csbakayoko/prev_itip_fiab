@@ -12,21 +12,19 @@ import logging
 
 from pyspark.sql import DataFrame, SparkSession
 
-from config import db_cfg, tech_cfg, RUN_PARAMS
+from config import (
+    db_cfg, tech_cfg, RUN_PARAMS,
+    EXPORT_ANALYSES, EXPORT_FORMATS, EXPORT_DELTA_SCHEMA,
+)
 from modules.load_data import load_cpt_raw, load_mrm_raw
 from modules.transform import clean_cpt, clean_mrm
 from modules.matching import matching_waterfall, recover_late_declarations
 from modules.analysis import (
-    ventilate_cpt_only,
     flag_late_it_observations,
     enrich_result_tags,
-    study_provisionnement,
     diagnose_mrm_fanout,
-    analyze_taux_chute,
-    analyze_suivi_consignes_global,
-    analyze_consignes_pm,
-    analyze_delete_non_suivies,
-    analyze_obs_tardives,
+    restituer_analyses,
+    export_analyses,
 )
 from modules.kpi_export import print_synthese
 from modules._timing import timed
@@ -75,36 +73,13 @@ def run(spark: SparkSession) -> DataFrame:
         with timed("ÉTAPE 1 diagnostic fan-out"):
             diagnose_mrm_fanout(df_result, mrm_clean).show(30, truncate=False)
 
-        # ÉTAPE 2 — taux de chute par consigne (matchés + récupérés N+1).
-        with timed("ÉTAPE 2 taux de chute"):
-            print("\n[TAUX DE CHUTE] par consigne (matchés + récupérés N+1) :")
-            analyze_taux_chute(df_result).show(truncate=False)
+        # ÉTAPE 2 — restitution console de toutes les analyses (clause taguée) :
+        # suivi consignes, taux de chute, consignes×PM, à supprimer non suivies,
+        # provisionnement, ventilation CPT_ONLY, obs tardives (clos avant N+1).
+        with timed("ÉTAPE 2 restitution analyses"):
+            restituer_analyses(df_result)
 
-        # ÉTAPE 3 — suivi global des consignes + PM (une ligne par consigne).
-        with timed("ÉTAPE 3 suivi consignes global"):
-            print("\n[SUIVI CONSIGNES] conformité + PM par consigne :")
-            analyze_suivi_consignes_global(df_result).show(truncate=False)
-
-        # ÉTAPE 3 bis — consignes × niveaux de PM (détail par tranche).
-        with timed("ÉTAPE 3bis consignes × PM"):
-            print("\n[CONSIGNES × PM] ventilation par catégorie × tranche PM :")
-            analyze_consignes_pm(df_result).show(100, truncate=False)
-
-        # ÉTAPE 4 — consignes "à supprimer" non suivies (PM non supprimée).
-        with timed("ÉTAPE 4 à supprimer non suivies"):
-            print("\n[À SUPPRIMER NON SUIVIES] MRM_DELETE pourtant matché :")
-            analyze_delete_non_suivies(df_result).show(truncate=False)
-
-        # ÉTAPE 5 — sinistres clos avant inventaire N+1 (hors métriques, explicable).
-        with timed("ÉTAPE 5 clos avant inventaire N+1"):
-            print("\n[CLOS AVANT INV. N+1] obs tardives IT — volumétrie + PM compte :")
-            analyze_obs_tardives(df_result).show(50, truncate=False)
-
-        # ÉTAPE 6 — orphelins CPT_ONLY + étude du provisionnement (existant).
-        with timed("ÉTAPE 6 orphelins & provisionnement"):
-            print("\n[CPT_ONLY] ventilation par survenance × garantie (PM décroissant) :")
-            ventilate_cpt_only(df_result).show(50, truncate=False)
-
+            # Répartition CPT_ONLY par tag (segmentation actionnable des anomalies).
             print("\n[CPT_ONLY] répartition par tag :")
             (df_result.filter(F.col("TYPE_RECONCILIATION") == "CPT_ONLY")
                       .groupBy("TAG_CPT_ONLY")
@@ -113,8 +88,14 @@ def run(spark: SparkSession) -> DataFrame:
                       .orderBy(F.desc("PM_CPT_TOTAL"))
                       .show(truncate=False))
 
-            print("\n[PROVISIONNEMENT] sur/sous/conforme (matchés hors à supprimer) :")
-            study_provisionnement(df_result).show(truncate=False)
+        # ÉTAPE 3 — export multi-format sur DBFS (piloté par profile.py).
+        if EXPORT_ANALYSES:
+            with timed("ÉTAPE 3 export analyses"):
+                export_analyses(
+                    df_result,
+                    formats      = EXPORT_FORMATS,
+                    delta_schema = EXPORT_DELTA_SCHEMA,
+                )
     return df_result
 
 

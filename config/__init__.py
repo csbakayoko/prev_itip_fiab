@@ -24,6 +24,9 @@ from .profile import (
     FICHIER_MRM,
     FICHIER_MRM_N1,
     DEV_MODE,
+    EXPORT_ANALYSES,
+    EXPORT_FORMATS,
+    EXPORT_DELTA_SCHEMA,
 )
 from .mappings import (
     MAPPING_CPT,
