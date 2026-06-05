@@ -4,8 +4,39 @@ from pyspark.sql import DataFrame, Window
 import pyspark.sql.functions as F
 from typing import Dict, List, Optional, Tuple
 
-from config import MATCH_LABELS, DATE_INVENTAIRE
+from config import MATCH_LABELS, DATE_INVENTAIRE, CLIENT_TYPE_CLAUSES
 from modules.matching import categorize_mrm_conclusion
+
+
+def derive_clause_column(df: DataFrame) -> DataFrame:
+    """
+    Ajoute les colonnes CLAUSE et TYPE_CLAUSE attendues par les analyses
+    multi-clause (analyze_suivi_consignes, calculate_taux_chute, …).
+
+    Après le waterfall, la clause est portée par CPT_CLAUSE (ex. "CPB_121981",
+    préfixe = type) et/ou MRM_CLAUSE (ex. "121981") ; il n'existe pas de colonne
+    "CLAUSE" nue → d'où l'erreur UNRESOLVED_COLUMN quand on appelle run_full_analysis
+    directement. On la dérive ici :
+
+        CLAUSE      = MRM_CLAUSE sinon CPT_CLAUSE sans son préfixe ("CPB_…").
+        TYPE_CLAUSE = MRM_TYPE_CLAUSE sinon type client (mono-client).
+
+    À appeler une fois sur df_result avant les analyses multi-clause.
+    """
+    clause_parts = []
+    if "MRM_CLAUSE" in df.columns:
+        clause_parts.append(F.col("MRM_CLAUSE"))
+    if "CPT_CLAUSE" in df.columns:
+        clause_parts.append(F.regexp_replace(F.col("CPT_CLAUSE"), r"^[A-Za-z]+_", ""))
+    clause = F.coalesce(*clause_parts) if clause_parts else F.lit(None).cast("string")
+
+    type_parts = []
+    if "MRM_TYPE_CLAUSE" in df.columns:
+        type_parts.append(F.col("MRM_TYPE_CLAUSE"))
+    type_parts.append(F.lit(CLIENT_TYPE_CLAUSES[0] if CLIENT_TYPE_CLAUSES else None).cast("string"))
+    type_clause = F.coalesce(*type_parts)
+
+    return df.withColumn("CLAUSE", clause).withColumn("TYPE_CLAUSE", type_clause)
 
 
 def _with_mrm_action(df: DataFrame, conclusion_col: str) -> DataFrame:

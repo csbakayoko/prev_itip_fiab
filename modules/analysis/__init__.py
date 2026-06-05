@@ -47,7 +47,7 @@ from modules.analysis.enrich import (
     enrich_result_tags,
 )
 from modules.analysis.diagnostics import diagnose_mrm_fanout
-from modules.analysis.helpers import DEFAULT_PM_TRANCHES
+from modules.analysis.helpers import DEFAULT_PM_TRANCHES, derive_clause_column
 from modules.analysis.export import (
     tag_clause,
     collect_analyses,
@@ -81,9 +81,11 @@ def run_full_analysis(
         analyse_cpt_only     — CPT_ONLY agrégés par mois + tranche PM
         analyse_mrm_missing  — MRM_MISSING agrégés par mois + tranche PM + consigne
 
-    Note : ces fonctions attendent les colonnes CLAUSE / TYPE_CLAUSE (multi-clause).
+    Les colonnes CLAUSE / TYPE_CLAUSE (absentes du df_result brut : la clause est
+    portée par CPT_CLAUSE / MRM_CLAUSE) sont dérivées ici via derive_clause_column.
     Pour la restitution/export mono-client, voir export.collect_analyses.
     """
+    df_result = derive_clause_column(df_result)
     synthese_consignes, _ = analyze_suivi_consignes(df_result, conclusion_col, clause_col)
 
     return {
