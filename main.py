@@ -21,6 +21,12 @@ from modules.analysis import (
     flag_late_it_observations,
     enrich_result_tags,
     study_provisionnement,
+    diagnose_mrm_fanout,
+    analyze_taux_chute,
+    analyze_suivi_consignes_global,
+    analyze_consignes_pm,
+    analyze_delete_non_suivies,
+    analyze_obs_tardives,
 )
 from modules.kpi_export import print_synthese
 from modules._timing import timed
@@ -42,7 +48,8 @@ def run(spark: SparkSession) -> DataFrame:
             df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1)])
 
         # Observations tardives IT : CPT_ONLY garantie 60 survenus en fin d'année,
-        # absents du MRM courant et du N+1 → calés en CPT_LATE (LATE_SOURCE=OBS_TARDIVE_IT).
+        # absents du MRM courant et du N+1 → tagués CPT_OBS_TARDIVE (anomalie,
+        # LATE_SOURCE=OBS_TARDIVE_IT). Jamais matchés → exclus des taux et des PM.
         df_result = flag_late_it_observations(df_result)
 
         # Colonnes persistantes : consigne reformatée (MRM_ACTION) + tag des
@@ -53,11 +60,48 @@ def run(spark: SparkSession) -> DataFrame:
             df_result = df_result.persist()
             df_result.count()  # force la matérialisation pour un timing fiable
 
-        print_synthese(df_result)
+        # ====================================================================
+        # ANALYSES PAS-À-PAS (étapes appelées après le matching).
+        # Sorties séparées, à vérifier une à une avant agrégation ultérieure
+        # dans un pipeline global. Univers PM/chute = matchés + récupérés N+1 ;
+        # obs tardives IT, MRM_MISSING et CPT_ONLY exclus des comparaisons.
+        # ====================================================================
 
-        # Ventilation des CPT_ONLY définitifs par survenance × garantie,
-        # PM décroissant — où se concentre la PM non réconciliée.
-        with timed("ventilation CPT_ONLY"):
+        # ÉTAPE 0 — vue d'ensemble + taux distincts (matching vs récupération).
+        with timed("ÉTAPE 0 synthèse"):
+            print_synthese(df_result)
+
+        # ÉTAPE 1 — diagnostic du fan-out (écart MRM clean ↔ synthèse mrm_nb).
+        with timed("ÉTAPE 1 diagnostic fan-out"):
+            diagnose_mrm_fanout(df_result, mrm_clean).show(30, truncate=False)
+
+        # ÉTAPE 2 — taux de chute par consigne (matchés + récupérés N+1).
+        with timed("ÉTAPE 2 taux de chute"):
+            print("\n[TAUX DE CHUTE] par consigne (matchés + récupérés N+1) :")
+            analyze_taux_chute(df_result).show(truncate=False)
+
+        # ÉTAPE 3 — suivi global des consignes + PM (une ligne par consigne).
+        with timed("ÉTAPE 3 suivi consignes global"):
+            print("\n[SUIVI CONSIGNES] conformité + PM par consigne :")
+            analyze_suivi_consignes_global(df_result).show(truncate=False)
+
+        # ÉTAPE 3 bis — consignes × niveaux de PM (détail par tranche).
+        with timed("ÉTAPE 3bis consignes × PM"):
+            print("\n[CONSIGNES × PM] ventilation par catégorie × tranche PM :")
+            analyze_consignes_pm(df_result).show(100, truncate=False)
+
+        # ÉTAPE 4 — consignes "à supprimer" non suivies (PM non supprimée).
+        with timed("ÉTAPE 4 à supprimer non suivies"):
+            print("\n[À SUPPRIMER NON SUIVIES] MRM_DELETE pourtant matché :")
+            analyze_delete_non_suivies(df_result).show(truncate=False)
+
+        # ÉTAPE 5 — sinistres clos avant inventaire N+1 (hors métriques, explicable).
+        with timed("ÉTAPE 5 clos avant inventaire N+1"):
+            print("\n[CLOS AVANT INV. N+1] obs tardives IT — volumétrie + PM compte :")
+            analyze_obs_tardives(df_result).show(50, truncate=False)
+
+        # ÉTAPE 6 — orphelins CPT_ONLY + étude du provisionnement (existant).
+        with timed("ÉTAPE 6 orphelins & provisionnement"):
             print("\n[CPT_ONLY] ventilation par survenance × garantie (PM décroissant) :")
             ventilate_cpt_only(df_result).show(50, truncate=False)
 
@@ -69,8 +113,6 @@ def run(spark: SparkSession) -> DataFrame:
                       .orderBy(F.desc("PM_CPT_TOTAL"))
                       .show(truncate=False))
 
-        # Étude du provisionnement (matchés hors à supprimer) : sur/sous/conforme.
-        with timed("étude provisionnement"):
             print("\n[PROVISIONNEMENT] sur/sous/conforme (matchés hors à supprimer) :")
             study_provisionnement(df_result).show(truncate=False)
     return df_result

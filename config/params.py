@@ -47,6 +47,16 @@ RELAPSE_WINDOW_DAYS  = 30    # fenêtre max (jours) pour rattacher une rechute I
 # couverture a vraisemblablement pris fin avant l'inventaire de l'exercice suivant.
 LATE_IT_GARANTIE      = 60
 
+# Label des observations tardives IT. Ces dossiers (garantie 60, survenance fin
+# d'année) n'apparaissent ni dans le MRM courant ni dans le N+1 : le sinistre a
+# vraisemblablement eu lieu ET s'est CLOS avant la date d'inventaire du MRM suivant
+# — il est donc LOGIQUE de ne pas les retrouver. Ce ne sont PAS des anomalies (≠
+# CPT_ONLY définitifs) : on les tague à part, on les EXCLUT des calculs PM / taux
+# de chute et des taux de couverture/récupération, mais on présente leur PM compte
+# et leur volumétrie. Un label distinct de CPT_LATE garantit l'exclusion par
+# construction (tout code basé sur MATCH_LABELS / CPT_LATE les ignore).
+OBS_TARDIVE_LABEL     = "CPT_OBS_TARDIVE"
+
 # Segmentation des orphelins CPT_ONLY définitifs (tag TAG_CPT_ONLY) :
 #   - fin d'année d'inventaire (mois ∈ ORPHAN_FIN_ANNEE_MOIS) → tardif probable
 #   - PM > ORPHAN_PM_THRESHOLD                                → orphelin montant élevé

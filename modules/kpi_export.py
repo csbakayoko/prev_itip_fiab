@@ -14,7 +14,11 @@ Décodage des grandeurs (depuis df_result + TYPE_RECONCILIATION) :
     MRM      = MATCHÉS + à supprimer + non mappés (total dossiers MRM en entrée)
     MATCHÉS  = clé principale (EXACT + WINDOW) + clé affinée (TRONC + TRONC_WINDOW)
                + récupération (IP / rechute / rechute tronquée)
-    COMPTE   = MATCHÉS + récupérés tardifs (CPT_LATE) + CPT_ONLY définitifs
+    COMPTE   = MATCHÉS + récupérés N+1 (CPT_LATE) + obs tardives IT (anomalie,
+               CPT_OBS_TARDIVE) + CPT_ONLY définitifs
+
+    Univers MÉTRIQUES (taux de chute, niveaux de PM) = MATCHÉS + récupérés N+1.
+    Les obs tardives IT n'ont jamais matché → EXCLUES des métriques et des taux.
 
     PM : côté MRM (MRM_PM) pour les ventilations MRM, côté CPT (CPT_PM) pour les CPT.
 """
@@ -29,6 +33,7 @@ from config import (
     MATCH_PRINCIPALE,
     MATCH_AFFINEE,
     MATCH_RECUPERATION,
+    OBS_TARDIVE_LABEL,
 )
 from modules.matching import categorize_mrm_conclusion
 from modules._timing import timed_fn
@@ -96,26 +101,23 @@ def compute_synthese(df_result: DataFrame) -> dict:
     nb_del,   pm_del        = mrm(lambda r: T(r) == "MRM_DELETE")
     nb_miss,  pm_miss       = mrm(lambda r: T(r) == "MRM_MISSING")
     nb_def,   pm_def        = cpt(lambda r: T(r) == "CPT_ONLY")
+    # CPT_LATE = uniquement les dossiers RÉELLEMENT retrouvés dans un inventaire
+    # ultérieur (N+1). Les observations tardives IT portent désormais un label
+    # distinct (OBS_TARDIVE_LABEL) → sorties des CPT_LATE et de l'univers métriques.
     nb_late,  pm_late_cpt   = cpt(lambda r: T(r) == "CPT_LATE")
     pm_late_mrm             = agg("pm_mrm", lambda r: T(r) == "CPT_LATE")
 
-    # Ventilation des CPT_LATE par origine : retrouvés dans un inventaire ultérieur
-    # (LATE_SOURCE commençant par "MRM_") vs observations tardives IT heuristiques
-    # (LATE_SOURCE == "OBS_TARDIVE_IT", sans contrepartie MRM).
-    is_late      = lambda r: T(r) == "CPT_LATE"
-    is_late_n1   = lambda r: is_late(r) and (S(r) or "").startswith("MRM_")
-    is_late_obs  = lambda r: is_late(r) and not (S(r) or "").startswith("MRM_")
-    nb_late_n1   = agg("nb",     is_late_n1)
-    nb_late_obs  = agg("nb",     is_late_obs)
-    pm_late_obs  = agg("pm_cpt", is_late_obs)
+    # Observations tardives IT : ANOMALIES (jamais matchées, sans contrepartie MRM).
+    # Présentées à part, exclues des taux et des calculs PM/chute.
+    nb_obs,   pm_obs_cpt    = cpt(lambda r: T(r) == OBS_TARDIVE_LABEL)
 
     # Matchés légitimes de l'inventaire courant.
     nb_match     = nb_princ + nb_aff + nb_recup
     pm_match_mrm = agg("pm_mrm", lambda r: T(r) in match)
     pm_match_cpt = agg("pm_cpt", lambda r: T(r) in match)
 
-    # Univers MÉTRIQUES PM = matchés légitimes + déclarations tardives (CPT_LATE,
-    # toutes origines : retrouvées en N+1 ou observations tardives IT).
+    # Univers MÉTRIQUES PM = matchés légitimes + récupérés N+1 réels (CPT_LATE).
+    # Les obs tardives IT (CPT_OBS_TARDIVE) sont EXCLUES : jamais matchées.
     in_metrics     = lambda r: T(r) in match or T(r) == "CPT_LATE"
     pm_metrics_mrm = pm_match_mrm + pm_late_mrm
     pm_metrics_cpt = pm_match_cpt + pm_late_cpt
@@ -124,9 +126,9 @@ def compute_synthese(df_result: DataFrame) -> dict:
     # Totaux exhaustifs des deux univers d'entrée.
     #   MRM en entrée   = matchés + à supprimer + non mappés (CPT_LATE exclu : il
     #                     provient d'un autre inventaire ou n'a pas de contrepartie MRM).
-    #   COMPTE en entrée = matchés + récupérés tardifs + CPT_ONLY définitifs.
+    #   COMPTE en entrée = matchés + récupérés N+1 + obs tardives + CPT_ONLY définitifs.
     mrm_pm_total = pm_match_mrm + pm_del + pm_miss
-    cpt_pm_total = pm_match_cpt + pm_def + pm_late_cpt
+    cpt_pm_total = pm_match_cpt + pm_def + pm_late_cpt + pm_obs_cpt
 
     # ── Sous-ventilation de "Non mappés" : MISSING ∩ consigne ────────────────
     def miss(action):
@@ -188,8 +190,8 @@ def compute_synthese(df_result: DataFrame) -> dict:
     # compte une fois. classified < total_rows ⇒ un TYPE_RECONCILIATION inattendu
     # (label orphelin, étape oubliée) n'est pas pris en compte par la synthèse.
     total_rows      = sum(r["nb"] for r in rows)
-    classified_rows = nb_match + nb_del + nb_miss + nb_def + nb_late
-    labels_connus   = match | {"MRM_DELETE", "MRM_MISSING", "CPT_ONLY", "CPT_LATE"}
+    classified_rows = nb_match + nb_del + nb_miss + nb_def + nb_late + nb_obs
+    labels_connus   = match | {"MRM_DELETE", "MRM_MISSING", "CPT_ONLY", "CPT_LATE", OBS_TARDIVE_LABEL}
     labels_inconnus = sorted({T(r) for r in rows if T(r) not in labels_connus})
 
     return {
@@ -211,20 +213,29 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "match_pm_cpt"    : pm_match_cpt,
         "match_pm_ecart"  : pm_match_mrm - pm_match_cpt,
         # ── Bulle COMPTE ──
-        "cpt_nb"          : nb_match + nb_def + nb_late,
+        "cpt_nb"          : nb_match + nb_def + nb_late + nb_obs,
         "cpt_pm"          : cpt_pm_total,
         "trouves_nb"      : nb_trouves,
+        # Récupérés N+1 réels (avec contrepartie MRM, comptés dans les métriques).
         "late_nb" : nb_late, "late_pm" : pm_late_cpt,
         "late_pm_mrm" : pm_late_mrm, "late_pm_cpt" : pm_late_cpt,
-        "late_n1_nb"  : nb_late_n1,
-        "late_obs_nb" : nb_late_obs, "late_obs_pm" : pm_late_obs,
+        # Observations tardives IT = ANOMALIES (hors métriques, hors taux récup).
+        "obs_nb"  : nb_obs,  "obs_pm"  : pm_obs_cpt,
         "def_nb"  : nb_def,  "def_pm"  : pm_def,
         # ── Indicateurs (taux) ──
-        "taux_couverture_mrm" : _pct(nb_match, nb_match + nb_miss),
-        "taux_recup_tardive"  : _pct(nb_late, nb_late + nb_def),
-        "taux_recup_globale"  : _pct(nb_trouves, nb_match + nb_late + nb_def),
-        "taux_chute_global"   : _pct(pm_mrm_kas - pm_cpt_kas, pm_mrm_kas),
-        "conformite_globale"  : _pct(conf_kas, total_kas),
+        # Les obs tardives IT (sinistres clos avant l'inventaire suivant) sont
+        # EXCLUES de tous les dénominateurs : non destinées à matcher. Le résidu
+        # des taux compte = CPT_ONLY définitifs (= anomalies réelles).
+        #   couverture_mrm     : matchés / à comparer MRM            (nb_match + nb_miss)
+        #   couverture_compte  : matchés inventaire / compte réconciliable (match+late+def)
+        #   recup_tardive      : récupérés N+1 / orphelins post-inventaire   (late+def)
+        #   recup_global       : (matchés + récupérés N+1) / compte réconciliable
+        "taux_couverture_mrm"     : _pct(nb_match, nb_match + nb_miss),
+        "taux_couverture_compte"  : _pct(nb_match, nb_match + nb_late + nb_def),
+        "taux_recup_tardive"      : _pct(nb_late, nb_late + nb_def),
+        "taux_recup_global"       : _pct(nb_match + nb_late, nb_match + nb_late + nb_def),
+        "taux_chute_global"       : _pct(pm_mrm_kas - pm_cpt_kas, pm_mrm_kas),
+        "conformite_globale"      : _pct(conf_kas, total_kas),
         # ── Niveaux de PM (matchés légitimes + tardifs) ──
         "metrics_pm_mrm"   : pm_metrics_mrm,
         "metrics_pm_cpt"   : pm_metrics_cpt,
@@ -326,10 +337,9 @@ def _render_box(d: dict, client: str) -> str:
         "",
         _row("Total CPT (compte)",          d["cpt_nb"],     d["cpt_pm"]),
         _row("├ matchés inventaire",        d["match_nb"],   d["match_pm_cpt"]),
-        _row("├ récupérés tardifs",         d["late_nb"],    d["late_pm"]),
-        _row("│  ├ retrouvés N+1",          d["late_n1_nb"], None),
-        _row("│  └ observ. tardive IT",     d["late_obs_nb"], d["late_obs_pm"]),
-        _row("└ CPT_ONLY définitifs",       d["def_nb"],     d["def_pm"]),
+        _row("├ récupérés N+1",             d["late_nb"],    d["late_pm"]),
+        _row("├ clos avant inv. N+1",       d["obs_nb"],     d["obs_pm"]),
+        _row("└ CPT_ONLY (anomalies)",      d["def_nb"],     d["def_pm"]),
         "",
     ]
 
@@ -358,22 +368,32 @@ def _render_indicateurs(d: dict) -> str:
     )
     lines = [
         "INDICATEURS",
-        f"  Taux de couverture MRM (matchés / à comparer) : {d['taux_couverture_mrm']:>5} %",
-        f"  Taux de récupération tardive (N+1)            : {d['taux_recup_tardive']:>5} %",
-        f"  Taux de récupération globale (CPT trouvés)    : {d['taux_recup_globale']:>5} %",
-        f"  Taux de chute global (KEEP/ADD/STUDY)         : {d['taux_chute_global']:>5} %",
-        f"  Conformité globale des consignes              : {d['conformite_globale']:>5} %",
+        "  COUVERTURE",
+        f"    Taux de couverture MRM (matchés / à comparer MRM)      : {d['taux_couverture_mrm']:>5} %",
+        f"    Taux de couverture compte (matchés inventaire / compte): {d['taux_couverture_compte']:>5} %",
+        "  RÉCUPÉRATION (compte, déclarations tardives N+1)",
+        f"    Taux de récupération tardive (récupérés / orphelins)   : {d['taux_recup_tardive']:>5} %",
+        f"    Taux de récupération global (matchés + N+1 / compte)   : {d['taux_recup_global']:>5} %",
+        "  PROVISIONNEMENT",
+        f"    Taux de chute global (KEEP/ADD/STUDY)                  : {d['taux_chute_global']:>5} %",
+        f"    Conformité globale des consignes                       : {d['conformite_globale']:>5} %",
+        "  (dénominateurs compte hors sinistres clos avant inventaire suivant)",
         "",
-        f"NIVEAUX DE PM (matchés + tardifs, {_n(d['metrics_nb'])} dossiers)",
+        f"NIVEAUX DE PM (matchés + récupérés N+1, {_n(d['metrics_nb'])} dossiers)",
         f"  PM MRM   : {_n(d['metrics_pm_mrm']):>15} €",
         f"  PM CPT   : {_n(d['metrics_pm_cpt']):>15} €",
         f"  Écart    : {_n(d['metrics_pm_ecart']):>15} €  ({d['metrics_pm_pct']} %)",
         "",
-        f"DÉCLARATIONS TARDIVES ({_n(d['late_nb'])} dossiers, incluses dans les métriques)",
-        f"  ├ retrouvées N+1        : {_n(d['late_n1_nb'])} dossiers  "
+        f"RÉCUPÉRATION TARDIVE N+1 ({_n(d['late_nb'])} dossiers, INCLUS dans les métriques)",
+        f"  Dossiers CPT orphelins retrouvés dans l'inventaire N+1  "
         f"(PM MRM {_n(d['late_pm_mrm'])} € | PM CPT {_n(d['late_pm_cpt'])} €)",
-        f"  └ observations tardives IT (garantie 60, fin d'année) : "
-        f"{_n(d['late_obs_nb'])} dossiers  (PM CPT {_n(d['late_obs_pm'])} €)",
+        "",
+        f"SINISTRES CLOS AVANT INVENTAIRE SUIVANT ({_n(d['obs_nb'])} dossiers, hors métriques)",
+        f"  Obs. tardives IT (garantie 60, fin d'année) : sinistre clos avant l'inventaire",
+        f"  MRM N+1 → non retrouvé (explicable, pas une anomalie). PM CPT {_n(d['obs_pm'])} €.",
+        "",
+        f"ANOMALIES — CPT_ONLY définitifs ({_n(d['def_nb'])} dossiers, PM CPT {_n(d['def_pm'])} €)",
+        f"  Dossiers compte sans contrepartie MRM, ni récupérés, ni explicables.",
         "",
         f"CONTRÔLE DE COHÉRENCE : {coh} — {detail_coh}",
     ]

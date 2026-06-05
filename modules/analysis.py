@@ -28,6 +28,7 @@ from config import (
     MATCH_LABELS,
     DATE_INVENTAIRE,
     LATE_IT_GARANTIE,
+    OBS_TARDIVE_LABEL,
     ORPHAN_PM_THRESHOLD,
     ORPHAN_FIN_ANNEE_MOIS,
 )
@@ -710,11 +711,11 @@ def flag_late_it_observations(
     date_col    : str = "CPT_D_SURVENANCE",
 ) -> DataFrame:
     """
-    Reclasse en CPT_LATE les CPT_ONLY qui sont des observations tardives d'IT.
+    Tague en CPT_OBS_TARDIVE les CPT_ONLY qui sont des observations tardives d'IT.
 
     Un CPT_ONLY resté orphelin après la récupération N+1 (donc absent du MRM
     courant ET du N+1 → « pas dans deux exercices successifs ») est calé en
-    déclaration tardive lorsque :
+    observation tardive lorsque :
         - garantie == LATE_IT_GARANTIE (incapacité de travail),
         - survenance en fin d'année (mois ∈ ORPHAN_FIN_ANNEE_MOIS),
         - année de survenance == année d'inventaire (si dérivable de DATE_INVENTAIRE).
@@ -723,10 +724,15 @@ def flag_late_it_observations(
     d'inventaire de l'exercice suivant (inventaire MRM réalisé 2× par an), d'où
     l'absence de contrepartie MRM. Ces lignes n'ont donc pas de colonnes MRM_*.
 
-    Lignes reclassées :
-        TYPE_RECONCILIATION → "CPT_LATE"
-        LATE_SOURCE         → "OBS_TARDIVE_IT"  (distingue des CPT_LATE retrouvés
-                                                  en N+1, tagués "MRM_N1")
+    IMPORTANT — ce ne sont PAS des dossiers retrouvés : ils n'ont jamais matché.
+    On les tague comme anomalie (déclaration probable de fin d'année) mais on les
+    EXCLUT des taux (matching / récupération) et des calculs PM / taux de chute.
+    Le label distinct OBS_TARDIVE_LABEL (≠ CPT_LATE) garantit cette exclusion par
+    construction : tout code basé sur MATCH_LABELS / CPT_LATE les ignore.
+
+    Lignes taguées :
+        TYPE_RECONCILIATION → OBS_TARDIVE_LABEL ("CPT_OBS_TARDIVE")
+        LATE_SOURCE         → "OBS_TARDIVE_IT"  (traçabilité de l'origine)
 
     À appeler APRÈS recover_late_declarations et AVANT enrich_result_tags (pour
     que ces dossiers ne soient plus comptés/tagués comme CPT_ONLY).
@@ -747,7 +753,7 @@ def flag_late_it_observations(
     return (
         df.withColumn(
             "TYPE_RECONCILIATION",
-            F.when(eligible, F.lit("CPT_LATE")).otherwise(F.col("TYPE_RECONCILIATION")),
+            F.when(eligible, F.lit(OBS_TARDIVE_LABEL)).otherwise(F.col("TYPE_RECONCILIATION")),
         )
         .withColumn(
             "LATE_SOURCE",
@@ -930,6 +936,360 @@ def study_provisionnement(
             F.round(F.when(F.col("PM_MRM") != 0,
                            F.col("ECART_SIGNE") / F.col("PM_MRM") * 100).otherwise(0.0), 2))
         .orderBy(F.desc("NB_DOSSIERS"))
+    )
+
+
+# ============================================================================
+# ANALYSES PAS-À-PAS (mono-client SODEXO — sans dimension CLAUSE)
+#
+# Fonctions autonomes appelées comme ÉTAPES dans main.py après le matching.
+# Chacune renvoie un DataFrame .show()-able pour vérification manuelle, avant
+# agrégation ultérieure dans un pipeline global.
+#
+# Univers "matchés" de référence = matchs légitimes de l'inventaire courant
+# (MATCH_LABELS) + récupérés N+1 réels (CPT_LATE, contrepartie MRM existante).
+# EXCLUS partout des comparaisons PM : MRM_MISSING, CPT_ONLY définitifs et
+# observations tardives IT (CPT_OBS_TARDIVE) — ces dossiers n'ont pas matché.
+# ============================================================================
+
+# Colonnes d'identité MRM (alignées sur mrm_dup_keys) pour compter les dossiers
+# MRM distincts et repérer le fan-out (1 MRM matché par plusieurs CPT).
+_MRM_ID_COLS = ["MRM_IDCORP", "MRM_D_NAISSANCE", "MRM_D_SURVENANCE", "MRM_GARANTIE"]
+
+
+def _matched_universe() -> List[str]:
+    """Matchs légitimes + récupérés N+1 réels (= dossiers ayant une contrepartie
+    MRM qui a matché). N'inclut PAS CPT_OBS_TARDIVE (anomalie, jamais matchée)."""
+    return list(MATCH_LABELS) + ["CPT_LATE"]
+
+
+def _mrm_identity(df: DataFrame) -> F.Column:
+    """Identifiant d'un dossier MRM = concat des colonnes d'identité présentes."""
+    cols = [F.coalesce(F.col(c).cast("string"), F.lit("∅"))
+            for c in _MRM_ID_COLS if c in df.columns]
+    return F.concat_ws("|", *cols) if cols else F.lit("∅")
+
+
+# ----------------------------------------------------------------------------
+# DIAGNOSTIC — écart MRM clean vs synthèse mrm_nb (fan-out CPT)
+# ----------------------------------------------------------------------------
+
+def diagnose_mrm_fanout(
+    df_result   : DataFrame,
+    df_mrm_clean : Optional[DataFrame] = None,
+    top         : int = 30,
+) -> DataFrame:
+    """
+    Explique l'écart entre le MRM nettoyé (ex: 5121) et le mrm_nb de la synthèse
+    (ex: 5209). Hypothèse : fan-out CPT — une même ligne MRM matchée par plusieurs
+    lignes CPT est comptée plusieurs fois côté "matchés" (nb_match).
+
+    Affiche un récapitulatif chiffré :
+        - lignes matchées (nb_match, côté CPT après join)
+        - dossiers MRM distincts matchés
+        - sur-comptage = lignes matchées − MRM distincts (= fan-out CPT)
+        - [si df_mrm_clean fourni] réconciliation au total MRM en entrée
+
+    Renvoie le DÉTAIL des dossiers MRM matchés par > 1 CPT (à inspecter).
+
+    Aucune correction de mrm_nb n'est faite ici : on confirme d'abord la cause.
+    """
+    matched = df_result.filter(F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS)))
+    matched = matched.withColumn("_MRM_ID", _mrm_identity(matched))
+
+    nb_matched_rows = matched.count()
+    nb_mrm_distinct = matched.select("_MRM_ID").distinct().count()
+    fanout_overcount = nb_matched_rows - nb_mrm_distinct
+
+    print("\n[DIAG fan-out] écart MRM clean ↔ synthèse mrm_nb")
+    print(f"  lignes matchées (nb_match, côté CPT)   : {nb_matched_rows:,}")
+    print(f"  dossiers MRM distincts matchés         : {nb_mrm_distinct:,}")
+    print(f"  → sur-comptage fan-out CPT (≈ écart)   : {fanout_overcount:,}")
+
+    if df_mrm_clean is not None:
+        n_mrm_in = df_mrm_clean.count()
+        n_mrm_id = df_mrm_clean.withColumn("_MRM_ID", _mrm_identity(df_mrm_clean)) \
+                               .select("_MRM_ID").distinct().count()
+        print(f"  MRM clean en entrée (lignes)           : {n_mrm_in:,}")
+        print(f"  MRM clean en entrée (identités dist.)  : {n_mrm_id:,}")
+        print(f"  → doublons d'identité MRM en entrée    : {n_mrm_in - n_mrm_id:,}")
+
+    # Détail : dossiers MRM matchés par plusieurs CPT, PM décroissante.
+    nom_col = "MRM_NOM_PRENOM" if "MRM_NOM_PRENOM" in matched.columns else None
+    detail = (
+        matched
+        .groupBy("_MRM_ID")
+        .agg(
+            F.count("*").alias("NB_CPT"),
+            F.round(F.first("MRM_PM"), 2).alias("MRM_PM"),
+            F.collect_set("TYPE_RECONCILIATION").alias("ETAPES"),
+            *( [F.first(nom_col).alias("NOM_PRENOM")] if nom_col else [] ),
+        )
+        .filter(F.col("NB_CPT") > 1)
+        .orderBy(F.desc("NB_CPT"), F.desc("MRM_PM"))
+    )
+    print(f"  dossiers MRM en fan-out (NB_CPT > 1) — top {top} :")
+    return detail
+
+
+# ----------------------------------------------------------------------------
+# TAUX DE CHUTE (matchés + récupérés N+1 ; obs tardives & orphelins EXCLUS)
+# ----------------------------------------------------------------------------
+
+def analyze_taux_chute(
+    df_result     : DataFrame,
+    conclusion_col: str = "MRM_CONCLUSION",
+) -> DataFrame:
+    """
+    Taux de chute par consigne (KEEP / ADD / STUDY) sur les dossiers MATCHÉS
+    uniquement (MATCH_LABELS + récupérés N+1). Les MRM_MISSING, CPT_ONLY et
+    observations tardives IT n'ont pas de contrepartie matchée → exclus.
+
+    taux_chute = Σ(MRM_PM − CPT_PM) / Σ(MRM_PM) × 100   (formule agrégée)
+        > 0 → sous-provisionnement (CPT < MRM, risque)
+        < 0 → sur-provisionnement  (CPT > MRM, marge)
+
+    Colonnes : MRM_ACTION, nb_dossiers, nb_sous, nb_sur, nb_conforme,
+               pm_mrm, pm_cpt, ecart_signe, taux_chute_pct.
+    """
+    df = (
+        _with_mrm_action(df_result, conclusion_col)
+        .filter(F.col("TYPE_RECONCILIATION").isin(_matched_universe()))
+        .filter(F.col("MRM_ACTION").isin("MRM_KEEP", "MRM_ADD", "MRM_STUDY"))
+        .withColumn("_ecart", F.coalesce(F.col("MRM_PM"), F.lit(0.0))
+                            - F.coalesce(F.col("CPT_PM"), F.lit(0.0)))
+    )
+    return (
+        df.groupBy("MRM_ACTION")
+        .agg(
+            F.count("*").alias("nb_dossiers"),
+            F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("nb_sous"),
+            F.sum(F.when(F.col("_ecart") < 0, 1).otherwise(0)).alias("nb_sur"),
+            F.sum(F.when(F.col("_ecart") == 0, 1).otherwise(0)).alias("nb_conforme"),
+            F.round(F.sum("MRM_PM"), 2).alias("pm_mrm"),
+            F.round(F.sum("CPT_PM"), 2).alias("pm_cpt"),
+            F.round(F.sum("_ecart"), 2).alias("ecart_signe"),
+        )
+        .withColumn("taux_chute_pct",
+            F.round(F.when(F.col("pm_mrm") != 0,
+                           F.col("ecart_signe") / F.col("pm_mrm") * 100).otherwise(0.0), 2))
+        .orderBy(F.desc("nb_dossiers"))
+    )
+
+
+# ----------------------------------------------------------------------------
+# CONSIGNES × NIVEAUX DE PM (analyse pas-à-pas)
+# ----------------------------------------------------------------------------
+
+def analyze_consignes_pm(
+    df_result     : DataFrame,
+    conclusion_col: str = "MRM_CONCLUSION",
+    pm_col        : str = "MRM_PM",
+) -> DataFrame:
+    """
+    Analyse pas-à-pas des consignes (KEEP / ADD / STUDY) croisées au niveau de PM,
+    sur les dossiers MATCHÉS uniquement (MATCH_LABELS + récupérés N+1).
+
+    Pour chaque consigne, ventile par catégorie de provisionnement
+    (SOUS / SUR / CONFORME) et par tranche de PM MRM (réutilise _pm_tranche_expr).
+
+    Colonnes : MRM_ACTION, CATEGORIE_PROVISION, TRANCHE_PM, ORDRE_TRANCHE,
+               nb_dossiers, pm_mrm, pm_cpt, ecart_signe, taux_chute_pct,
+               pct_nb_consigne (poids du croisement dans la consigne).
+    """
+    tranche_col, ordre_col = _pm_tranche_expr(pm_col)
+    pm_mrm = F.coalesce(F.col("MRM_PM"), F.lit(0.0))
+    pm_cpt = F.coalesce(F.col("CPT_PM"), F.lit(0.0))
+
+    df = (
+        _with_mrm_action(df_result, conclusion_col)
+        .filter(F.col("TYPE_RECONCILIATION").isin(_matched_universe()))
+        .filter(F.col("MRM_ACTION").isin("MRM_KEEP", "MRM_ADD", "MRM_STUDY"))
+        .withColumn("CATEGORIE_PROVISION",
+            F.when(pm_cpt < pm_mrm, "SOUS_PROVISIONNE")
+             .when(pm_cpt > pm_mrm, "SUR_PROVISIONNE")
+             .otherwise("CONFORME"))
+        .withColumn("TRANCHE_PM",    tranche_col)
+        .withColumn("ORDRE_TRANCHE", ordre_col)
+        .withColumn("_ecart", pm_mrm - pm_cpt)
+    )
+
+    window_consigne = Window.partitionBy("MRM_ACTION")
+    return (
+        df.groupBy("MRM_ACTION", "CATEGORIE_PROVISION", "TRANCHE_PM", "ORDRE_TRANCHE")
+        .agg(
+            F.count("*").alias("nb_dossiers"),
+            F.round(F.sum("MRM_PM"), 2).alias("pm_mrm"),
+            F.round(F.sum("CPT_PM"), 2).alias("pm_cpt"),
+            F.round(F.sum("_ecart"), 2).alias("ecart_signe"),
+        )
+        .withColumn("taux_chute_pct",
+            F.round(F.when(F.col("pm_mrm") != 0,
+                           F.col("ecart_signe") / F.col("pm_mrm") * 100).otherwise(0.0), 2))
+        .withColumn("pct_nb_consigne",
+            F.round(F.col("nb_dossiers") / F.sum("nb_dossiers").over(window_consigne) * 100, 2))
+        .orderBy("MRM_ACTION", "CATEGORIE_PROVISION", "ORDRE_TRANCHE")
+    )
+
+
+# ----------------------------------------------------------------------------
+# SUIVI GLOBAL DES CONSIGNES + PM (une ligne par consigne)
+# ----------------------------------------------------------------------------
+
+# Ordre d'affichage et libellés des consignes.
+_CONSIGNE_ORDRE = {"MRM_KEEP": 0, "MRM_STUDY": 1, "MRM_ADD": 2, "MRM_DELETE": 3}
+
+
+def analyze_suivi_consignes_global(
+    df_result     : DataFrame,
+    conclusion_col: str = "MRM_CONCLUSION",
+) -> DataFrame:
+    """
+    Suivi GLOBAL des consignes MRM accompagné des PM — une ligne par consigne
+    (MRM_KEEP / MRM_STUDY / MRM_ADD / MRM_DELETE).
+
+    Univers par consigne = dossiers matchés à l'inventaire (MATCH_LABELS) +
+    orphelins MRM portant cette consigne (MRM_MISSING pour KEEP/STUDY/ADD,
+    MRM_DELETE pour DELETE). Les CPT_LATE (autre inventaire), CPT_OBS_TARDIVE et
+    CPT_ONLY (pas de consigne MRM) sont hors univers.
+
+    Conformité :
+        KEEP / STUDY / ADD → conforme = retrouvé au compte (matché)
+        DELETE             → conforme = absent du compte (orphelin, donc supprimé)
+
+    Les PM (MRM, CPT, écart, taux de chute) ne portent que sur les dossiers
+    MATCHÉS. Pour DELETE, ces matchés sont justement les consignes NON suivies
+    (PM toujours présente) → taux de chute non pertinent (null).
+
+    Colonnes : MRM_ACTION, ORDRE, nb_total, nb_matches, nb_orphelins,
+               nb_conformes, pct_conformite, nb_pm_nulle, nb_pm_non_nulle,
+               pm_mrm, pm_cpt, ecart, taux_chute_pct.
+    """
+    is_m = F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS))
+    df = (
+        _with_mrm_action(df_result, conclusion_col)
+        .filter(F.col("MRM_ACTION").isNotNull())
+        .filter(is_m | F.col("TYPE_RECONCILIATION").isin("MRM_MISSING", "MRM_DELETE"))
+    )
+
+    agg = (
+        df.groupBy("MRM_ACTION")
+        .agg(
+            F.count("*").alias("nb_total"),
+            F.sum(F.when(is_m, 1).otherwise(0)).alias("nb_matches"),
+            F.sum(F.when(is_m & F.col("MRM_PM").isNotNull() & (F.col("MRM_PM") != 0), 1)
+                   .otherwise(0)).alias("nb_pm_non_nulle"),
+            F.round(F.sum(F.when(is_m, F.col("MRM_PM")).otherwise(0.0)), 2).alias("pm_mrm"),
+            F.round(F.sum(F.when(is_m, F.col("CPT_PM")).otherwise(0.0)), 2).alias("pm_cpt"),
+        )
+    )
+
+    ordre_expr = F.lit(99)
+    for action, idx in _CONSIGNE_ORDRE.items():
+        ordre_expr = F.when(F.col("MRM_ACTION") == action, idx).otherwise(ordre_expr)
+
+    is_delete = F.col("MRM_ACTION") == "MRM_DELETE"
+    return (
+        agg
+        .withColumn("ORDRE", ordre_expr)
+        .withColumn("nb_orphelins", F.col("nb_total") - F.col("nb_matches"))
+        .withColumn("nb_conformes",
+            F.when(is_delete, F.col("nb_orphelins")).otherwise(F.col("nb_matches")))
+        .withColumn("pct_conformite",
+            F.round(F.col("nb_conformes") / F.col("nb_total") * 100, 2))
+        .withColumn("nb_pm_nulle", F.col("nb_matches") - F.col("nb_pm_non_nulle"))
+        .withColumn("ecart", F.round(F.col("pm_mrm") - F.col("pm_cpt"), 2))
+        .withColumn("taux_chute_pct",
+            F.when(is_delete | (F.col("pm_mrm") == 0), None)
+             .otherwise(F.round(F.col("ecart") / F.col("pm_mrm") * 100, 2)))
+        .select(
+            "MRM_ACTION", "ORDRE", "nb_total", "nb_matches", "nb_orphelins",
+            "nb_conformes", "pct_conformite", "nb_pm_nulle", "nb_pm_non_nulle",
+            "pm_mrm", "pm_cpt", "ecart", "taux_chute_pct",
+        )
+        .orderBy("ORDRE")
+    )
+
+
+# ----------------------------------------------------------------------------
+# CONSIGNES "À SUPPRIMER" NON SUIVIES (MRM_DELETE pourtant matché)
+# ----------------------------------------------------------------------------
+
+def analyze_delete_non_suivies(
+    df_result     : DataFrame,
+    conclusion_col: str = "MRM_CONCLUSION",
+    pm_col        : str = "MRM_PM",
+) -> DataFrame:
+    """
+    Consignes "à supprimer" NON suivies : dossiers dont la consigne MRM est
+    MRM_DELETE mais qui ont matché un CPT (TYPE_RECONCILIATION ∈ MATCH_LABELS).
+    La PM MRM aurait dû être supprimée mais elle est toujours présente au compte.
+
+    Analyse séparée (volumétrie + niveau de PM par tranche) : la consigne n'a pas
+    été appliquée → enjeu financier à remonter.
+
+    Colonnes : TRANCHE_PM, ORDRE_TRANCHE, nb_dossiers, pm_mrm_non_supprimee,
+               pm_cpt, pct_nb.
+    """
+    tranche_col, ordre_col = _pm_tranche_expr(pm_col)
+    df = (
+        _with_mrm_action(df_result, conclusion_col)
+        .filter(
+            (F.col("MRM_ACTION") == "MRM_DELETE")
+            & F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS))
+        )
+        .withColumn("TRANCHE_PM",    tranche_col)
+        .withColumn("ORDRE_TRANCHE", ordre_col)
+    )
+    w = Window.partitionBy()
+    return (
+        df.groupBy("TRANCHE_PM", "ORDRE_TRANCHE")
+        .agg(
+            F.count("*").alias("nb_dossiers"),
+            F.round(F.sum("MRM_PM"), 2).alias("pm_mrm_non_supprimee"),
+            F.round(F.sum("CPT_PM"), 2).alias("pm_cpt"),
+        )
+        .withColumn("pct_nb",
+            F.round(F.col("nb_dossiers") / F.sum("nb_dossiers").over(w) * 100, 2))
+        .orderBy("ORDRE_TRANCHE")
+    )
+
+
+# ----------------------------------------------------------------------------
+# OBSERVATIONS TARDIVES IT (anomalies — présentées hors métriques)
+# ----------------------------------------------------------------------------
+
+def analyze_obs_tardives(
+    df_result   : DataFrame,
+    date_col    : str = "CPT_D_SURVENANCE",
+    garantie_col: str = "CPT_GARANTIE",
+    pm_col      : str = "CPT_PM",
+) -> DataFrame:
+    """
+    Ventile les observations tardives IT (TYPE_RECONCILIATION = CPT_OBS_TARDIVE)
+    par (année, mois de survenance, garantie), PM CPT décroissante.
+
+    Ce ne sont PAS des anomalies : sinistres dont l'arrêt s'est clos avant la date
+    d'inventaire du MRM suivant → logiquement non retrouvés. Exclus des taux et des
+    comparaisons de PM, mais on présente ici leur volumétrie et leur PM compte.
+
+    Colonnes : ANNEE_SURVENANCE, MOIS_SURVENANCE, GARANTIE,
+               NB_DOSSIERS, PM_CPT_TOTAL, PM_CPT_MOYEN.
+    """
+    return (
+        df_result
+        .filter(F.col("TYPE_RECONCILIATION") == OBS_TARDIVE_LABEL)
+        .groupBy(
+            F.year(F.col(date_col)).alias("ANNEE_SURVENANCE"),
+            F.month(F.col(date_col)).alias("MOIS_SURVENANCE"),
+            F.col(garantie_col).alias("GARANTIE"),
+        )
+        .agg(
+            F.count("*").alias("NB_DOSSIERS"),
+            F.round(F.coalesce(F.sum(pm_col), F.lit(0.0)), 2).alias("PM_CPT_TOTAL"),
+            F.round(F.coalesce(F.avg(pm_col), F.lit(0.0)), 2).alias("PM_CPT_MOYEN"),
+        )
+        .orderBy(F.desc("PM_CPT_TOTAL"))
     )
 
 
