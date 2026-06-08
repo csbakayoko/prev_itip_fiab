@@ -143,28 +143,32 @@ def compute_synthese(df_result: DataFrame) -> dict:
     # PM (MRM, Compte, Δ), taux de chute, volumétrie PM nulle/non-nulle : dossiers
     # MATCHÉS seulement. Pour "à supprimer", l'analyse PM n'est pas pertinente.
     def consigne(action):
+        by_action = lambda r: A(r) == action
         if action == "MRM_DELETE":
-            univ = lambda r: A(r) == action and (T(r) in match or T(r) == "MRM_DELETE")
+            univ = lambda r: by_action(r) and (T(r) in match or T(r) == "MRM_DELETE")
             conf = lambda r: univ(r) and T(r) not in match     # conforme = écarté
         else:
-            univ = lambda r: A(r) == action and (T(r) in match or T(r) == "MRM_MISSING")
+            univ = lambda r: by_action(r) and (T(r) in match or T(r) == "MRM_MISSING")
             conf = lambda r: univ(r) and T(r) in match          # conforme = retrouvé
         nb       = agg("nb", univ)
         conf_nb  = agg("nb", conf)
-        is_m     = lambda r: univ(r) and T(r) in match
-        nb_m     = agg("nb",           is_m)
-        pm_mrm_m = agg("pm_mrm",       is_m)
-        pm_cpt_m = agg("pm_cpt",       is_m)
-        nz       = agg("nb_pm_mrm_nz", is_m)   # PM MRM ≠ 0
-        nz0      = nb_m - nz                    # PM MRM nulle (null ou 0)
-        delta    = pm_mrm_m - pm_cpt_m
+        # Univers PM / chute = matchés + récupérés N+1 (CPT_LATE), identique au
+        # taux de chute global et à la table d'analyse taux_chute (cohérence :
+        # global = Σ consignes). cf. docs/METRIQUES.md §4.
+        in_chute = lambda r: by_action(r) and in_metrics(r)
+        nb_c     = agg("nb",           in_chute)
+        pm_mrm_c = agg("pm_mrm",       in_chute)
+        pm_cpt_c = agg("pm_cpt",       in_chute)
+        nz       = agg("nb_pm_mrm_nz", in_chute)   # PM MRM ≠ 0
+        nz0      = nb_c - nz                         # PM MRM nulle (null ou 0)
+        delta    = pm_mrm_c - pm_cpt_c
         return {
             "nb": nb, "conf": conf_nb, "pct": _pct(conf_nb, nb),
-            "nb_match": nb_m,
-            "nz": nz,   "pct_nz":  _pct(nz, nb_m),
-            "nz0": nz0, "pct_nz0": _pct(nz0, nb_m),
-            "pm_mrm": pm_mrm_m, "pm_cpt": pm_cpt_m, "delta": delta,
-            "taux_chute": _pct(delta, pm_mrm_m),
+            "nb_match": nb_c,
+            "nz": nz,   "pct_nz":  _pct(nz, nb_c),
+            "nz0": nz0, "pct_nz0": _pct(nz0, nb_c),
+            "pm_mrm": pm_mrm_c, "pm_cpt": pm_cpt_c, "delta": delta,
+            "taux_chute": _pct(delta, pm_mrm_c),
             "pertinent": action != "MRM_DELETE",
         }
 
@@ -257,6 +261,45 @@ def compute_synthese(df_result: DataFrame) -> dict:
         # ── Entête ──
         "date_inventaire" : _resolve_date_inventaire(df_result),
     }
+
+
+def build_synthese_indicateurs(df_result: DataFrame) -> DataFrame:
+    """
+    Table d'indicateurs de synthèse — UNE ligne par run.
+
+    Aplati les scalaires de compute_synthese (taux de couverture, récupération
+    N+1, chute global, conformité, niveaux de PM, volumétries) en un DataFrame
+    d'une ligne : historisable en base (suivi dans le temps) et directement
+    lisible en présentation. Périmètre + date d'inventaire en tête.
+    """
+    d = compute_synthese(df_result)
+    row = {
+        "PERIMETRE"             : CLIENT_NAME,
+        "DATE_INVENTAIRE"       : d["date_inventaire"],
+        "NB_MATCHES"            : int(d["match_nb"]),
+        "NB_RECUP_N1"           : int(d["late_nb"]),
+        "NB_CPT_ONLY"           : int(d["def_nb"]),
+        "NB_MRM_MISSING"        : int(d["non_mappes_nb"]),
+        "NB_A_SUPPRIMER"        : int(d["a_supprimer_nb"]),
+        "TAUX_COUVERTURE_MRM"   : float(d["taux_couverture_mrm"]),
+        "TAUX_COUVERTURE_COMPTE": float(d["taux_couverture_compte"]),
+        "TAUX_RECUP_TARDIVE"    : float(d["taux_recup_tardive"]),
+        "TAUX_RECUP_GLOBAL"     : float(d["taux_recup_global"]),
+        "TAUX_CHUTE_GLOBAL"     : float(d["taux_chute_global"]),
+        "CONFORMITE_GLOBALE"    : float(d["conformite_globale"]),
+        "PM_MRM"                : float(d["metrics_pm_mrm"]),
+        "PM_CPT"                : float(d["metrics_pm_cpt"]),
+        "PM_ECART"              : float(d["metrics_pm_ecart"]),
+        "PM_ECART_PCT"          : float(d["metrics_pm_pct"]),
+        "COHERENT"              : bool(d["coherent"]),
+    }
+    # Schéma explicite → ordre de colonnes stable d'un run à l'autre.
+    from pyspark.sql.types import (
+        StructType, StructField, StringType, LongType, DoubleType, BooleanType,
+    )
+    _t = {bool: BooleanType(), int: LongType(), float: DoubleType(), str: StringType()}
+    schema = StructType([StructField(k, _t[type(v)], True) for k, v in row.items()])
+    return df_result.sparkSession.createDataFrame([tuple(row.values())], schema=schema)
 
 
 def _resolve_date_inventaire(df_result: DataFrame) -> str:
@@ -415,7 +458,7 @@ def _render_consignes(d: dict) -> str:
     head = (f"  {'Consigne':<13}{'nb':>6}{'%conf':>8}{'match.':>7}"
             f"{'PM MRM nulle':>13}{'PM MRM≠0':>14}{'PM MRM':>15}{'PM CPT':>15}{'chute':>8}")
     lines = [
-        "SUIVI DES CONSIGNES — conformité (tous dossiers) ; PM & chute (dossiers matchés)",
+        "SUIVI DES CONSIGNES — conformité (tous dossiers) ; PM & chute (matchés + récupérés N+1)",
         head,
     ]
     for label, c in d["consignes"].items():

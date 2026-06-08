@@ -31,6 +31,7 @@ from modules.analysis.consignes import (
 )
 from modules.analysis.provisionnement import study_provisionnement
 from modules.analysis.orphelins import ventilate_cpt_only, analyze_obs_tardives
+from modules.kpi_export import build_synthese_indicateurs
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,8 @@ def collect_analyses(df_result: DataFrame) -> Dict[str, DataFrame]:
     """
     df_result = derive_clause_column(df_result)
     tables = {
+        # Indicateurs de synthèse (1 ligne/run, scalaires historisables).
+        "synthese_indicateurs" : build_synthese_indicateurs(df_result),
         "suivi_consignes"      : analyze_suivi_consignes_global(df_result),
         "taux_chute"           : analyze_taux_chute(df_result),
         "consignes_pm"         : analyze_consignes_pm(df_result),
@@ -136,6 +139,15 @@ def export_parquet(tables: Dict[str, DataFrame], base_path: str) -> None:
         print(f"  ✓ [PARQUET] {path}")
 
 
+def export_json(tables: Dict[str, DataFrame], base_path: str) -> None:
+    """Un JSON (une ligne par enregistrement) par analyse, périmètre dans le dossier."""
+    out = _clause_dir(base_path)
+    for name, df in tables.items():
+        path = f"{out}/{name}_{_PERIMETRE}.json"
+        df.coalesce(1).write.mode("overwrite").json(path)
+        print(f"  ✓ [JSON]    {path}")
+
+
 def export_excel(tables: Dict[str, DataFrame], base_path: str) -> str:
     """Un seul .xlsx multi-onglets (un onglet par analyse, < 100k lignes)."""
     out_dir = _to_local(_clause_dir(base_path))
@@ -165,7 +177,7 @@ def export_delta(tables: Dict[str, DataFrame], schema: str) -> None:
 def export_analyses(
     df_result   : DataFrame,
     base_path   : str = DEFAULT_BASE_PATH,
-    formats     : Iterable[str] = ("csv", "parquet", "excel"),
+    formats     : Iterable[str] = ("csv", "parquet", "excel", "json"),
     delta_schema: Optional[str] = None,
     delimiter   : str = ";",
 ) -> Dict[str, DataFrame]:
@@ -175,13 +187,13 @@ def export_analyses(
 
     Args:
         df_result    : résultat réconcilié (persisté + enrichi).
-        base_path    : racine DBFS des exports fichiers (CSV/Parquet/Excel).
-        formats      : sous-ensemble de {"csv", "parquet", "excel", "delta"}.
+        base_path    : racine DBFS des exports fichiers (CSV/Parquet/Excel/JSON).
+        formats      : sous-ensemble de {"csv", "parquet", "excel", "json", "delta"}.
         delta_schema : schéma metastore cible (requis si "delta" ∈ formats).
         delimiter    : séparateur CSV.
 
     Returns:
-        Le dict des tables exportées (taguées clause).
+        Le dict des tables exportées (ventilées par clause).
     """
     tables = collect_analyses(df_result)
     formats = {f.lower() for f in formats}
@@ -193,6 +205,8 @@ def export_analyses(
         export_parquet(tables, base_path)
     if "excel" in formats:
         export_excel(tables, base_path)
+    if "json" in formats:
+        export_json(tables, base_path)
     if "delta" in formats:
         if not delta_schema:
             logger.warning("Format 'delta' demandé sans delta_schema — ignoré.")

@@ -148,7 +148,7 @@ ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
 - **DELETE** : la PM aurait dû être **supprimée** ; un écart « PM_MRM − PM_CPT »
   n'a pas le sens d'une chute. → **taux de chute non défini** pour DELETE.
   Suivi séparé : *taux de suppression effective* (voir §5.3).
-- **Décision (à valider)** : `taux_chute_global` = univers `MATCHÉS + CPT_LATE`
+- **Décision retenue** : `taux_chute_global` = univers `MATCHÉS + CPT_LATE`
   restreint à **KEEP + ADD + STUDY**. DELETE suivi à part, pas mélangé à la
   chute (sinon le « global » mêle deux grandeurs de natures différentes).
 
@@ -219,17 +219,18 @@ ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
 - **Excel** (présentation) : un classeur multi-onglets, un onglet par table +
   un onglet « synthèse » lisible (indicateurs cadrés).
 - **CSV** / **Parquet** : une table par fichier (rejeu / dataviz).
-- **JSON** : structure `{métrique: valeur}` pour les scalaires (synthèse) +
-  tables en lignes — *à ajouter* (aujourd'hui : CSV / Parquet / Excel / Delta).
+- **JSON** : une ligne par enregistrement, par table (`export_json`). ✅
 - **Base de données** : table Delta metastore (une par analyse).
 
 ### 8.2 Ce qui va en base (proposition à valider)
 - Tables ventilées par clause (`suivi_consignes`, `taux_chute`,
   `consignes_pm`, `provisionnement`, `delete_non_suivies`,
   `ventilation_cpt_only`, `obs_tardives`).
-- Une table **`synthese_indicateurs`** : les scalaires (taux de couverture,
-  récupération, chute global, conformité), une ligne par run (avec date
-  d'inventaire + libellé périmètre) → historisation et suivi dans le temps.
+- Une table **`synthese_indicateurs`** ✅ : les scalaires (taux de couverture,
+  récupération, chute global, conformité, niveaux de PM, volumétries), une ligne
+  par run (date d'inventaire + libellé périmètre) → historisation et suivi dans
+  le temps. Construite par `kpi_export.build_synthese_indicateurs`, incluse dans
+  `collect_analyses` (donc restituée + exportée tous formats + Delta).
 
 ### 8.3 Qualité « présentation »
 - Libellés explicites, ordre stable, pourcentages arrondis à 0,1.
@@ -239,12 +240,12 @@ ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
 
 ---
 
-## 9. Décisions à valider
+## 9. Décisions — tranchées
 
-1. **Taux de chute global** : restreint à **KEEP + ADD + STUDY** (DELETE suivi à
-   part) — confirmer, ou bien inclure DELETE avec une définition dédiée.
+1. **Taux de chute global** = **KEEP + ADD + STUDY** uniquement ; DELETE suivi à
+   part (taux de suppression effective). ✅
 2. **Univers chute unique = `MATCHÉS + CPT_LATE`** des deux côtés (global et par
-   consigne) — confirme la correction de l'incohérence actuelle.
-3. **Synthèse en base** : créer `synthese_indicateurs` (1 ligne / run, scalaires
-   historisés) en plus des tables ventilées.
-4. **JSON** : ajouter le format en sortie (scalaires + tables).
+   consigne) — incohérence corrigée (`_filter_matched_keep_add_study` et
+   `compute_synthese.consigne` alignés). ✅
+3. **Synthèse en base** : table `synthese_indicateurs` (1 ligne / run). ✅
+4. **JSON** : format ajouté en sortie. ✅

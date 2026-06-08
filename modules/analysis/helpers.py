@@ -71,9 +71,14 @@ def _statut_inv_dim(df: DataFrame, col: str = "MRM_STATUT_INV") -> List[str]:
 
 
 def _filter_matched_keep_add_study(df: DataFrame) -> DataFrame:
-    """Filtre les dossiers matchés avec consigne KEEP, STUDY ou ADD."""
+    """Filtre les dossiers de l'univers chute (KEEP / STUDY / ADD).
+
+    Univers UNIQUE = matchés inventaire courant + récupérés N+1 (CPT_LATE), via
+    _matched_universe(). Garantit la cohérence du taux de chute par consigne ↔
+    global ↔ niveaux de PM (cf. docs/METRIQUES.md §4). DELETE exclu (la chute n'y
+    a pas de sens). CPT_OBS_TARDIVE exclu (jamais matché)."""
     return df.filter(
-        F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS)) &
+        F.col("TYPE_RECONCILIATION").isin(_matched_universe()) &
         F.col("MRM_ACTION").isin("MRM_KEEP", "MRM_ADD", "MRM_STUDY")
     )
 

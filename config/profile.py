@@ -35,5 +35,5 @@ DEV_MODE = True                   # False en prod (Job Databricks remplit RUN_PA
 
 # ── Export des analyses (restitution toujours en console ; écriture fichiers) ─
 EXPORT_ANALYSES    = False        # True = écrit les analyses sur disque (DBFS)
-EXPORT_FORMATS     = ("csv", "parquet", "excel")   # ⊆ {csv, parquet, excel, delta}
+EXPORT_FORMATS     = ("csv", "parquet", "excel", "json")  # ⊆ {csv, parquet, excel, json, delta}
 EXPORT_DELTA_SCHEMA = None        # schéma metastore cible si "delta" ∈ EXPORT_FORMATS
