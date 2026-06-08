@@ -170,7 +170,10 @@ def ventilate_cpt_only(
         JOUR_MIN  = jour le plus précoce
     Utile pour repérer un effet "bloc" (ex. déclarations groupées un 31).
 
-    Colonnes : ANNEE_SURVENANCE, MOIS_SURVENANCE, GARANTIE,
+    Ventilé par (CLAUSE, TYPE_CLAUSE) — dérivées du préfixe CPT pour ces
+    dossiers sans contrepartie MRM.
+
+    Colonnes : CLAUSE, TYPE_CLAUSE, ANNEE_SURVENANCE, MOIS_SURVENANCE, GARANTIE,
                NB_DOSSIERS, PM_CPT_TOTAL, PM_CPT_MOYEN, JOUR_MODE, JOUR_MIN
 
     Args:
@@ -189,6 +192,8 @@ def ventilate_cpt_only(
         .filter(F.col("TYPE_RECONCILIATION") == "CPT_ONLY")
         .withColumn("_JOUR", F.dayofmonth(F.col(date_col)))
         .groupBy(
+            "CLAUSE",
+            "TYPE_CLAUSE",
             F.year(F.col(date_col)).alias("ANNEE_SURVENANCE"),
             F.month(F.col(date_col)).alias("MOIS_SURVENANCE"),
             F.col(garantie_col).alias("GARANTIE"),
@@ -218,13 +223,18 @@ def analyze_obs_tardives(
     d'inventaire du MRM suivant → logiquement non retrouvés. Exclus des taux et des
     comparaisons de PM, mais on présente ici leur volumétrie et leur PM compte.
 
-    Colonnes : ANNEE_SURVENANCE, MOIS_SURVENANCE, GARANTIE,
+    Ventilé par (CLAUSE, TYPE_CLAUSE) — dérivées du préfixe CPT pour ces
+    dossiers sans contrepartie MRM.
+
+    Colonnes : CLAUSE, TYPE_CLAUSE, ANNEE_SURVENANCE, MOIS_SURVENANCE, GARANTIE,
                NB_DOSSIERS, PM_CPT_TOTAL, PM_CPT_MOYEN.
     """
     return (
         df_result
         .filter(F.col("TYPE_RECONCILIATION") == OBS_TARDIVE_LABEL)
         .groupBy(
+            "CLAUSE",
+            "TYPE_CLAUSE",
             F.year(F.col(date_col)).alias("ANNEE_SURVENANCE"),
             F.month(F.col(date_col)).alias("MOIS_SURVENANCE"),
             F.col(garantie_col).alias("GARANTIE"),

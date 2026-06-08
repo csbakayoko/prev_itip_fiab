@@ -1,12 +1,14 @@
 """
-Profil client — périmètre du run en cours.
+Profil de run — périmètre traité.
 
-Un seul client actif à la fois. Pour changer de périmètre, éditer ce fichier.
-SODEXO = clause 121981, type PB, vision CC2023.
+v2.0 : tout le périmètre est chargé sans filtre clause ; les métriques restent
+ventilées par CLAUSE × TYPE_CLAUSE (portées par les données). SODEXO (clause
+121981, type PB) était le use case d'origine, désormais généralisé : pour le
+rejouer seul, remettre CLIENT_CLAUSES = ["121981"] / CLIENT_TYPE_CLAUSES = ["PB"].
 """
 
-# ── Identité du client ──────────────────────────────────────────────────────
-CLIENT_NAME            = "SODEXO"      # libellé affiché dans la synthèse
+# ── Identité du run ─────────────────────────────────────────────────────────
+CLIENT_NAME            = "PERIMETRE_GLOBAL"  # libellé du run (synthèse + noms d'export)
 CLIENT_CPT_VISION      = "CC2023"      # vision comptable CPT (filtre obligatoire)
 DATE_INVENTAIRE        = "31/12/2023"  # date d'inventaire (en dur). "auto" = max(MRM_D_INVENTAIRE).
 CLIENT_MRM_STATUT_INV  = None          # filtre statut inventaire au chargement. None = charge
@@ -14,9 +16,12 @@ CLIENT_MRM_STATUT_INV  = None          # filtre statut inventaire au chargement.
                                        # financière mais reste mappable). La distinction est
                                        # portée par la colonne MRM_STATUT_INV (exploitable export).
 
-# ── Filtres de périmètre (None = pas de filtre) ─────────────────────────────
-CLIENT_CLAUSES      = ["121981"]  # numéros sans préfixe
-CLIENT_TYPE_CLAUSES = ["PB"]      # "PB" / "HPB"
+# ── Filtres de périmètre (None = pas de filtre → tout le périmètre) ──────────
+# Périmètre PB : aucune clause figée, mais on filtre le TYPE sur PB. Côté MRM
+# cela écarte les HPB (qui n'existent pas dans le compte) ; côté CPT c'est un
+# garde-fou sur le préfixe CPB_ (le compte ne contient déjà que du PB).
+CLIENT_CLAUSES      = None         # numéros sans préfixe ; None = toutes les clauses
+CLIENT_TYPE_CLAUSES = ["PB"]       # "PB" / "HPB" ; filtre type (MRM = PB seul)
 
 # ── Chemins source MRM (CSV DBFS) ───────────────────────────────────────────
 # Principal = inventaire de référence (ex: 31/12/2023). N+1 = inventaire

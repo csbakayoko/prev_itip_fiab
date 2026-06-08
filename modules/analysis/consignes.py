@@ -150,9 +150,12 @@ def analyze_consignes_pm(
     Pour chaque consigne, ventile par catégorie de provisionnement
     (SOUS / SUR / CONFORME) et par tranche de PM MRM (réutilise _pm_tranche_expr).
 
-    Colonnes : MRM_ACTION, CATEGORIE_PROVISION, TRANCHE_PM, ORDRE_TRANCHE,
-               nb_dossiers, pm_mrm, pm_cpt, ecart_signe, taux_chute_pct,
-               pct_nb_consigne (poids du croisement dans la consigne).
+    Ventilé par (CLAUSE, TYPE_CLAUSE) ; pct_nb_consigne est le poids du
+    croisement dans la consigne, dans le scope de chaque clause.
+
+    Colonnes : CLAUSE, TYPE_CLAUSE, MRM_ACTION, CATEGORIE_PROVISION, TRANCHE_PM,
+               ORDRE_TRANCHE, nb_dossiers, pm_mrm, pm_cpt, ecart_signe,
+               taux_chute_pct, pct_nb_consigne.
     """
     tranche_col, ordre_col = _pm_tranche_expr(pm_col)
     pm_mrm = F.coalesce(F.col("MRM_PM"), F.lit(0.0))
@@ -171,9 +174,9 @@ def analyze_consignes_pm(
         .withColumn("_ecart", pm_mrm - pm_cpt)
     )
 
-    window_consigne = Window.partitionBy("MRM_ACTION")
+    window_consigne = Window.partitionBy("CLAUSE", "TYPE_CLAUSE", "MRM_ACTION")
     return (
-        df.groupBy("MRM_ACTION", "CATEGORIE_PROVISION", "TRANCHE_PM", "ORDRE_TRANCHE")
+        df.groupBy("CLAUSE", "TYPE_CLAUSE", "MRM_ACTION", "CATEGORIE_PROVISION", "TRANCHE_PM", "ORDRE_TRANCHE")
         .agg(
             F.count("*").alias("nb_dossiers"),
             F.round(F.sum("MRM_PM"), 2).alias("pm_mrm"),
@@ -185,7 +188,7 @@ def analyze_consignes_pm(
                            F.col("ecart_signe") / F.col("pm_mrm") * 100).otherwise(0.0), 2))
         .withColumn("pct_nb_consigne",
             F.round(F.col("nb_dossiers") / F.sum("nb_dossiers").over(window_consigne) * 100, 2))
-        .orderBy("MRM_ACTION", "CATEGORIE_PROVISION", "ORDRE_TRANCHE")
+        .orderBy("CLAUSE", "TYPE_CLAUSE", "MRM_ACTION", "CATEGORIE_PROVISION", "ORDRE_TRANCHE")
     )
 
 
@@ -210,9 +213,11 @@ def analyze_suivi_consignes_global(
     MATCHÉS. Pour DELETE, ces matchés sont justement les consignes NON suivies
     (PM toujours présente) → taux de chute non pertinent (null).
 
-    Colonnes : MRM_ACTION, ORDRE, nb_total, nb_matches, nb_orphelins,
-               nb_conformes, pct_conformite, nb_pm_nulle, nb_pm_non_nulle,
-               pm_mrm, pm_cpt, ecart, taux_chute_pct.
+    Ventilé par (CLAUSE, TYPE_CLAUSE) : une ligne par consigne et par clause.
+
+    Colonnes : CLAUSE, TYPE_CLAUSE, MRM_ACTION, ORDRE, nb_total, nb_matches,
+               nb_orphelins, nb_conformes, pct_conformite, nb_pm_nulle,
+               nb_pm_non_nulle, pm_mrm, pm_cpt, ecart, taux_chute_pct.
     """
     is_m = F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS))
     df = (
@@ -222,7 +227,7 @@ def analyze_suivi_consignes_global(
     )
 
     agg = (
-        df.groupBy("MRM_ACTION")
+        df.groupBy("CLAUSE", "TYPE_CLAUSE", "MRM_ACTION")
         .agg(
             F.count("*").alias("nb_total"),
             F.sum(F.when(is_m, 1).otherwise(0)).alias("nb_matches"),
@@ -252,11 +257,12 @@ def analyze_suivi_consignes_global(
             F.when(is_delete | (F.col("pm_mrm") == 0), None)
              .otherwise(F.round(F.col("ecart") / F.col("pm_mrm") * 100, 2)))
         .select(
+            "CLAUSE", "TYPE_CLAUSE",
             "MRM_ACTION", "ORDRE", "nb_total", "nb_matches", "nb_orphelins",
             "nb_conformes", "pct_conformite", "nb_pm_nulle", "nb_pm_non_nulle",
             "pm_mrm", "pm_cpt", "ecart", "taux_chute_pct",
         )
-        .orderBy("ORDRE")
+        .orderBy("CLAUSE", "TYPE_CLAUSE", "ORDRE")
     )
 
 
@@ -273,8 +279,11 @@ def analyze_delete_non_suivies(
     Analyse séparée (volumétrie + niveau de PM par tranche) : la consigne n'a pas
     été appliquée → enjeu financier à remonter.
 
-    Colonnes : TRANCHE_PM, ORDRE_TRANCHE, nb_dossiers, pm_mrm_non_supprimee,
-               pm_cpt, pct_nb.
+    Ventilé par (CLAUSE, TYPE_CLAUSE) ; pct_nb est le poids de la tranche dans
+    le scope de chaque clause.
+
+    Colonnes : CLAUSE, TYPE_CLAUSE, TRANCHE_PM, ORDRE_TRANCHE, nb_dossiers,
+               pm_mrm_non_supprimee, pm_cpt, pct_nb.
     """
     tranche_col, ordre_col = _pm_tranche_expr(pm_col)
     df = (
@@ -286,9 +295,9 @@ def analyze_delete_non_suivies(
         .withColumn("TRANCHE_PM",    tranche_col)
         .withColumn("ORDRE_TRANCHE", ordre_col)
     )
-    w = Window.partitionBy()
+    w = Window.partitionBy("CLAUSE", "TYPE_CLAUSE")
     return (
-        df.groupBy("TRANCHE_PM", "ORDRE_TRANCHE")
+        df.groupBy("CLAUSE", "TYPE_CLAUSE", "TRANCHE_PM", "ORDRE_TRANCHE")
         .agg(
             F.count("*").alias("nb_dossiers"),
             F.round(F.sum("MRM_PM"), 2).alias("pm_mrm_non_supprimee"),
@@ -296,6 +305,6 @@ def analyze_delete_non_suivies(
         )
         .withColumn("pct_nb",
             F.round(F.col("nb_dossiers") / F.sum("nb_dossiers").over(w) * 100, 2))
-        .orderBy("ORDRE_TRANCHE")
+        .orderBy("CLAUSE", "TYPE_CLAUSE", "ORDRE_TRANCHE")
     )
 

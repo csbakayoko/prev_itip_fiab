@@ -2,12 +2,14 @@
 Restitution et export des résultats d'analyse.
 
 - collect_analyses : assemble toutes les analyses en un dict {nom: DataFrame},
-  chaque table taguée de la CLAUSE / du CLIENT (colonnes + nom de fichier).
+  chacune ventilée par CLAUSE / TYPE_CLAUSE (colonnes portées par les données).
 - restituer_analyses : restitution console (.show de chaque analyse).
 - export_analyses : écriture multi-format (CSV / Parquet / Excel multi-onglets /
-  table Delta metastore), la clause apparaît dans le nom de fichier/table.
+  table Delta metastore), le périmètre apparaît dans le nom de fichier/table.
 
-Mono-client : la clause active est CLIENT_CLAUSES[0] (sinon "GLOBAL").
+v2.0 multi-périmètre : aucune clause n'est figée. Chaque table est déjà
+ventilée par (CLAUSE, TYPE_CLAUSE) ; le run porte un libellé de périmètre
+(CLIENT_NAME) utilisé uniquement pour nommer les sorties.
 """
 
 import logging
@@ -18,7 +20,8 @@ import pandas as pd
 from pyspark.sql import DataFrame
 import pyspark.sql.functions as F
 
-from config import CLIENT_NAME, CLIENT_CLAUSES, CLIENT_TYPE_CLAUSES
+from config import CLIENT_NAME, CLIENT_CLAUSES
+from modules.analysis.helpers import derive_clause_column
 
 from modules.analysis.taux_chute import analyze_taux_chute
 from modules.analysis.consignes import (
@@ -32,9 +35,11 @@ from modules.analysis.orphelins import ventilate_cpt_only, analyze_obs_tardives
 logger = logging.getLogger(__name__)
 
 
-# Clause active (mono-client) + type, propagés dans chaque sortie.
-_CLAUSE = CLIENT_CLAUSES[0] if CLIENT_CLAUSES else "GLOBAL"
-_TYPE   = CLIENT_TYPE_CLAUSES[0] if CLIENT_TYPE_CLAUSES else "GLOBAL"
+# Libellé de périmètre pour nommer les sorties (fichiers / tables). En
+# multi-périmètre il n'y a pas de clause unique : on note la clause si le run
+# est filtré sur une seule, sinon "MULTI". La clause réelle reste DANS chaque
+# table (colonne CLAUSE), jamais écrasée.
+_PERIMETRE = CLIENT_CLAUSES[0] if (CLIENT_CLAUSES and len(CLIENT_CLAUSES) == 1) else "MULTI"
 
 # Chemin DBFS par défaut des exports fichiers.
 DEFAULT_BASE_PATH = (
@@ -47,27 +52,32 @@ DEFAULT_BASE_PATH = (
 # ============================================================================
 
 def tag_clause(df: DataFrame) -> DataFrame:
-    """Préfixe le DataFrame des colonnes d'identité CLIENT / CLAUSE / TYPE_CLAUSE.
+    """Place les colonnes d'identité CLAUSE / TYPE_CLAUSE en tête de table.
 
-    La clause est ainsi présente DANS chaque table restituée ou exportée.
+    En multi-périmètre la clause est portée par les données (dérivée via
+    derive_clause_column avant agrégation) : chaque analyse est déjà ventilée
+    par (CLAUSE, TYPE_CLAUSE). On ne fait que réordonner pour la lisibilité ;
+    une table sans dimension clause est renvoyée telle quelle.
     """
-    cols = ["CLIENT", "CLAUSE", "TYPE_CLAUSE"] + df.columns
-    return (
-        df.withColumn("CLIENT",      F.lit(CLIENT_NAME))
-          .withColumn("CLAUSE",      F.lit(_CLAUSE))
-          .withColumn("TYPE_CLAUSE", F.lit(_TYPE))
-          .select(*cols)
-    )
+    front = [c for c in ("CLAUSE", "TYPE_CLAUSE") if c in df.columns]
+    if not front:
+        return df
+    rest = [c for c in df.columns if c not in front]
+    return df.select(*front, *rest)
 
 
 def collect_analyses(df_result: DataFrame) -> Dict[str, DataFrame]:
     """
     Assemble toutes les analyses restituables en un dict {nom: DataFrame},
-    chaque table taguée de la clause.
+    chaque table ventilée par (CLAUSE, TYPE_CLAUSE).
+
+    derive_clause_column est appliqué une fois en amont pour matérialiser les
+    colonnes CLAUSE / TYPE_CLAUSE attendues par chaque analyse.
 
     Note : diagnose_mrm_fanout n'est pas inclus (il imprime un récap et requiert
     le MRM clean en entrée) — il reste appelé à part dans main.
     """
+    df_result = derive_clause_column(df_result)
     tables = {
         "suivi_consignes"      : analyze_suivi_consignes_global(df_result),
         "taux_chute"           : analyze_taux_chute(df_result),
@@ -87,7 +97,7 @@ def restituer_analyses(df_result: DataFrame, n: int = 100) -> Dict[str, DataFram
     """
     tables = collect_analyses(df_result)
     for name, df in tables.items():
-        print(f"\n===== {name}  (client {CLIENT_NAME} / clause {_CLAUSE}) =====")
+        print(f"\n===== {name}  (périmètre {CLIENT_NAME} / clauses {_PERIMETRE}) =====")
         df.show(n, truncate=False)
     return tables
 
@@ -103,14 +113,14 @@ def _to_local(path: str) -> str:
 
 def _clause_dir(base_path: str) -> str:
     """Sous-dossier d'export propre au client/clause."""
-    return f"{base_path.rstrip('/')}/{CLIENT_NAME}_{_CLAUSE}"
+    return f"{base_path.rstrip('/')}/{CLIENT_NAME}_{_PERIMETRE}"
 
 
 def export_csv(tables: Dict[str, DataFrame], base_path: str, delimiter: str = ";") -> None:
     """Un CSV par analyse (coalesce(1), header), clause dans le nom de dossier."""
     out = _clause_dir(base_path)
     for name, df in tables.items():
-        path = f"{out}/{name}_{_CLAUSE}"
+        path = f"{out}/{name}_{_PERIMETRE}"
         (df.coalesce(1).write.mode("overwrite")
            .option("header", "true").option("delimiter", delimiter)
            .option("encoding", "UTF-8").csv(path))
@@ -121,7 +131,7 @@ def export_parquet(tables: Dict[str, DataFrame], base_path: str) -> None:
     """Un Parquet par analyse, clause dans le nom de dossier."""
     out = _clause_dir(base_path)
     for name, df in tables.items():
-        path = f"{out}/{name}_{_CLAUSE}.parquet"
+        path = f"{out}/{name}_{_PERIMETRE}.parquet"
         df.coalesce(1).write.mode("overwrite").parquet(path)
         print(f"  ✓ [PARQUET] {path}")
 
@@ -130,7 +140,7 @@ def export_excel(tables: Dict[str, DataFrame], base_path: str) -> str:
     """Un seul .xlsx multi-onglets (un onglet par analyse, < 100k lignes)."""
     out_dir = _to_local(_clause_dir(base_path))
     os.makedirs(out_dir, exist_ok=True)
-    path = f"{out_dir}/analyses_{CLIENT_NAME}_{_CLAUSE}.xlsx"
+    path = f"{out_dir}/analyses_{CLIENT_NAME}_{_PERIMETRE}.xlsx"
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
         for name, df in tables.items():
             nb = df.count()
@@ -146,7 +156,7 @@ def export_excel(tables: Dict[str, DataFrame], base_path: str) -> str:
 def export_delta(tables: Dict[str, DataFrame], schema: str) -> None:
     """Une table Delta metastore par analyse : <schema>.itip_<nom>_<clause>."""
     for name, df in tables.items():
-        table = f"{schema}.itip_{name}_{_CLAUSE}"
+        table = f"{schema}.itip_{name}_{_PERIMETRE}"
         (df.write.format("delta").mode("overwrite")
            .option("overwriteSchema", "true").saveAsTable(table))
         print(f"  ✓ [DELTA]   {table}")
@@ -175,7 +185,7 @@ def export_analyses(
     """
     tables = collect_analyses(df_result)
     formats = {f.lower() for f in formats}
-    print(f"\n[EXPORT] client {CLIENT_NAME} / clause {_CLAUSE} → formats {sorted(formats)}")
+    print(f"\n[EXPORT] périmètre {CLIENT_NAME} / clauses {_PERIMETRE} → formats {sorted(formats)}")
 
     if "csv" in formats:
         export_csv(tables, base_path, delimiter)

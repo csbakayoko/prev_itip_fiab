@@ -188,14 +188,17 @@ def study_provisionnement(
     Univers : matchs légitimes (MATCH_LABELS) + déclarations tardives (CPT_LATE),
     consigne MRM_DELETE exclue. PM nulles ramenées à 0 pour la comparaison.
 
-    Colonnes (une ligne par catégorie, + tri par nb décroissant) :
-        CATEGORIE_PROVISION, NB_DOSSIERS, PCT_NB,
+    Ventilé par (CLAUSE, TYPE_CLAUSE) ; les pourcentages (PCT_NB, PCT_PM_MRM)
+    sont calculés dans le scope de chaque clause.
+
+    Colonnes (une ligne par clause × catégorie, + tri par nb décroissant) :
+        CLAUSE, TYPE_CLAUSE, CATEGORIE_PROVISION, NB_DOSSIERS, PCT_NB,
         PM_MRM, PM_CPT, PCT_PM_MRM,
         ECART_SIGNE, ECART_ABS_TOTAL, ECART_ABS_MOYEN, ECART_ABS_MAX,
         TAUX_CHUTE
 
     Returns:
-        DataFrame de stats par catégorie, prêt pour visualisation.
+        DataFrame de stats par clause × catégorie, prêt pour visualisation.
     """
     matched = list(MATCH_LABELS) + ["CPT_LATE"]
     pm_mrm  = F.coalesce(F.col("MRM_PM"), F.lit(0.0))
@@ -214,9 +217,9 @@ def study_provisionnement(
              .otherwise("CONFORME"))
     )
 
-    w = Window.partitionBy()   # totaux globaux pour les pourcentages
+    w = Window.partitionBy("CLAUSE", "TYPE_CLAUSE")   # totaux par clause pour les pourcentages
     return (
-        df.groupBy("CATEGORIE_PROVISION")
+        df.groupBy("CLAUSE", "TYPE_CLAUSE", "CATEGORIE_PROVISION")
         .agg(
             F.count("*").alias("NB_DOSSIERS"),
             F.round(F.sum("MRM_PM"), 2).alias("PM_MRM"),
@@ -233,6 +236,6 @@ def study_provisionnement(
         .withColumn("TAUX_CHUTE",
             F.round(F.when(F.col("PM_MRM") != 0,
                            F.col("ECART_SIGNE") / F.col("PM_MRM") * 100).otherwise(0.0), 2))
-        .orderBy(F.desc("NB_DOSSIERS"))
+        .orderBy("CLAUSE", "TYPE_CLAUSE", F.desc("NB_DOSSIERS"))
     )
 

@@ -1,4 +1,4 @@
-"""Taux de chute CPT/MRM (multi-clause historique + mono-client matchés)."""
+"""Taux de chute CPT/MRM, ventilé par clause (agrégé Power BI + synthèse)."""
 
 from pyspark.sql import DataFrame, Window
 import pyspark.sql.functions as F
@@ -115,8 +115,10 @@ def analyze_taux_chute(
         > 0 → sous-provisionnement (CPT < MRM, risque)
         < 0 → sur-provisionnement  (CPT > MRM, marge)
 
-    Colonnes : MRM_ACTION, nb_dossiers, nb_sous, nb_sur, nb_conforme,
-               pm_mrm, pm_cpt, ecart_signe, taux_chute_pct.
+    Ventilé par (CLAUSE, TYPE_CLAUSE) : une ligne par consigne et par clause.
+
+    Colonnes : CLAUSE, TYPE_CLAUSE, MRM_ACTION, nb_dossiers, nb_sous, nb_sur,
+               nb_conforme, pm_mrm, pm_cpt, ecart_signe, taux_chute_pct.
     """
     df = (
         _with_mrm_action(df_result, conclusion_col)
@@ -126,7 +128,7 @@ def analyze_taux_chute(
                             - F.coalesce(F.col("CPT_PM"), F.lit(0.0)))
     )
     return (
-        df.groupBy("MRM_ACTION")
+        df.groupBy("CLAUSE", "TYPE_CLAUSE", "MRM_ACTION")
         .agg(
             F.count("*").alias("nb_dossiers"),
             F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("nb_sous"),
@@ -139,6 +141,6 @@ def analyze_taux_chute(
         .withColumn("taux_chute_pct",
             F.round(F.when(F.col("pm_mrm") != 0,
                            F.col("ecart_signe") / F.col("pm_mrm") * 100).otherwise(0.0), 2))
-        .orderBy(F.desc("nb_dossiers"))
+        .orderBy("CLAUSE", "TYPE_CLAUSE", F.desc("nb_dossiers"))
     )
 

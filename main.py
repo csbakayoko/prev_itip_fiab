@@ -1,10 +1,10 @@
 """
 Pipeline de fiabilisation ITIP-FIAB — point d'entrée.
 
-Spine essentiel, mono-client (SODEXO) :
-    load → clean → waterfall → synthèse SODEXO (ASCII console)
+Spine essentiel, multi-périmètre :
+    load → clean → waterfall → synthèse (ASCII console) + analyses par clause
 
-Périmètre piloté par config/profile.py. Lancement :
+Périmètre piloté par config/profile.py (par défaut : toutes les clauses). Lancement :
     spark-submit main.py        (ou exécution dans un notebook Databricks)
 """
 

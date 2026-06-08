@@ -4,12 +4,12 @@ Package d'analyse métier de la réconciliation CPT/MRM.
 Découpage thématique (un sous-module par famille d'analyse) :
     helpers          — helpers internes + constantes (tranches, identité MRM)
     consignes        — suivi/audit des consignes MRM (+ PM)
-    taux_chute       — taux de chute (multi-clause historique + mono-client matchés)
+    taux_chute       — taux de chute ventilé par clause
     provisionnement  — sous/sur/conforme, écarts par tranches, étude globale
     orphelins        — CPT_ONLY, MRM_MISSING, ventilation, obs tardives IT
     enrich           — tag obs tardives IT + tags orphelins (mutent df_result)
     diagnostics      — diagnostic fan-out CPT/MRM
-    export           — restitution console + export multi-format (clause taguée)
+    export           — restitution console + export multi-format (ventilé par clause)
 
 Toutes les fonctions publiques sont ré-exportées ici → l'import reste
 `from modules.analysis import <fonction>` (compat ascendante).
@@ -83,7 +83,8 @@ def run_full_analysis(
 
     Les colonnes CLAUSE / TYPE_CLAUSE (absentes du df_result brut : la clause est
     portée par CPT_CLAUSE / MRM_CLAUSE) sont dérivées ici via derive_clause_column.
-    Pour la restitution/export mono-client, voir export.collect_analyses.
+    Pour la restitution/export console (synthèse par clause), voir
+    export.collect_analyses.
     """
     df_result = derive_clause_column(df_result)
     synthese_consignes, _ = analyze_suivi_consignes(df_result, conclusion_col, clause_col)

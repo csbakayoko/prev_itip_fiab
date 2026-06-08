@@ -4,8 +4,12 @@ from pyspark.sql import DataFrame, Window
 import pyspark.sql.functions as F
 from typing import Dict, List, Optional, Tuple
 
-from config import MATCH_LABELS, DATE_INVENTAIRE, CLIENT_TYPE_CLAUSES
+from config import MATCH_LABELS, DATE_INVENTAIRE, TYPE_CLAUSE_CPT_PREFIX
 from modules.matching import categorize_mrm_conclusion
+
+# Préfixe CPT → type de clause (ex. "CPB" → "PB"). Réciproque de
+# TYPE_CLAUSE_CPT_PREFIX, pour dériver le type des dossiers sans contrepartie MRM.
+_CPT_PREFIX_TO_TYPE = {v.rstrip("_"): t for t, v in TYPE_CLAUSE_CPT_PREFIX.items()}
 
 
 def derive_clause_column(df: DataFrame) -> DataFrame:
@@ -16,10 +20,11 @@ def derive_clause_column(df: DataFrame) -> DataFrame:
     Après le waterfall, la clause est portée par CPT_CLAUSE (ex. "CPB_121981",
     préfixe = type) et/ou MRM_CLAUSE (ex. "121981") ; il n'existe pas de colonne
     "CLAUSE" nue → d'où l'erreur UNRESOLVED_COLUMN quand on appelle run_full_analysis
-    directement. On la dérive ici :
+    directement. On la dérive ici, sans aucune hypothèse mono-client :
 
         CLAUSE      = MRM_CLAUSE sinon CPT_CLAUSE sans son préfixe ("CPB_…").
-        TYPE_CLAUSE = MRM_TYPE_CLAUSE sinon type client (mono-client).
+        TYPE_CLAUSE = MRM_TYPE_CLAUSE sinon type déduit du préfixe CPT
+                      (CPT_ONLY : pas de MRM → on lit le type dans "CPB_…").
 
     À appeler une fois sur df_result avant les analyses multi-clause.
     """
@@ -33,8 +38,14 @@ def derive_clause_column(df: DataFrame) -> DataFrame:
     type_parts = []
     if "MRM_TYPE_CLAUSE" in df.columns:
         type_parts.append(F.col("MRM_TYPE_CLAUSE"))
-    type_parts.append(F.lit(CLIENT_TYPE_CLAUSES[0] if CLIENT_TYPE_CLAUSES else None).cast("string"))
-    type_clause = F.coalesce(*type_parts)
+    if "CPT_CLAUSE" in df.columns:
+        # Préfixe CPT (ex. "CPB") → type ("PB") pour les dossiers sans MRM.
+        prefix = F.regexp_extract(F.col("CPT_CLAUSE"), r"^([A-Za-z]+)_", 1)
+        type_from_cpt = F.lit(None).cast("string")
+        for pfx, t in _CPT_PREFIX_TO_TYPE.items():
+            type_from_cpt = F.when(prefix == pfx, F.lit(t)).otherwise(type_from_cpt)
+        type_parts.append(type_from_cpt)
+    type_clause = F.coalesce(*type_parts) if type_parts else F.lit(None).cast("string")
 
     return df.withColumn("CLAUSE", clause).withColumn("TYPE_CLAUSE", type_clause)
 
