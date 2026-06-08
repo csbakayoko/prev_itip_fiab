@@ -45,6 +45,7 @@ from modules.analysis.orphelins import (
 from modules.analysis.enrich import (
     flag_late_it_observations,
     enrich_result_tags,
+    drop_unmatched_inventory_non,
 )
 from modules.analysis.diagnostics import diagnose_mrm_fanout
 from modules.analysis.helpers import DEFAULT_PM_TRANCHES, derive_clause_column

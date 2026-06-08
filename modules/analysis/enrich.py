@@ -1,4 +1,6 @@
-"""Enrichissement du résultat : tag obs tardives IT + tags orphelins."""
+"""Enrichissement du résultat : tag obs tardives IT + tags orphelins + rejet final."""
+
+import logging
 
 from pyspark.sql import DataFrame, Window
 import pyspark.sql.functions as F
@@ -9,6 +11,8 @@ from config import (
 )
 from modules.matching import categorize_mrm_conclusion
 from modules.analysis.helpers import _inventory_year
+
+logger = logging.getLogger(__name__)
 
 
 def flag_late_it_observations(
@@ -115,4 +119,37 @@ def enrich_result_tags(
          .when(is_cpt_only,                                     "ORPHELIN_A_ANALYSER")
          .otherwise(None)
     )
+
+
+def drop_unmatched_inventory_non(
+    df_result : DataFrame,
+    statut_col: str = "MRM_STATUT_INV",
+) -> DataFrame:
+    """
+    Jette les dossiers MRM au statut inventaire NON restés NON matchés en fin de
+    pipeline (TYPE_RECONCILIATION == "MRM_MISSING").
+
+    Le statut NON est ouvert au chargement pour permettre le REPÊCHAGE : un MRM
+    NON qui matche un compte est légitime (il est dans le compte) et conservé.
+    Mais un MRM NON qui n'a jamais matché n'est pas remonté à la direction
+    financière → il n'a aucune contrepartie comptable : on le jette purement et
+    simplement (hors métriques ET hors export). Nettoyage tracé.
+
+    À appeler en TOUTE FIN de pipeline (après matching + recovery + tags), juste
+    avant la persistance et les analyses.
+    """
+    if statut_col not in df_result.columns:
+        return df_result
+
+    is_non_unmatched = (
+        (F.col("TYPE_RECONCILIATION") == "MRM_MISSING")
+        & (F.upper(F.trim(F.col(statut_col))) == F.lit("NON"))
+    )
+    n_drop = df_result.filter(is_non_unmatched).count()
+    if n_drop:
+        logger.info(
+            "Rejet MRM statut NON non matchés (MRM_MISSING) : %d dossier(s) jeté(s) "
+            "— hors métriques et hors export.", n_drop,
+        )
+    return df_result.filter(~is_non_unmatched)
 

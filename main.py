@@ -22,6 +22,7 @@ from modules.matching import matching_waterfall, recover_late_declarations
 from modules.analysis import (
     flag_late_it_observations,
     enrich_result_tags,
+    drop_unmatched_inventory_non,
     diagnose_mrm_fanout,
     restituer_analyses,
     export_analyses,
@@ -53,6 +54,12 @@ def run(spark: SparkSession) -> DataFrame:
         # Colonnes persistantes : consigne reformatée (MRM_ACTION) + tag des
         # orphelins CPT_ONLY (TAG_CPT_ONLY).
         df_result = enrich_result_tags(df_result)
+
+        # Nettoyage final : le statut inventaire NON est ouvert au load pour le
+        # repêchage (un NON qui matche est conservé). Les MRM NON restés NON
+        # matchés (MRM_MISSING) n'ont aucune contrepartie compte → jetés (hors
+        # métriques et hors export).
+        df_result = drop_unmatched_inventory_non(df_result)
 
         with timed("persist df_result"):
             df_result = df_result.persist()

@@ -179,6 +179,68 @@ def keep_latest_by_keys(
     )
 
 
+def dedupe_mrm_by_strict_key(
+    df        : DataFrame,
+    key_col   : str = "key_strict",
+    statut_col: str = "STATUT_INV",
+) -> DataFrame:
+    """
+    Dédoublonnage MRM sur la clé stricte — déterministe et justifié.
+
+    Règle métier : quand plusieurs lignes partagent la même clé stricte, on
+    retire EN PRIORITÉ celles au statut inventaire NON (non remontées à la
+    direction financière), puis on garde la plus récente (date d'inventaire),
+    avec un départage stable (PM décroissant, puis n° de sinistre) → résultat
+    reproductible d'un run à l'autre (corrige le non-déterminisme qui avait fait
+    désactiver le dropDuplicates historique).
+
+    Le nettoyage est tracé : nombre de doublons retirés, dont combien au statut
+    NON (justification du nettoyage avant les métriques).
+    """
+    if key_col not in df.columns:
+        return df
+
+    is_non = (
+        (F.upper(F.trim(F.col(statut_col))) == F.lit("NON"))
+        if statut_col in df.columns else F.lit(False)
+    )
+
+    # Priorité : OUI/autre (0) avant NON (1) ; puis plus récent ; puis stable.
+    order = [F.when(is_non, 1).otherwise(0).asc()]
+    if "D_INVENTAIRE" in df.columns:
+        order.append(F.col("D_INVENTAIRE").desc_nulls_last())
+    if "PM" in df.columns:
+        order.append(F.col("PM").desc_nulls_last())
+    if "NUM_SINISTRE" in df.columns:
+        order.append(F.col("NUM_SINISTRE").asc_nulls_last())
+
+    w      = Window.partitionBy(key_col).orderBy(*order)
+    ranked = df.withColumn("_rn", F.row_number().over(w))
+
+    # Justification du nettoyage (une seule passe d'agrégation sur les retirés).
+    stats = (
+        ranked.filter(F.col("_rn") > 1)
+        .select(
+            F.count(F.lit(1)).alias("n_removed"),
+            F.sum(F.when(is_non, 1).otherwise(0)).alias("n_removed_non"),
+        )
+        .first()
+    )
+    n_removed     = (stats["n_removed"] or 0) if stats else 0
+    n_removed_non = (stats["n_removed_non"] or 0) if stats else 0
+
+    if n_removed:
+        logger.info(
+            "Dédoublonnage MRM clé stricte : %d doublon(s) retiré(s) "
+            "(dont %d statut NON, %d autres départagés par date d'inventaire).",
+            n_removed, n_removed_non, n_removed - n_removed_non,
+        )
+    else:
+        logger.info("Dédoublonnage MRM clé stricte : aucun doublon détecté.")
+
+    return ranked.filter(F.col("_rn") == 1).drop("_rn")
+
+
 # ============================================================================
 # CONVERSIONS
 # ============================================================================
@@ -273,8 +335,9 @@ def clean_mrm(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     Pipeline complet de nettoyage MRM :
         1. Sélection / renommage selon MAPPING_MRM
         2. Cast des dates (D_NAISSANCE, D_SURVENANCE) et montants (PM, PSAP)
-        3. Dédoublonnage (fix T-01 — un dossier MRM dupliqué inflate la jointure)
-        4. Ajout des clés de matching
+        3. Ajout des clés de matching
+        4. Dédoublonnage déterministe sur la clé stricte (priorité OUI > NON,
+           puis plus récent) — tracé et justifié avant les métriques
 
     Args:
         df_raw : DataFrame MRM brut (sorti de loader.py)
@@ -289,15 +352,11 @@ def clean_mrm(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
         if date_col in df.columns:
             df = df.withColumn(date_col, F.to_date(F.col(date_col), "dd/MM/yyyy"))
     df = cast_mrm_amounts(df, cols=["PM", "PSAP"])
-    # Dédoublonnage MRM désactivé : dropDuplicates(mrm_dup_keys) était non
-    # déterministe (ligne gardée arbitraire → PM/consigne/nom instables d'un run
-    # à l'autre). Le fan-out du join est déjà géré par dropDuplicates([key]) dans
-    # execute_matching_step. À réactiver via un keep_latest_by_keys ordonné si on
-    # veut éviter le double-comptage des doublons MRM en MRM_MISSING.
-    # dup_keys = [k for k in cfg.mrm_dup_keys if k in df.columns]
-    # if dup_keys:
-    #     df = df.dropDuplicates(dup_keys)
     df = add_matching_keys(df, rpp_col="IDCORP")
+    # Dédoublonnage MRM sur la clé stricte (déterministe) : retire les doublons,
+    # priorité OUI > NON puis plus récent. Évite le double-comptage des doublons
+    # MRM (notamment en MRM_MISSING) et le fan-out de jointure.
+    df = dedupe_mrm_by_strict_key(df)
     df = prefix_columns(
         df, prefix="MRM_",
         keep=["key_strict", "key_no_date", "key_strict_tronc", "key_no_date_tronc", "key_no_garantie"],
