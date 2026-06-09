@@ -10,7 +10,7 @@ from config import (
     LATE_IT_GARANTIE, OBS_TARDIVE_LABEL, ORPHAN_PM_THRESHOLD, ORPHAN_FIN_ANNEE_MOIS,
 )
 from modules.matching import categorize_mrm_conclusion
-from modules.analysis.helpers import _inventory_year
+from modules.analysis.helpers import _inventory_year, _matched_universe
 
 logger = logging.getLogger(__name__)
 
@@ -124,32 +124,40 @@ def enrich_result_tags(
 def drop_unmatched_inventory_non(
     df_result : DataFrame,
     statut_col: str = "MRM_STATUT_INV",
+    log       : bool = True,
 ) -> DataFrame:
     """
-    Jette les dossiers MRM au statut inventaire NON restés NON matchés en fin de
-    pipeline (TYPE_RECONCILIATION == "MRM_MISSING").
+    Jette les dossiers MRM au statut inventaire NON restés NON matchés.
 
-    Le statut NON est ouvert au chargement pour permettre le REPÊCHAGE : un MRM
-    NON qui matche un compte est légitime (il est dans le compte) et conservé.
-    Mais un MRM NON qui n'a jamais matché n'est pas remonté à la direction
-    financière → il n'a aucune contrepartie comptable : on le jette purement et
-    simplement (hors métriques ET hors export). Nettoyage tracé.
+    Le statut NON est ouvert au chargement uniquement pour le REPÊCHAGE : un MRM
+    NON qui MATCHE un compte (∈ MATCH_LABELS, ou récupéré N+1 CPT_LATE) est
+    légitime → conservé (un DELETE matché reste un finding « delete non suivi »).
+    Tout MRM NON qui n'a PAS matché (MRM_MISSING, orphelin MRM_DELETE, …) n'a
+    aucune contrepartie comptable et n'est pas remonté à la direction
+    financière → on le jette : hors métriques ET hors export.
 
-    À appeler en TOUTE FIN de pipeline (après matching + recovery + tags), juste
-    avant la persistance et les analyses.
+    Idempotent : à appeler en fin de pipeline (main, avant persistance) et/ou en
+    tête des points d'analyse (run_full_analysis, collect_analyses) pour garantir
+    des tables propres quel que soit l'appelant. `log=False` évite le recomptage
+    quand le rejet a déjà été tracé en amont.
+
+    Args:
+        statut_col : colonne statut inventaire (MRM_STATUT_INV).
+        log        : True → trace le nombre de dossiers jetés (1 action count).
     """
     if statut_col not in df_result.columns:
         return df_result
 
-    is_non_unmatched = (
-        (F.col("TYPE_RECONCILIATION") == "MRM_MISSING")
-        & (F.upper(F.trim(F.col(statut_col))) == F.lit("NON"))
-    )
-    n_drop = df_result.filter(is_non_unmatched).count()
-    if n_drop:
-        logger.info(
-            "Rejet MRM statut NON non matchés (MRM_MISSING) : %d dossier(s) jeté(s) "
-            "— hors métriques et hors export.", n_drop,
-        )
+    is_non       = F.upper(F.trim(F.col(statut_col))) == F.lit("NON")
+    is_matched   = F.col("TYPE_RECONCILIATION").isin(_matched_universe())
+    is_non_unmatched = is_non & ~is_matched
+
+    if log:
+        n_drop = df_result.filter(is_non_unmatched).count()
+        if n_drop:
+            logger.info(
+                "Rejet MRM statut NON non matchés : %d dossier(s) jeté(s) "
+                "— hors métriques et hors export (repêchage NON conservé).", n_drop,
+            )
     return df_result.filter(~is_non_unmatched)
 

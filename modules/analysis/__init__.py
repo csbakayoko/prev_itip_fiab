@@ -84,9 +84,12 @@ def run_full_analysis(
 
     Les colonnes CLAUSE / TYPE_CLAUSE (absentes du df_result brut : la clause est
     portée par CPT_CLAUSE / MRM_CLAUSE) sont dérivées ici via derive_clause_column.
-    Pour la restitution/export console (synthèse par clause), voir
+    Les MRM statut NON non matchés sont jetés en tête (cohérence : ils n'ont aucune
+    contrepartie compte). Pour la restitution/export console, voir
     export.collect_analyses.
     """
+    # Rejet des NON non matchés (idempotent ; déjà tracé dans main si lancé là).
+    df_result = drop_unmatched_inventory_non(df_result, log=False)
     df_result = derive_clause_column(df_result)
     synthese_consignes, _ = analyze_suivi_consignes(df_result, conclusion_col, clause_col)
 

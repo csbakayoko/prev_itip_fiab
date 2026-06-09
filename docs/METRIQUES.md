@@ -32,13 +32,16 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
 1. **Statut inventaire NON — repêchage puis rejet.**
    Le statut `MRM_STATUT_INV = NON` est chargé **exprès** pour autoriser le
    repêchage au matching.
-   - Un MRM `NON` qui **matche** un compte est **conservé** (il est dans le
-     compte → légitime), traité comme tout matché.
-   - Un MRM `NON` resté **non matché** (`MRM_MISSING`) en fin de pipeline est
-     **jeté** : ni métriques, ni export (`drop_unmatched_inventory_non`).
-   - Conséquence : tout `MRM_MISSING` présent dans les métriques est en statut
-     `OUI` (ou statut absent). Les dénominateurs « non mappés » ne contiennent
-     donc **que** des dossiers remontables à la direction financière.
+   - Un MRM `NON` qui **matche** un compte (∈ MATCH_LABELS ou récupéré N+1
+     `CPT_LATE`) est **conservé** (il est dans le compte → légitime), y compris
+     un DELETE matché (finding « delete non suivi »).
+   - Un MRM `NON` resté **non matché** (`MRM_MISSING`, orphelin `MRM_DELETE`)
+     est **jeté** : ni métriques, ni export (`drop_unmatched_inventory_non`,
+     appliqué dans `main`, `run_full_analysis` et `collect_analyses` →
+     idempotent, tables propres quel que soit l'appelant).
+   - Conséquence : tout dossier `NON` présent dans les métriques **a matché**.
+     Les dénominateurs « non mappés » et les ventilations ne contiennent plus de
+     `NON` non matché.
 
 2. **Observations tardives IT (`CPT_OBS_TARDIVE`)** — sinistres clos avant
    l'inventaire suivant, jamais matchés, **sans** contrepartie MRM. **Exclues**

@@ -22,6 +22,7 @@ import pyspark.sql.functions as F
 
 from config import CLIENT_NAME, CLIENT_CLAUSES
 from modules.analysis.helpers import derive_clause_column
+from modules.analysis.enrich import drop_unmatched_inventory_non
 
 from modules.analysis.taux_chute import analyze_taux_chute
 from modules.analysis.consignes import (
@@ -78,6 +79,8 @@ def collect_analyses(df_result: DataFrame) -> Dict[str, DataFrame]:
     Note : diagnose_mrm_fanout n'est pas inclus (il imprime un récap et requiert
     le MRM clean en entrée) — il reste appelé à part dans main.
     """
+    # Rejet des NON non matchés (idempotent ; déjà tracé dans main si lancé là).
+    df_result = drop_unmatched_inventory_non(df_result, log=False)
     df_result = derive_clause_column(df_result)
     tables = {
         # Indicateurs de synthèse (1 ligne/run, scalaires historisables).
