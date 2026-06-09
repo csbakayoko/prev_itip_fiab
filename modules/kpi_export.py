@@ -23,6 +23,8 @@ Décodage des grandeurs (depuis df_result + TYPE_RECONCILIATION) :
     PM : côté MRM (MRM_PM) pour les ventilations MRM, côté CPT (CPT_PM) pour les CPT.
 """
 
+import logging
+
 from pyspark.sql import DataFrame
 import pyspark.sql.functions as F
 
@@ -37,6 +39,8 @@ from config import (
 )
 from modules.matching import categorize_mrm_conclusion
 from modules._timing import timed_fn
+
+logger = logging.getLogger(__name__)
 
 
 _KAS = ("MRM_KEEP", "MRM_ADD", "MRM_STUDY")   # consignes "à comparer" (hors DELETE)
@@ -185,6 +189,33 @@ def compute_synthese(df_result: DataFrame) -> dict:
     in_kas_metrics = lambda r: A(r) in _KAS and in_metrics(r)
     pm_mrm_kas = agg("pm_mrm", in_kas_metrics)
     pm_cpt_kas = agg("pm_cpt", in_kas_metrics)
+    global_delta = pm_mrm_kas - pm_cpt_kas
+    taux_chute_global = _pct(global_delta, pm_mrm_kas)
+
+    # ── AUTO-CONTRÔLE : taux de chute global == Σ des chutes par consigne ──────
+    # Global et par-consigne partagent désormais le MÊME univers (matchés +
+    # CPT_LATE, KEEP/ADD/STUDY) → le global doit être l'agrégat exact des
+    # consignes. Tout écart > tolérance signale une divergence d'univers
+    # (régression) : on le logue et on le remonte dans la synthèse.
+    _kas_consignes = (keep, study, add)               # DELETE exclu de la chute
+    sum_pm_mrm = sum(c["pm_mrm"] for c in _kas_consignes)
+    sum_pm_cpt = sum(c["pm_cpt"] for c in _kas_consignes)
+    sum_delta  = sum(c["delta"]  for c in _kas_consignes)
+    taux_chute_consignes = _pct(sum_delta, sum_pm_mrm)
+    _eps = 0.01                                        # tolérance € (arrondis flottants)
+    chute_coherente = (
+        abs(sum_pm_mrm - pm_mrm_kas) <= _eps
+        and abs(sum_pm_cpt - pm_cpt_kas) <= _eps
+        and abs(sum_delta  - global_delta) <= _eps
+    )
+    if not chute_coherente:
+        logger.warning(
+            "INCOHÉRENCE taux de chute global ↔ Σ consignes : "
+            "PM_MRM %.2f≠%.2f | PM_CPT %.2f≠%.2f | écart %.2f≠%.2f | "
+            "taux %.2f%%≠%.2f%%",
+            pm_mrm_kas, sum_pm_mrm, pm_cpt_kas, sum_pm_cpt,
+            global_delta, sum_delta, taux_chute_global, taux_chute_consignes,
+        )
 
     nb_trouves = nb_match + nb_late   # matchés inventaire + récupérés tardifs
 
@@ -238,7 +269,9 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "taux_couverture_compte"  : _pct(nb_match, nb_match + nb_late + nb_def),
         "taux_recup_tardive"      : _pct(nb_late, nb_late + nb_def),
         "taux_recup_global"       : _pct(nb_match + nb_late, nb_match + nb_late + nb_def),
-        "taux_chute_global"       : _pct(pm_mrm_kas - pm_cpt_kas, pm_mrm_kas),
+        "taux_chute_global"       : taux_chute_global,
+        "taux_chute_consignes"    : taux_chute_consignes,   # Σ chutes par consigne (contrôle)
+        "chute_coherente"         : chute_coherente,        # global == Σ consignes ?
         "conformite_globale"      : _pct(conf_kas, total_kas),
         # ── Niveaux de PM (matchés légitimes + tardifs) ──
         "metrics_pm_mrm"   : pm_metrics_mrm,
@@ -286,6 +319,7 @@ def build_synthese_indicateurs(df_result: DataFrame) -> DataFrame:
         "TAUX_RECUP_TARDIVE"    : float(d["taux_recup_tardive"]),
         "TAUX_RECUP_GLOBAL"     : float(d["taux_recup_global"]),
         "TAUX_CHUTE_GLOBAL"     : float(d["taux_chute_global"]),
+        "CHUTE_COHERENTE"       : bool(d["chute_coherente"]),
         "CONFORMITE_GLOBALE"    : float(d["conformite_globale"]),
         "PM_MRM"                : float(d["metrics_pm_mrm"]),
         "PM_CPT"                : float(d["metrics_pm_cpt"]),
@@ -419,6 +453,8 @@ def _render_indicateurs(d: dict) -> str:
         f"    Taux de récupération global (matchés + N+1 / compte)   : {d['taux_recup_global']:>5} %",
         "  PROVISIONNEMENT",
         f"    Taux de chute global (KEEP/ADD/STUDY)                  : {d['taux_chute_global']:>5} %",
+        f"      ↳ contrôle Σ par consigne : {d['taux_chute_consignes']:>5} %  "
+        + ("✔ cohérent" if d["chute_coherente"] else "✘ INCOHÉRENT (voir logs)"),
         f"    Conformité globale des consignes                       : {d['conformite_globale']:>5} %",
         "  (dénominateurs compte hors sinistres clos avant inventaire suivant)",
         "",
