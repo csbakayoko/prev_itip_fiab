@@ -4,7 +4,7 @@ from pyspark.sql import DataFrame, Window
 import pyspark.sql.functions as F
 from typing import Dict, List, Optional, Tuple
 
-from config import OBS_TARDIVE_LABEL
+from config import OBS_TARDIVE_LABEL, RECUP_NON_LABEL
 from modules.analysis.helpers import (
     _with_mrm_action, _statut_inv_dim, _pm_tranche_expr, _mois_label_expr,
 )
@@ -245,5 +245,44 @@ def analyze_obs_tardives(
             F.round(F.coalesce(F.avg(pm_col), F.lit(0.0)), 2).alias("PM_CPT_MOYEN"),
         )
         .orderBy(F.desc("PM_CPT_TOTAL"))
+    )
+
+
+def analyze_recup_statut_non(
+    df_result     : DataFrame,
+    conclusion_col: str = "MRM_CONCLUSION",
+    clause_col    : str = "CLAUSE",
+    pm_cpt_col    : str = "CPT_PM",
+    pm_mrm_col    : str = "MRM_PM",
+) -> DataFrame:
+    """
+    Analyse dédiée des CPT_ONLY récupérés via un MRM statut NON (CPT_RECUP_NON).
+
+    Ces dossiers prouvent qu'une contrepartie MRM existe (statut NON → PM MRM = 0,
+    non remontée à la direction financière). Le repêchage résout une anomalie
+    (le CPT n'est plus orphelin) mais SANS valeur MRM comparable → ils sont EXCLUS
+    de toutes les métriques de valeur (chute, niveaux de PM, couverture) et
+    présentés ici à part.
+
+    Ventilé par (CLAUSE, TYPE_CLAUSE, MRM_ACTION). PM_CPT = enjeu compte récupéré ;
+    NB_PM_MRM_NON_NULLE contrôle l'hypothèse « PM MRM = 0 » (doit valoir 0).
+
+    Colonnes : CLAUSE, TYPE_CLAUSE, MRM_ACTION, NB_DOSSIERS, PM_CPT_TOTAL,
+               PM_MRM_TOTAL, NB_PM_MRM_NON_NULLE.
+    """
+    return (
+        _with_mrm_action(
+            df_result.filter(F.col("TYPE_RECONCILIATION") == RECUP_NON_LABEL),
+            conclusion_col,
+        )
+        .groupBy(clause_col, "TYPE_CLAUSE", "MRM_ACTION")
+        .agg(
+            F.count("*").alias("NB_DOSSIERS"),
+            F.round(F.coalesce(F.sum(pm_cpt_col), F.lit(0.0)), 2).alias("PM_CPT_TOTAL"),
+            F.round(F.coalesce(F.sum(pm_mrm_col), F.lit(0.0)), 2).alias("PM_MRM_TOTAL"),
+            F.sum(F.when(F.col(pm_mrm_col).isNotNull() & (F.col(pm_mrm_col) != 0), 1)
+                   .otherwise(0)).alias("NB_PM_MRM_NON_NULLE"),
+        )
+        .orderBy(clause_col, "TYPE_CLAUSE", F.desc("PM_CPT_TOTAL"))
     )
 

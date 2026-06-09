@@ -15,6 +15,7 @@ from pyspark.sql import DataFrame, SparkSession
 from config import (
     db_cfg, tech_cfg, RUN_PARAMS,
     EXPORT_ANALYSES, EXPORT_FORMATS, EXPORT_DELTA_SCHEMA,
+    RECUP_NON_LABEL,
 )
 from modules.load_data import load_cpt_raw, load_mrm_raw
 from modules.transform import clean_cpt, clean_mrm
@@ -22,7 +23,6 @@ from modules.matching import matching_waterfall, recover_late_declarations
 from modules.analysis import (
     flag_late_it_observations,
     enrich_result_tags,
-    drop_unmatched_inventory_non,
     diagnose_mrm_fanout,
     restituer_analyses,
     export_analyses,
@@ -32,19 +32,44 @@ from modules._timing import timed
 import pyspark.sql.functions as F
 
 
+def _split_mrm_statut(mrm_clean: DataFrame, statut_col: str = "MRM_STATUT_INV"):
+    """Scinde le MRM clean en (OUI + statut absent, NON).
+
+    OUI alimente le matching principal ; NON est réservé à la passe de repêchage
+    des CPT_ONLY (PM MRM = 0). null traité comme non-NON (→ OUI)."""
+    if statut_col not in mrm_clean.columns:
+        return mrm_clean, mrm_clean.limit(0)
+    is_non = F.coalesce(F.upper(F.trim(F.col(statut_col))) == F.lit("NON"), F.lit(False))
+    return mrm_clean.filter(~is_non), mrm_clean.filter(is_non)
+
+
 def run(spark: SparkSession) -> DataFrame:
     """Exécute le pipeline complet et affiche la synthèse client."""
     with timed("PIPELINE TOTAL"):
         cpt_clean = clean_cpt(load_cpt_raw(spark, db_cfg), tech_cfg)
         mrm_clean = clean_mrm(load_mrm_raw(spark, db_cfg), tech_cfg)
 
-        df_result = matching_waterfall(cpt_clean, mrm_clean)
+        # Le statut inventaire NON ne sert PAS au matching principal : il est
+        # réservé au repêchage des CPT_ONLY (PM MRM = 0, non remonté à la
+        # direction financière). On scinde : OUI (+ statut absent) pour le
+        # matching, NON pour la passe de repêchage dédiée.
+        mrm_oui, mrm_non = _split_mrm_statut(mrm_clean)
+
+        df_result = matching_waterfall(cpt_clean, mrm_oui)
 
         # Déclarations tardives : CPT_ONLY retrouvés dans l'inventaire MRM N+1.
         # Les dossiers récupérés sont enrichis des infos MRM (TYPE_RECONCILIATION=CPT_LATE).
         if RUN_PARAMS.get("fichier_mrm_n1"):
             mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
             df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1)])
+
+        # Repêchage via statut NON : les CPT_ONLY restants retrouvés dans les MRM
+        # NON sont tagués CPT_RECUP_NON (LATE_SOURCE=STATUT_NON). Label distinct →
+        # EXCLU de toutes les métriques, présenté dans une analyse dédiée. Les MRM
+        # NON non repêchés ne sont jamais unionnés (ils disparaissent).
+        df_result = recover_late_declarations(
+            df_result, [("STATUT_NON", mrm_non)], label=RECUP_NON_LABEL,
+        )
 
         # Observations tardives IT : CPT_ONLY garantie 60 survenus en fin d'année,
         # absents du MRM courant et du N+1 → tagués CPT_OBS_TARDIVE (anomalie,
@@ -54,12 +79,6 @@ def run(spark: SparkSession) -> DataFrame:
         # Colonnes persistantes : consigne reformatée (MRM_ACTION) + tag des
         # orphelins CPT_ONLY (TAG_CPT_ONLY).
         df_result = enrich_result_tags(df_result)
-
-        # Nettoyage final : le statut inventaire NON est ouvert au load pour le
-        # repêchage (un NON qui matche est conservé). Les MRM NON restés NON
-        # matchés (MRM_MISSING) n'ont aucune contrepartie compte → jetés (hors
-        # métriques et hors export).
-        df_result = drop_unmatched_inventory_non(df_result)
 
         with timed("persist df_result"):
             df_result = df_result.persist()
@@ -76,9 +95,10 @@ def run(spark: SparkSession) -> DataFrame:
         with timed("ÉTAPE 0 synthèse"):
             print_synthese(df_result)
 
-        # ÉTAPE 1 — diagnostic du fan-out (écart MRM clean ↔ synthèse mrm_nb).
+        # ÉTAPE 1 — diagnostic du fan-out (écart MRM ↔ synthèse mrm_nb). Univers =
+        # MRM OUI (celui du matching principal ; les NON ne sont pas comparés ici).
         with timed("ÉTAPE 1 diagnostic fan-out"):
-            diagnose_mrm_fanout(df_result, mrm_clean).show(30, truncate=False)
+            diagnose_mrm_fanout(df_result, mrm_oui).show(30, truncate=False)
 
         # ÉTAPE 2 — restitution console de toutes les analyses (clause taguée) :
         # suivi consignes, taux de chute, consignes×PM, à supprimer non suivies,

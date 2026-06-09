@@ -23,25 +23,29 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
 | Consigne à supprimer | `MRM_DELETE` | MRM marqué « à supprimer » |
 | Orphelins compte | `CPT_ONLY` | dossier compte sans contrepartie MRM |
 | Obs. tardives IT | `CPT_OBS_TARDIVE` | sinistre clos avant l'inventaire N+1 |
+| Récupérés via NON | `CPT_RECUP_NON` | CPT_ONLY repêché sur un MRM statut NON (PM MRM=0) |
 
 **MATCHÉS (inventaire courant)** = principale + affinée + récupération
 (`MATCH_LABELS`).
 
 ### Règles de population (qui entre dans les calculs)
 
-1. **Statut inventaire NON — repêchage puis rejet.**
-   Le statut `MRM_STATUT_INV = NON` est chargé **exprès** pour autoriser le
-   repêchage au matching.
-   - Un MRM `NON` qui **matche** un compte (∈ MATCH_LABELS ou récupéré N+1
-     `CPT_LATE`) est **conservé** (il est dans le compte → légitime), y compris
-     un DELETE matché (finding « delete non suivi »).
-   - Un MRM `NON` resté **non matché** (`MRM_MISSING`, orphelin `MRM_DELETE`)
-     est **jeté** : ni métriques, ni export (`drop_unmatched_inventory_non`,
-     appliqué dans `main`, `run_full_analysis` et `collect_analyses` →
-     idempotent, tables propres quel que soit l'appelant).
-   - Conséquence : tout dossier `NON` présent dans les métriques **a matché**.
-     Les dénominateurs « non mappés » et les ventilations ne contiennent plus de
-     `NON` non matché.
+1. **Statut inventaire NON — repêchage dédié, hors métriques.**
+   Le statut `MRM_STATUT_INV = NON` a une PM MRM **toujours = 0** (non remontée à
+   la direction financière). Il **n'alimente PAS le matching principal** (fait
+   sur les OUI + statut absent). Il sert **uniquement** à une passe de repêchage
+   dédiée des `CPT_ONLY` restants (`recover_late_declarations(..., label=`
+   `RECUP_NON_LABEL)`, calquée sur le N+1) :
+   - Un `CPT_ONLY` retrouvé dans les MRM NON est tagué **`CPT_RECUP_NON`**
+     (LATE_SOURCE = `STATUT_NON`) : anomalie résolue, mais **PM MRM = 0** → label
+     distinct ⇒ **EXCLU par construction de TOUTES les métriques** (couverture,
+     chute, conformité). Présenté uniquement dans l'analyse dédiée
+     `recup_statut_non` (par clause, PM CPT) et dans la bulle COMPTE.
+   - Un MRM NON qui ne repêche rien n'est **jamais unionné** → il disparaît
+     naturellement (pas de `MRM_MISSING` en statut NON). Aucune fonction de rejet
+     n'est nécessaire.
+   - Conséquence : `MRM_MISSING` ne contient que des OUI ; les métriques de
+     valeur ne sont jamais polluées par des couples à PM MRM = 0.
 
 2. **Observations tardives IT (`CPT_OBS_TARDIVE`)** — sinistres clos avant
    l'inventaire suivant, jamais matchés, **sans** contrepartie MRM. **Exclues**
@@ -197,6 +201,7 @@ ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
 | `delete_non_suivies` | DELETE matché (PM non supprimée) | `MRM_DELETE ∩ MATCHÉS` |
 | `ventilation_cpt_only` | concentration PM des orphelins compte | `CPT_ONLY` |
 | `obs_tardives` | sinistres clos avant inventaire N+1 | `CPT_OBS_TARDIVE` |
+| `recup_statut_non` | CPT récupérés via MRM statut NON (PM MRM=0) | `CPT_RECUP_NON` |
 
 ---
 

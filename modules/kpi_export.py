@@ -36,6 +36,7 @@ from config import (
     MATCH_AFFINEE,
     MATCH_RECUPERATION,
     OBS_TARDIVE_LABEL,
+    RECUP_NON_LABEL,
 )
 from modules.matching import categorize_mrm_conclusion
 from modules._timing import timed_fn
@@ -115,6 +116,11 @@ def compute_synthese(df_result: DataFrame) -> dict:
     # Présentées à part, exclues des taux et des calculs PM/chute.
     nb_obs,   pm_obs_cpt    = cpt(lambda r: T(r) == OBS_TARDIVE_LABEL)
 
+    # CPT récupérés via un MRM statut NON : anomalie résolue (contrepartie MRM
+    # existe, statut NON → PM MRM=0). EXCLUS de toutes les métriques de valeur ;
+    # présentés à part dans le compte (analyse dédiée recup_statut_non).
+    nb_recup_non, pm_recup_non_cpt = cpt(lambda r: T(r) == RECUP_NON_LABEL)
+
     # Matchés légitimes de l'inventaire courant.
     nb_match     = nb_princ + nb_aff + nb_recup
     pm_match_mrm = agg("pm_mrm", lambda r: T(r) in match)
@@ -130,9 +136,10 @@ def compute_synthese(df_result: DataFrame) -> dict:
     # Totaux exhaustifs des deux univers d'entrée.
     #   MRM en entrée   = matchés + à supprimer + non mappés (CPT_LATE exclu : il
     #                     provient d'un autre inventaire ou n'a pas de contrepartie MRM).
-    #   COMPTE en entrée = matchés + récupérés N+1 + obs tardives + CPT_ONLY définitifs.
+    #   COMPTE en entrée = matchés + récupérés N+1 + récupérés via NON + obs
+    #                      tardives + CPT_ONLY définitifs.
     mrm_pm_total = pm_match_mrm + pm_del + pm_miss
-    cpt_pm_total = pm_match_cpt + pm_def + pm_late_cpt + pm_obs_cpt
+    cpt_pm_total = pm_match_cpt + pm_def + pm_late_cpt + pm_obs_cpt + pm_recup_non_cpt
 
     # ── Sous-ventilation de "Non mappés" : MISSING ∩ consigne ────────────────
     def miss(action):
@@ -225,8 +232,9 @@ def compute_synthese(df_result: DataFrame) -> dict:
     # compte une fois. classified < total_rows ⇒ un TYPE_RECONCILIATION inattendu
     # (label orphelin, étape oubliée) n'est pas pris en compte par la synthèse.
     total_rows      = sum(r["nb"] for r in rows)
-    classified_rows = nb_match + nb_del + nb_miss + nb_def + nb_late + nb_obs
-    labels_connus   = match | {"MRM_DELETE", "MRM_MISSING", "CPT_ONLY", "CPT_LATE", OBS_TARDIVE_LABEL}
+    classified_rows = nb_match + nb_del + nb_miss + nb_def + nb_late + nb_obs + nb_recup_non
+    labels_connus   = match | {"MRM_DELETE", "MRM_MISSING", "CPT_ONLY", "CPT_LATE",
+                               OBS_TARDIVE_LABEL, RECUP_NON_LABEL}
     labels_inconnus = sorted({T(r) for r in rows if T(r) not in labels_connus})
 
     return {
@@ -248,7 +256,7 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "match_pm_cpt"    : pm_match_cpt,
         "match_pm_ecart"  : pm_match_mrm - pm_match_cpt,
         # ── Bulle COMPTE ──
-        "cpt_nb"          : nb_match + nb_def + nb_late + nb_obs,
+        "cpt_nb"          : nb_match + nb_def + nb_late + nb_obs + nb_recup_non,
         "cpt_pm"          : cpt_pm_total,
         "trouves_nb"      : nb_trouves,
         # Récupérés N+1 réels (avec contrepartie MRM, comptés dans les métriques).
@@ -256,6 +264,8 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "late_pm_mrm" : pm_late_mrm, "late_pm_cpt" : pm_late_cpt,
         # Observations tardives IT = ANOMALIES (hors métriques, hors taux récup).
         "obs_nb"  : nb_obs,  "obs_pm"  : pm_obs_cpt,
+        # Récupérés via MRM statut NON (anomalie résolue, hors métriques).
+        "recup_non_nb" : nb_recup_non, "recup_non_pm" : pm_recup_non_cpt,
         "def_nb"  : nb_def,  "def_pm"  : pm_def,
         # ── Indicateurs (taux) ──
         # Les obs tardives IT (sinistres clos avant l'inventaire suivant) sont
@@ -311,6 +321,7 @@ def build_synthese_indicateurs(df_result: DataFrame) -> DataFrame:
         "DATE_INVENTAIRE"       : d["date_inventaire"],
         "NB_MATCHES"            : int(d["match_nb"]),
         "NB_RECUP_N1"           : int(d["late_nb"]),
+        "NB_RECUP_STATUT_NON"   : int(d["recup_non_nb"]),
         "NB_CPT_ONLY"           : int(d["def_nb"]),
         "NB_MRM_MISSING"        : int(d["non_mappes_nb"]),
         "NB_A_SUPPRIMER"        : int(d["a_supprimer_nb"]),
@@ -415,6 +426,7 @@ def _render_box(d: dict, client: str) -> str:
         _row("Total CPT (compte)",          d["cpt_nb"],     d["cpt_pm"]),
         _row("├ matchés inventaire",        d["match_nb"],   d["match_pm_cpt"]),
         _row("├ récupérés N+1",             d["late_nb"],    d["late_pm"]),
+        _row("├ récupérés via NON",         d["recup_non_nb"], d["recup_non_pm"]),
         _row("├ clos avant inv. N+1",       d["obs_nb"],     d["obs_pm"]),
         _row("└ CPT_ONLY (anomalies)",      d["def_nb"],     d["def_pm"]),
         "",
@@ -470,6 +482,10 @@ def _render_indicateurs(d: dict) -> str:
         f"SINISTRES CLOS AVANT INVENTAIRE SUIVANT ({_n(d['obs_nb'])} dossiers, hors métriques)",
         f"  Obs. tardives IT (garantie 60, fin d'année) : sinistre clos avant l'inventaire",
         f"  MRM N+1 → non retrouvé (explicable, pas une anomalie). PM CPT {_n(d['obs_pm'])} €.",
+        "",
+        f"RÉCUPÉRÉS VIA MRM STATUT NON ({_n(d['recup_non_nb'])} dossiers, hors métriques)",
+        f"  CPT_ONLY repêchés sur un MRM statut NON (PM MRM = 0, non remonté à la",
+        f"  direction financière) : anomalie résolue. PM CPT {_n(d['recup_non_pm'])} €. Voir analyse dédiée.",
         "",
         f"ANOMALIES — CPT_ONLY définitifs ({_n(d['def_nb'])} dossiers, PM CPT {_n(d['def_pm'])} €)",
         f"  Dossiers compte sans contrepartie MRM, ni récupérés, ni explicables.",

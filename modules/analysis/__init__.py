@@ -41,11 +41,11 @@ from modules.analysis.orphelins import (
     analyze_mrm_missing,
     ventilate_cpt_only,
     analyze_obs_tardives,
+    analyze_recup_statut_non,
 )
 from modules.analysis.enrich import (
     flag_late_it_observations,
     enrich_result_tags,
-    drop_unmatched_inventory_non,
 )
 from modules.analysis.diagnostics import diagnose_mrm_fanout
 from modules.analysis.helpers import DEFAULT_PM_TRANCHES, derive_clause_column
@@ -81,15 +81,15 @@ def run_full_analysis(
         ecarts_tranches      — distribution par (CLAUSE, MRM_ACTION, CATEGORIE, TRANCHE)
         analyse_cpt_only     — CPT_ONLY agrégés par mois + tranche PM
         analyse_mrm_missing  — MRM_MISSING agrégés par mois + tranche PM + consigne
+        recup_statut_non     — CPT récupérés via MRM statut NON (hors métriques)
 
     Les colonnes CLAUSE / TYPE_CLAUSE (absentes du df_result brut : la clause est
     portée par CPT_CLAUSE / MRM_CLAUSE) sont dérivées ici via derive_clause_column.
-    Les MRM statut NON non matchés sont jetés en tête (cohérence : ils n'ont aucune
-    contrepartie compte). Pour la restitution/export console, voir
+    Les CPT récupérés via un MRM statut NON (CPT_RECUP_NON) sont exclus par
+    construction des métriques (label distinct) ; voir analyse dédiée
+    recup_statut_non. Pour la restitution/export console, voir
     export.collect_analyses.
     """
-    # Rejet des NON non matchés (idempotent ; déjà tracé dans main si lancé là).
-    df_result = drop_unmatched_inventory_non(df_result, log=False)
     df_result = derive_clause_column(df_result)
     synthese_consignes, _ = analyze_suivi_consignes(df_result, conclusion_col, clause_col)
 
@@ -101,4 +101,5 @@ def run_full_analysis(
         "ecarts_tranches"      : analyze_ecarts_tranches(df_result, conclusion_col, clause_col=clause_col),
         "analyse_cpt_only"     : analyse_cpt_only(df_result, clause_col),
         "analyse_mrm_missing"  : analyze_mrm_missing(df_result, conclusion_col, clause_col),
+        "recup_statut_non"     : analyze_recup_statut_non(df_result, conclusion_col, clause_col),
     }

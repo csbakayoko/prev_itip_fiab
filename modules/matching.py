@@ -336,19 +336,28 @@ def recover_late_declarations(
     df_result  : DataFrame,
     inventories: List[Tuple[str, DataFrame]],
     key        : str = "key_no_date",
+    label      : str = "CPT_LATE",
 ) -> DataFrame:
     """
-    Donne une seconde chance aux CPT_ONLY sur des inventaires MRM ultérieurs.
+    Donne une seconde chance aux CPT_ONLY sur des inventaires MRM ultérieurs OU
+    sur les MRM au statut inventaire NON (repêchage).
 
     Cascade : chaque CPT_ONLY est testé contre les inventaires dans l'ordre.
     Le premier inventaire qui contient la clé récupère le dossier :
-        - TYPE_RECONCILIATION → "CPT_LATE"
-        - LATE_SOURCE         → tag de l'inventaire (ex: "MRM_N1")
+        - TYPE_RECONCILIATION → `label` ("CPT_LATE" pour le N+1, "CPT_RECUP_NON"
+                                pour le repêchage via statut NON)
+        - LATE_SOURCE         → tag de l'inventaire (ex: "MRM_N1", "STATUT_NON")
         - colonnes MRM_*      → enrichies depuis l'inventaire
+
+    Le label conditionne l'inclusion dans les métriques : "CPT_LATE" est inclus
+    (vraie contrepartie N+1) ; "CPT_RECUP_NON" est un label distinct → exclu par
+    construction de toutes les métriques (cf. RECUP_NON_LABEL). Les MRM de
+    l'inventaire qui ne matchent rien ne sont JAMAIS unionnés (un NON non
+    repêché disparaît donc naturellement).
 
     Chaque inventaire est dédoublonné sur la clé et broadcasté.
     """
-    print("[late] === recovery démarré ===")
+    print(f"[late] === recovery démarré (label={label}) ===")
     is_cpt_only = F.col("TYPE_RECONCILIATION") == "CPT_ONLY"
     rest = df_result.filter(~is_cpt_only)
 
@@ -369,7 +378,7 @@ def recover_late_declarations(
         )
         hit = (
             remaining_cpt.join(F.broadcast(mrm_enrich), on=key, how="inner")
-                         .withColumn("TYPE_RECONCILIATION", F.lit("CPT_LATE"))
+                         .withColumn("TYPE_RECONCILIATION", F.lit(label))
                          .withColumn("LATE_SOURCE", F.lit(tag))
         ).cache()
         n_hit = hit.count()

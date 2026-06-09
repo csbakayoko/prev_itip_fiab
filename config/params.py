@@ -57,6 +57,15 @@ LATE_IT_GARANTIE      = 60
 # construction (tout code basé sur MATCH_LABELS / CPT_LATE les ignore).
 OBS_TARDIVE_LABEL     = "CPT_OBS_TARDIVE"
 
+# Label des CPT_ONLY récupérés via un MRM au statut inventaire NON. Le statut NON
+# n'alimente PAS le matching principal (réalisé sur les OUI seuls) : il sert
+# uniquement à une passe de repêchage des CPT_ONLY restants. Un CPT ainsi récupéré
+# prouve qu'une contrepartie MRM existe (statut NON, donc PM MRM = 0, non remontée
+# à la direction financière) → on le tague à part. Label distinct ⇒ EXCLU par
+# construction de TOUTES les métriques (couverture, chute, conformité) ; présenté
+# uniquement dans son analyse dédiée. LATE_SOURCE = "STATUT_NON".
+RECUP_NON_LABEL       = "CPT_RECUP_NON"
+
 # Segmentation des orphelins CPT_ONLY définitifs (tag TAG_CPT_ONLY) :
 #   - fin d'année d'inventaire (mois ∈ ORPHAN_FIN_ANNEE_MOIS) → tardif probable
 #   - PM > ORPHAN_PM_THRESHOLD                                → orphelin montant élevé

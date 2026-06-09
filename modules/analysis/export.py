@@ -22,7 +22,6 @@ import pyspark.sql.functions as F
 
 from config import CLIENT_NAME, CLIENT_CLAUSES
 from modules.analysis.helpers import derive_clause_column
-from modules.analysis.enrich import drop_unmatched_inventory_non
 
 from modules.analysis.taux_chute import analyze_taux_chute
 from modules.analysis.consignes import (
@@ -31,7 +30,9 @@ from modules.analysis.consignes import (
     analyze_delete_non_suivies,
 )
 from modules.analysis.provisionnement import study_provisionnement
-from modules.analysis.orphelins import ventilate_cpt_only, analyze_obs_tardives
+from modules.analysis.orphelins import (
+    ventilate_cpt_only, analyze_obs_tardives, analyze_recup_statut_non,
+)
 from modules.kpi_export import build_synthese_indicateurs
 
 logger = logging.getLogger(__name__)
@@ -79,8 +80,6 @@ def collect_analyses(df_result: DataFrame) -> Dict[str, DataFrame]:
     Note : diagnose_mrm_fanout n'est pas inclus (il imprime un récap et requiert
     le MRM clean en entrée) — il reste appelé à part dans main.
     """
-    # Rejet des NON non matchés (idempotent ; déjà tracé dans main si lancé là).
-    df_result = drop_unmatched_inventory_non(df_result, log=False)
     df_result = derive_clause_column(df_result)
     tables = {
         # Indicateurs de synthèse (1 ligne/run, scalaires historisables).
@@ -92,6 +91,8 @@ def collect_analyses(df_result: DataFrame) -> Dict[str, DataFrame]:
         "provisionnement"      : study_provisionnement(df_result),
         "ventilation_cpt_only" : ventilate_cpt_only(df_result),
         "obs_tardives"         : analyze_obs_tardives(df_result),
+        # CPT récupérés via MRM statut NON (hors métriques, analyse dédiée).
+        "recup_statut_non"     : analyze_recup_statut_non(df_result),
     }
     return {name: tag_clause(df) for name, df in tables.items()}
 
