@@ -148,7 +148,13 @@ def drop_unmatched_inventory_non(
     if statut_col not in df_result.columns:
         return df_result
 
-    is_non       = F.upper(F.trim(F.col(statut_col))) == F.lit("NON")
+    # NULL-SAFE : MRM_STATUT_INV est null pour les lignes sans MRM (CPT_ONLY,
+    # CPT_OBS_TARDIVE). Sans coalesce, le prédicat vaudrait null et filter(~null)
+    # ÉLIMINERAIT ces lignes (filter ne garde que TRUE). On force null → False
+    # → seuls les vrais NON non matchés sont visés, jamais les CPT_ONLY.
+    is_non       = F.coalesce(
+        F.upper(F.trim(F.col(statut_col))) == F.lit("NON"), F.lit(False)
+    )
     is_matched   = F.col("TYPE_RECONCILIATION").isin(_matched_universe())
     is_non_unmatched = is_non & ~is_matched
 
