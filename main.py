@@ -14,7 +14,7 @@ from pyspark.sql import DataFrame, SparkSession
 
 from config import (
     db_cfg, tech_cfg, RUN_PARAMS,
-    EXPORT_ANALYSES, EXPORT_FORMATS, EXPORT_DELTA_SCHEMA,
+    EXPORT_ANALYSES, EXPORT_FORMATS, EXPORT_DELTA_SCHEMA, EXPORT_GRAPHS,
     RECUP_NON_LABEL, CHECKPOINT_DIR,
 )
 from modules.load_data import load_cpt_raw, load_mrm_raw
@@ -26,6 +26,7 @@ from modules.analysis import (
     diagnose_mrm_fanout,
     restituer_analyses,
     export_analyses,
+    restituer_graphiques,
 )
 from modules.kpi_export import print_synthese
 from modules._timing import timed
@@ -140,6 +141,13 @@ def run(spark: SparkSession) -> DataFrame:
                     formats      = EXPORT_FORMATS,
                     delta_schema = EXPORT_DELTA_SCHEMA,
                 )
+
+        # ÉTAPE 4 — graphiques de restitution (titres-messages : justification
+        # du compte, couverture des listes d'arrêts, chute par clause/consigne,
+        # conformité des consignes, anomalies). Affichés en notebook + PNG DBFS.
+        if EXPORT_GRAPHS:
+            with timed("ÉTAPE 4 graphiques"):
+                restituer_graphiques(df_result)
     return df_result
 
 

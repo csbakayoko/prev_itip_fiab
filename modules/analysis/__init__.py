@@ -61,6 +61,7 @@ from modules.analysis.export import (
     export_excel,
     export_delta,
 )
+from modules.analysis.graphs import restituer_graphiques
 
 
 # ============================================================================
