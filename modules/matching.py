@@ -414,7 +414,10 @@ def recover_late_declarations(
     l'inventaire qui ne matchent rien ne sont JAMAIS unionnés (un NON non
     repêché disparaît donc naturellement, sans empreinte volumétrique).
 
-    Chaque inventaire est dédoublonné sur la clé courante et broadcasté.
+    Performance : chaque inventaire est matérialisé une seule fois (clés +
+    colonnes MRM_*) avant la cascade, puis dédoublonné sur la clé courante et
+    broadcasté à chaque étape ; le remaining est re-matérialisé après chaque
+    étape fructueuse (lignée plate, pas de chaîne d'anti-joins recalculée).
     """
     steps = [(k, k, None) if isinstance(k, str) else k for k in keys]
     print(f"[late] === recovery démarré (label={label}, étapes={[s for s, _, _ in steps]}) ===")
@@ -430,11 +433,22 @@ def recover_late_declarations(
 
     recovered: List[DataFrame] = []
     for tag, df_mrm in inventories:
+        # Matérialise l'inventaire UNE SEULE FOIS (clés + colonnes MRM_*).
+        # Sans ça, chaque étape de la cascade re-déroule tout le pipeline de
+        # nettoyage de l'inventaire (lecture CSV + dédoublonnages fenêtrés)
+        # pour construire son broadcast → coût multiplié par le nombre
+        # d'étapes (cause directe des runs > 30 min).
+        inv_cols = list(dict.fromkeys(
+            [k for _, k, _ in steps if k in df_mrm.columns]
+            + [c for c in df_mrm.columns if c.startswith("MRM_")]
+        ))
+        df_inv = _materialize(df_mrm.select(*inv_cols))
+
         for step_label, key, cond in steps:
             print(f"[late] ▶ {tag} ({step_label}, clé={key})")
             mrm_enrich = (
-                df_mrm.filter(F.col(key).isNotNull())
-                      .select(key, *[c for c in df_mrm.columns if c.startswith("MRM_")])
+                df_inv.filter(F.col(key).isNotNull())
+                      .select(key, *[c for c in df_inv.columns if c.startswith("MRM_")])
                       .dropDuplicates([key])
             )
             hit = remaining_cpt.join(F.broadcast(mrm_enrich), on=key, how="inner")
@@ -448,10 +462,16 @@ def recover_late_declarations(
             n_hit = hit.count()
             print(f"[late]   ↳ {tag}/{step_label} : {n_hit:,} retrouvés")
 
-            remaining_cpt = remaining_cpt.join(
-                F.broadcast(hit.select(key).distinct()), on=key, how="left_anti"
-            )
-            recovered.append(hit)
+            if n_hit:
+                # Tronque la lignée du remaining (sinon chaîne d'anti-joins de
+                # plus en plus profonde, recalculée par chaque étape suivante).
+                # Étape sans hit → remaining inchangé, rien à faire.
+                remaining_cpt = _materialize(
+                    remaining_cpt.join(
+                        F.broadcast(hit.select(key).distinct()), on=key, how="left_anti"
+                    )
+                )
+                recovered.append(hit)
 
     df_final = reduce(
         lambda a, b: a.unionByName(b, allowMissingColumns=True),
