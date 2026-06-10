@@ -11,6 +11,8 @@ Chaque graphique répond à une question de la problématique de fiabilisation
     4. chute_par_consigne     — l'écart de provision selon la consigne de la revue
     5. conformite_consignes   — les consignes de la revue sont-elles appliquées ?
     6. anomalies_cpt_only     — les anomalies résiduelles : volume, PM, saisonnalité
+    7. kpi_chute_globale      — LE ratio de chute global (gros chiffre + PM en regard)
+    8. kpi_conformite_globale — LE ratio de suivi des consignes au global (donut)
 
 Usage (notebook Databricks) :
     from modules.analysis import restituer_graphiques
@@ -24,7 +26,7 @@ import logging
 import matplotlib.pyplot as plt
 from pyspark.sql import DataFrame
 
-from modules.kpi_export import compute_synthese
+from modules.kpi_export import compute_synthese, kas_totaux
 from modules.analysis.helpers import derive_clause_column
 from modules.analysis.taux_chute import analyze_taux_chute_par_clause
 from modules.analysis.orphelins import analyse_cpt_only
@@ -292,6 +294,82 @@ def graph_anomalies_cpt_only(df_result: DataFrame, d: dict):
 
 
 # ============================================================================
+# 7. KPI — TAUX DE CHUTE GLOBAL
+# ============================================================================
+
+def graph_kpi_chute_globale(d: dict):
+    """Le ratio de chute global en un visuel : gros chiffre + PM en regard."""
+    k = kas_totaux(d)
+    val = d["taux_chute_global"]
+    sous_prov = val > 0
+    couleur = C_ROUGE if sous_prov else C_BLEU
+
+    fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(10, 3.4), width_ratios=[1, 1.6])
+    ax0.text(0.5, 0.60, _pct(val), ha="center", va="center",
+             fontsize=34, fontweight="bold", color=couleur)
+    ax0.text(0.5, 0.24,
+             "sous-provisionnement (risque)" if sous_prov else "sur-provisionnement (marge)",
+             ha="center", fontsize=10, color="#555555")
+    ax0.axis("off")
+
+    bars = [("PM revue MRM", k["pm_mrm"], C_BLEU), ("PM compte client", k["pm_cpt"], C_GRIS)]
+    ax1.barh([b[0] for b in bars][::-1], [b[1] / 1e6 for b in bars][::-1],
+             color=[b[2] for b in bars][::-1], height=0.5)
+    for i, b in enumerate(bars[::-1]):
+        ax1.text(b[1] / 1e6 + max(k["pm_mrm"], k["pm_cpt"]) / 1e6 * 0.015, i,
+                 _meur(b[1]), va="center", fontsize=9.5, fontweight="bold")
+    ax1.set_xlim(0, max(k["pm_mrm"], k["pm_cpt"]) / 1e6 * 1.22)
+    ax1.set_xticks([])
+    ax1.text(0, -0.75, f"Écart (PM MRM − PM compte) : {_meur(k['delta'])}",
+             fontsize=9.5, fontweight="bold", color=couleur)
+    _style(ax1)
+    ax1.grid(False)
+    _title(
+        fig,
+        f"Taux de chute global : {_pct(val)} — le compte porte "
+        f"{_meur(abs(k['delta']))} de {'moins' if sous_prov else 'plus'} que la revue",
+        "Σ(PM MRM − PM CPT) / Σ PM MRM — univers matchés + récupérés N+1, consignes "
+        "à conserver / étudier / ajouter (« à supprimer » suivie à part)",
+    )
+    fig.subplots_adjust(top=0.80, bottom=0.24)
+    return fig
+
+
+# ============================================================================
+# 8. KPI — CONFORMITÉ GLOBALE DES CONSIGNES
+# ============================================================================
+
+def graph_kpi_conformite_globale(d: dict):
+    """Le ratio de suivi des consignes au global : donut conformes / non conformes."""
+    k = kas_totaux(d)
+    conf, non_conf = k["conf"], k["nb"] - k["conf"]
+
+    fig, ax = plt.subplots(figsize=(7.5, 3.8))
+    ax.pie(
+        [conf, non_conf], colors=[C_VERT, C_ROUGE], startangle=90,
+        counterclock=False, wedgeprops=dict(width=0.38, edgecolor="white"),
+    )
+    ax.text(0, 0.08, _pct(d["conformite_globale"]), ha="center", va="center",
+            fontsize=26, fontweight="bold", color=C_VERT)
+    ax.text(0, -0.22, "de consignes\nappliquées", ha="center", va="center",
+            fontsize=9, color="#555555")
+    ax.legend(
+        [f"Conformes (retrouvées au compte) — {_n(conf)}",
+         f"Non conformes (non retrouvées) — {_n(non_conf)}"],
+        loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9, frameon=False,
+    )
+    _title(
+        fig,
+        f"Suivi des consignes de la revue : {_pct(d['conformite_globale'])} "
+        f"appliquées au compte ({_n(conf)} / {_n(k['nb'])} dossiers)",
+        "Consignes à conserver / étudier / ajouter, toutes clauses confondues — "
+        "« à supprimer » jugée à part (conforme = effectivement absente du compte)",
+    )
+    fig.subplots_adjust(top=0.80, right=0.55)
+    return fig
+
+
+# ============================================================================
 # ORCHESTRATEUR
 # ============================================================================
 
@@ -311,12 +389,14 @@ def restituer_graphiques(
     df_result = derive_clause_column(df_result)
 
     figs = {
-        "1_compte_justification" : graph_compte_justification(d),
-        "2_couverture_mrm"       : graph_couverture_mrm(d),
-        "3_chute_par_clause"     : graph_chute_par_clause(df_result, d),
-        "4_chute_par_consigne"   : graph_chute_par_consigne(d),
-        "5_conformite_consignes" : graph_conformite_consignes(d),
-        "6_anomalies_cpt_only"   : graph_anomalies_cpt_only(df_result, d),
+        "1_compte_justification"   : graph_compte_justification(d),
+        "2_couverture_mrm"         : graph_couverture_mrm(d),
+        "3_chute_par_clause"       : graph_chute_par_clause(df_result, d),
+        "4_chute_par_consigne"     : graph_chute_par_consigne(d),
+        "5_conformite_consignes"   : graph_conformite_consignes(d),
+        "6_anomalies_cpt_only"     : graph_anomalies_cpt_only(df_result, d),
+        "7_kpi_chute_globale"      : graph_kpi_chute_globale(d),
+        "8_kpi_conformite_globale" : graph_kpi_conformite_globale(d),
     }
 
     if save_dir:

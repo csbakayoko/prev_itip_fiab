@@ -209,6 +209,7 @@ ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
 
 | Table | Problématique | Univers |
 |---|---|---|
+| `ratios_globaux` | les ratios de tête (chute global, conformité globale, couverture, récupération) avec numérateur/dénominateur explicites | univers de chaque ratio (cf. LECTURE) |
 | `suivi_consignes` | conformité + PM + chute par consigne | conformité : matchés + missing ; PM/chute : `MATCHÉS + CPT_LATE` |
 | `suivi_consignes_global` | ratios de suivi des consignes toutes clauses confondues | mêmes univers que `suivi_consignes` |
 | `taux_chute` | chute par consigne (sous/sur/conforme, poids) | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |

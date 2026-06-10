@@ -34,7 +34,7 @@ from modules.analysis.orphelins import (
     ventilate_cpt_only, analyze_obs_tardives,
     analyze_recup_statut_non, analyze_recup_statut_non_detail,
 )
-from modules.kpi_export import build_synthese_indicateurs
+from modules.kpi_export import build_synthese_indicateurs, build_ratios_globaux
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,8 @@ def collect_analyses(df_result: DataFrame) -> Dict[str, DataFrame]:
     tables = {
         # Indicateurs de synthèse (1 ligne/run, scalaires historisables).
         "synthese_indicateurs" : build_synthese_indicateurs(df_result),
+        # Ratios globaux de restitution (1 ligne/indicateur, num/dén explicites).
+        "ratios_globaux"       : build_ratios_globaux(df_result),
         "suivi_consignes"      : analyze_suivi_consignes_global(df_result),
         # Suivi des consignes toutes clauses confondues (ratios globaux).
         "suivi_consignes_global" : analyze_suivi_consignes_global(df_result, par_clause=False),
