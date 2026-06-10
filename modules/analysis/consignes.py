@@ -206,46 +206,57 @@ def analyze_consignes_pm(
 def analyze_suivi_consignes_global(
     df_result     : DataFrame,
     conclusion_col: str = "MRM_CONCLUSION",
+    par_clause    : bool = True,
 ) -> DataFrame:
     """
-    Suivi GLOBAL des consignes MRM accompagné des PM — une ligne par consigne
+    Suivi des consignes MRM accompagné des PM — une ligne par consigne
     (MRM_KEEP / MRM_STUDY / MRM_ADD / MRM_DELETE).
 
-    Univers par consigne = dossiers matchés à l'inventaire (MATCH_LABELS) +
-    orphelins MRM portant cette consigne (MRM_MISSING pour KEEP/STUDY/ADD,
-    MRM_DELETE pour DELETE). Les CPT_LATE (autre inventaire), CPT_OBS_TARDIVE et
-    CPT_ONLY (pas de consigne MRM) sont hors univers.
+    Deux univers DISTINCTS par consigne (cf. METRIQUES.md §4.2 et §5) :
+      - CONFORMITÉ (nb_total, nb_conformes, pct) : matchés à l'inventaire
+        (MATCH_LABELS) + orphelins MRM portant la consigne (MRM_MISSING pour
+        KEEP/STUDY/ADD, MRM_DELETE pour DELETE).
+      - PM / CHUTE (nb_pm_univers, pm_mrm, pm_cpt, écart, taux) : matchés +
+        récupérés N+1 (CPT_LATE) — le MÊME univers que le taux de chute global
+        de la synthèse et que la table taux_chute ⇒ les chiffres se
+        réconcilient exactement (Σ par consigne = global).
 
     Conformité :
         KEEP / STUDY / ADD → conforme = retrouvé au compte (matché)
-        DELETE             → conforme = absent du compte (orphelin, donc supprimé)
+        DELETE             → conforme = absent du compte (orphelin, donc
+                             supprimé) ; taux de chute non pertinent (null).
 
-    Les PM (MRM, CPT, écart, taux de chute) ne portent que sur les dossiers
-    MATCHÉS. Pour DELETE, ces matchés sont justement les consignes NON suivies
-    (PM toujours présente) → taux de chute non pertinent (null).
+    par_clause=True  → une ligne par (CLAUSE, TYPE_CLAUSE, consigne).
+    par_clause=False → une ligne par consigne, toutes clauses confondues
+                       (onglet suivi_consignes_global).
 
-    Ventilé par (CLAUSE, TYPE_CLAUSE) : une ligne par consigne et par clause.
-
-    Colonnes : CLAUSE, TYPE_CLAUSE, MRM_ACTION, ORDRE, nb_total, nb_matches,
-               nb_orphelins, nb_conformes, pct_conformite, nb_pm_nulle,
-               nb_pm_non_nulle, pm_mrm, pm_cpt, ecart, taux_chute_pct.
+    Colonnes : [CLAUSE, TYPE_CLAUSE,] MRM_ACTION, ORDRE, nb_total, nb_matches,
+               nb_orphelins, nb_conformes, pct_conformite, nb_pm_univers,
+               nb_pm_nulle, nb_pm_non_nulle, pm_mrm, pm_cpt, ecart,
+               taux_chute_pct.
     """
-    is_m = F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS))
+    is_m    = F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS))
+    is_pm   = F.col("TYPE_RECONCILIATION").isin(_matched_universe())   # + CPT_LATE
+    is_orph = F.col("TYPE_RECONCILIATION").isin("MRM_MISSING", "MRM_DELETE")
     df = (
         _with_mrm_action(df_result, conclusion_col)
         .filter(F.col("MRM_ACTION").isNotNull())
-        .filter(is_m | F.col("TYPE_RECONCILIATION").isin("MRM_MISSING", "MRM_DELETE"))
+        .filter(is_pm | is_orph)
     )
 
+    group = (["CLAUSE", "TYPE_CLAUSE"] if par_clause else []) + ["MRM_ACTION"]
     agg = (
-        df.groupBy("CLAUSE", "TYPE_CLAUSE", "MRM_ACTION")
+        df.groupBy(*group)
         .agg(
-            F.count("*").alias("nb_total"),
+            # Univers conformité (matchés + orphelins) — les CPT_LATE n'y sont pas.
+            F.sum(F.when(is_m | is_orph, 1).otherwise(0)).alias("nb_total"),
             F.sum(F.when(is_m, 1).otherwise(0)).alias("nb_matches"),
-            F.sum(F.when(is_m & F.col("MRM_PM").isNotNull() & (F.col("MRM_PM") != 0), 1)
+            # Univers PM / chute (matchés + CPT_LATE).
+            F.sum(F.when(is_pm, 1).otherwise(0)).alias("nb_pm_univers"),
+            F.sum(F.when(is_pm & F.col("MRM_PM").isNotNull() & (F.col("MRM_PM") != 0), 1)
                    .otherwise(0)).alias("nb_pm_non_nulle"),
-            F.round(F.sum(F.when(is_m, F.col("MRM_PM")).otherwise(0.0)), 2).alias("pm_mrm"),
-            F.round(F.sum(F.when(is_m, F.col("CPT_PM")).otherwise(0.0)), 2).alias("pm_cpt"),
+            F.round(F.sum(F.when(is_pm, F.col("MRM_PM")).otherwise(0.0)), 2).alias("pm_mrm"),
+            F.round(F.sum(F.when(is_pm, F.col("CPT_PM")).otherwise(0.0)), 2).alias("pm_cpt"),
         )
     )
 
@@ -262,18 +273,17 @@ def analyze_suivi_consignes_global(
             F.when(is_delete, F.col("nb_orphelins")).otherwise(F.col("nb_matches")))
         .withColumn("pct_conformite",
             F.round(F.col("nb_conformes") / F.col("nb_total") * 100, 2))
-        .withColumn("nb_pm_nulle", F.col("nb_matches") - F.col("nb_pm_non_nulle"))
+        .withColumn("nb_pm_nulle", F.col("nb_pm_univers") - F.col("nb_pm_non_nulle"))
         .withColumn("ecart", F.round(F.col("pm_mrm") - F.col("pm_cpt"), 2))
         .withColumn("taux_chute_pct",
             F.when(is_delete | (F.col("pm_mrm") == 0), None)
              .otherwise(F.round(F.col("ecart") / F.col("pm_mrm") * 100, 2)))
         .select(
-            "CLAUSE", "TYPE_CLAUSE",
-            "MRM_ACTION", "ORDRE", "nb_total", "nb_matches", "nb_orphelins",
-            "nb_conformes", "pct_conformite", "nb_pm_nulle", "nb_pm_non_nulle",
-            "pm_mrm", "pm_cpt", "ecart", "taux_chute_pct",
+            *group, "ORDRE", "nb_total", "nb_matches", "nb_orphelins",
+            "nb_conformes", "pct_conformite", "nb_pm_univers", "nb_pm_nulle",
+            "nb_pm_non_nulle", "pm_mrm", "pm_cpt", "ecart", "taux_chute_pct",
         )
-        .orderBy("CLAUSE", "TYPE_CLAUSE", "ORDRE")
+        .orderBy(*group[:-1], "ORDRE")
     )
 
 

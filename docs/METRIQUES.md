@@ -209,15 +209,18 @@ ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
 
 | Table | Problématique | Univers |
 |---|---|---|
-| `suivi_consignes` | conformité + PM + chute par consigne | matchés (+late) / +missing pour conformité |
+| `suivi_consignes` | conformité + PM + chute par consigne | conformité : matchés + missing ; PM/chute : `MATCHÉS + CPT_LATE` |
+| `suivi_consignes_global` | ratios de suivi des consignes toutes clauses confondues | mêmes univers que `suivi_consignes` |
 | `taux_chute` | chute par consigne (sous/sur/conforme, poids) | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
+| `taux_chute_par_clause` | chute globale par clause (consignes confondues, poids PM) | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
 | `consignes_pm` | chute par consigne × catégorie × tranche PM | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
 | `provisionnement` | sous/sur/conforme par consigne | `MATCHÉS + CPT_LATE`, hors DELETE |
 | `ecarts_tranches` | distribution des écarts par tranche € | sous/sur-provisionnés |
 | `delete_non_suivies` | DELETE matché (PM non supprimée) | `MRM_DELETE ∩ MATCHÉS` |
 | `ventilation_cpt_only` | concentration PM des orphelins compte | `CPT_ONLY` |
 | `obs_tardives` | sinistres clos avant inventaire N+1 | `CPT_OBS_TARDIVE` |
-| `recup_statut_non` | CPT récupérés via MRM statut NON (PM MRM=0) | `CPT_RECUP_NON` |
+| `recup_statut_non` | CPT récupérés via MRM statut NON : conformité par consigne × étape de repêchage | `CPT_RECUP_NON` |
+| `recup_statut_non_detail` | enjeu PM compte des récupérés NON (mois de survenance × garantie × tranche PM) | `CPT_RECUP_NON` |
 
 ---
 

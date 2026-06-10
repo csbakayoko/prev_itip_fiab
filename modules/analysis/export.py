@@ -23,7 +23,7 @@ import pyspark.sql.functions as F
 from config import CLIENT_NAME, CLIENT_CLAUSES
 from modules.analysis.helpers import derive_clause_column
 
-from modules.analysis.taux_chute import analyze_taux_chute
+from modules.analysis.taux_chute import analyze_taux_chute, analyze_taux_chute_par_clause
 from modules.analysis.consignes import (
     analyze_suivi_consignes_global,
     analyze_consignes_pm,
@@ -31,7 +31,8 @@ from modules.analysis.consignes import (
 )
 from modules.analysis.provisionnement import study_provisionnement
 from modules.analysis.orphelins import (
-    ventilate_cpt_only, analyze_obs_tardives, analyze_recup_statut_non,
+    ventilate_cpt_only, analyze_obs_tardives,
+    analyze_recup_statut_non, analyze_recup_statut_non_detail,
 )
 from modules.kpi_export import build_synthese_indicateurs
 
@@ -85,14 +86,21 @@ def collect_analyses(df_result: DataFrame) -> Dict[str, DataFrame]:
         # Indicateurs de synthèse (1 ligne/run, scalaires historisables).
         "synthese_indicateurs" : build_synthese_indicateurs(df_result),
         "suivi_consignes"      : analyze_suivi_consignes_global(df_result),
+        # Suivi des consignes toutes clauses confondues (ratios globaux).
+        "suivi_consignes_global" : analyze_suivi_consignes_global(df_result, par_clause=False),
         "taux_chute"           : analyze_taux_chute(df_result),
+        # Taux de chute global par clause (KEEP/ADD/STUDY confondues) —
+        # se réconcilie avec taux_chute (Σ consignes) et la synthèse (Σ clauses).
+        "taux_chute_par_clause" : analyze_taux_chute_par_clause(df_result),
         "consignes_pm"         : analyze_consignes_pm(df_result),
         "delete_non_suivies"   : analyze_delete_non_suivies(df_result),
         "provisionnement"      : study_provisionnement(df_result),
         "ventilation_cpt_only" : ventilate_cpt_only(df_result),
         "obs_tardives"         : analyze_obs_tardives(df_result),
-        # CPT récupérés via MRM statut NON (hors métriques, analyse dédiée).
-        "recup_statut_non"     : analyze_recup_statut_non(df_result),
+        # CPT récupérés via MRM statut NON (hors métriques, analyses dédiées) :
+        # synthèse par consigne × étape + ventilation de l'enjeu PM compte.
+        "recup_statut_non"        : analyze_recup_statut_non(df_result),
+        "recup_statut_non_detail" : analyze_recup_statut_non_detail(df_result),
     }
     return {name: tag_clause(df) for name, df in tables.items()}
 

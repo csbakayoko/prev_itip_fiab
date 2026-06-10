@@ -248,6 +248,57 @@ def analyze_obs_tardives(
     )
 
 
+def analyze_recup_statut_non_detail(
+    df_result   : DataFrame,
+    clause_col  : str = "CLAUSE",
+    date_col    : str = "CPT_D_SURVENANCE",
+    garantie_col: str = "CPT_GARANTIE",
+    pm_col      : str = "CPT_PM",
+) -> DataFrame:
+    """
+    Ventilation détaillée des CPT récupérés via MRM statut NON (CPT_RECUP_NON) :
+    mois de survenance × garantie × tranche PM CPT.
+
+    Complète analyze_recup_statut_non (synthèse par consigne × étape) en
+    répondant à : où se concentre l'enjeu compte de ces anomalies résolues,
+    quand sont-elles survenues (effet fin d'année ?), sur quelle garantie
+    (IT 60 vs IP). PM MRM = 0 par hypothèse (statut NON) → seule la PM compte
+    est ventilée.
+
+    Colonnes : CLAUSE, TYPE_CLAUSE, ANNEE_SURVENANCE, MOIS_SURVENANCE,
+               MOIS_LABEL, IS_FIN_ANNEE, GARANTIE, TRANCHE_PM, ORDRE_TRANCHE,
+               NB_DOSSIERS, PM_CPT_TOTAL, PM_CPT_MOYEN.
+    """
+    tranche_col, ordre_col = _pm_tranche_expr(pm_col)
+    return (
+        df_result
+        .filter(F.col("TYPE_RECONCILIATION") == RECUP_NON_LABEL)
+        .withColumn("ANNEE_SURVENANCE", F.year(F.col(date_col)))
+        .withColumn("MOIS_SURVENANCE",  F.month(F.col(date_col)))
+        .withColumn("MOIS_LABEL",       _mois_label_expr(date_col))
+        .withColumn("IS_FIN_ANNEE",     F.month(F.col(date_col)).isin(10, 11, 12))
+        .withColumn("TRANCHE_PM",       tranche_col)
+        .withColumn("ORDRE_TRANCHE",    ordre_col)
+        .groupBy(
+            F.col(clause_col).alias("CLAUSE"),
+            "TYPE_CLAUSE",
+            "ANNEE_SURVENANCE",
+            "MOIS_SURVENANCE",
+            "MOIS_LABEL",
+            "IS_FIN_ANNEE",
+            F.col(garantie_col).alias("GARANTIE"),
+            "TRANCHE_PM",
+            "ORDRE_TRANCHE",
+        )
+        .agg(
+            F.count("*").alias("NB_DOSSIERS"),
+            F.round(F.coalesce(F.sum(pm_col), F.lit(0.0)), 2).alias("PM_CPT_TOTAL"),
+            F.round(F.coalesce(F.avg(pm_col), F.lit(0.0)), 2).alias("PM_CPT_MOYEN"),
+        )
+        .orderBy("CLAUSE", "TYPE_CLAUSE", "ANNEE_SURVENANCE", "MOIS_SURVENANCE", "ORDRE_TRANCHE")
+    )
+
+
 def analyze_recup_statut_non(
     df_result     : DataFrame,
     conclusion_col: str = "MRM_CONCLUSION",

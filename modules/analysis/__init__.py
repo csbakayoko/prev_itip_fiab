@@ -29,6 +29,7 @@ from modules.analysis.consignes import (
 from modules.analysis.taux_chute import (
     calculate_taux_chute,
     analyze_taux_chute,
+    analyze_taux_chute_par_clause,
 )
 from modules.analysis.provisionnement import (
     analyze_provisionnement,
@@ -42,6 +43,7 @@ from modules.analysis.orphelins import (
     ventilate_cpt_only,
     analyze_obs_tardives,
     analyze_recup_statut_non,
+    analyze_recup_statut_non_detail,
 )
 from modules.analysis.enrich import (
     flag_late_it_observations,
@@ -82,6 +84,7 @@ def run_full_analysis(
         analyse_cpt_only     — CPT_ONLY agrégés par mois + tranche PM
         analyse_mrm_missing  — MRM_MISSING agrégés par mois + tranche PM + consigne
         recup_statut_non     — CPT récupérés via MRM statut NON (hors métriques)
+        recup_statut_non_detail — leur enjeu PM compte (mois × garantie × tranche)
 
     Les colonnes CLAUSE / TYPE_CLAUSE (absentes du df_result brut : la clause est
     portée par CPT_CLAUSE / MRM_CLAUSE) sont dérivées ici via derive_clause_column.
@@ -102,4 +105,5 @@ def run_full_analysis(
         "analyse_cpt_only"     : analyse_cpt_only(df_result, clause_col),
         "analyse_mrm_missing"  : analyze_mrm_missing(df_result, conclusion_col, clause_col),
         "recup_statut_non"     : analyze_recup_statut_non(df_result, conclusion_col, clause_col),
+        "recup_statut_non_detail" : analyze_recup_statut_non_detail(df_result, clause_col),
     }
