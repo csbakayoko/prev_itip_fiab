@@ -15,7 +15,7 @@ from pyspark.sql import DataFrame, SparkSession
 from config import (
     db_cfg, tech_cfg, RUN_PARAMS,
     EXPORT_ANALYSES, EXPORT_FORMATS, EXPORT_DELTA_SCHEMA,
-    RECUP_NON_LABEL,
+    RECUP_NON_LABEL, CHECKPOINT_DIR,
 )
 from modules.load_data import load_cpt_raw, load_mrm_raw
 from modules.transform import clean_cpt, clean_mrm
@@ -45,6 +45,13 @@ def _split_mrm_statut(mrm_clean: DataFrame, statut_col: str = "MRM_STATUT_INV"):
 
 def run(spark: SparkSession) -> DataFrame:
     """Exécute le pipeline complet et affiche la synthèse client."""
+    # Checkpoints fiables (DBFS) : les matérialisations du waterfall survivent
+    # à la perte d'un executor (autoscaling). Sans checkpointDir, _materialize
+    # retombe sur localCheckpoint → CHECKPOINT_RDD_BLOCK_ID_NOT_FOUND possible
+    # dès que le cluster réduit en cours de run.
+    if CHECKPOINT_DIR:
+        spark.sparkContext.setCheckpointDir(CHECKPOINT_DIR)
+
     with timed("PIPELINE TOTAL"):
         cpt_clean = clean_cpt(load_cpt_raw(spark, db_cfg), tech_cfg)
         mrm_clean = clean_mrm(load_mrm_raw(spark, db_cfg), tech_cfg)
@@ -58,7 +65,10 @@ def run(spark: SparkSession) -> DataFrame:
         df_result = matching_waterfall(cpt_clean, mrm_oui)
 
         # Déclarations tardives : CPT_ONLY retrouvés dans l'inventaire MRM N+1.
-        # Les dossiers récupérés sont enrichis des infos MRM (TYPE_RECONCILIATION=CPT_LATE).
+        # Les dossiers récupérés sont enrichis des infos MRM (TYPE_RECONCILIATION=
+        # CPT_LATE). Cascade RECOVERY_KEYS : le waterfall principal rejoué dans
+        # l'ordre (strict → flexible) + étapes finales hors fenêtre de date.
+        # L'étape gagnante est tracée dans LATE_KEY.
         if RUN_PARAMS.get("fichier_mrm_n1"):
             mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
             df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1)])
@@ -67,12 +77,9 @@ def run(spark: SparkSession) -> DataFrame:
         # NON sont tagués CPT_RECUP_NON (LATE_SOURCE=STATUT_NON). Label distinct →
         # EXCLU de toutes les métriques, présenté dans une analyse dédiée. Les MRM
         # NON non repêchés ne sont jamais unionnés (ils disparaissent, zéro
-        # empreinte dans la volumétrie). Cascade de clés : nominale complète puis
-        # tronquée 20 chars (même logique que le waterfall principal).
+        # empreinte dans la volumétrie). Même cascade RECOVERY_KEYS que le N+1.
         df_result = recover_late_declarations(
-            df_result, [("STATUT_NON", mrm_non)],
-            keys=("key_no_date", "key_no_date_tronc"),
-            label=RECUP_NON_LABEL,
+            df_result, [("STATUT_NON", mrm_non)], label=RECUP_NON_LABEL,
         )
 
         # Observations tardives IT : CPT_ONLY garantie 60 survenus en fin d'année,

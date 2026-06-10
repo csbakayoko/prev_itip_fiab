@@ -33,6 +33,13 @@ FICHIER_MRM_N1 = None             # MRM N+1 (ex: 30/06/2024)
 # ── Mode d'exécution ────────────────────────────────────────────────────────
 DEV_MODE = True                   # False en prod (Job Databricks remplit RUN_PARAMS)
 
+# Répertoire des checkpoints FIABLES (DBFS). Les checkpoints fiables survivent
+# à la perte d'un executor (autoscaling / spot), contrairement à localCheckpoint
+# dont les blocs vivent sur les executors (→ CHECKPOINT_RDD_BLOCK_ID_NOT_FOUND
+# irrécupérable quand le cluster réduit). None = retomber sur localCheckpoint
+# (uniquement pour cluster à taille fixe).
+CHECKPOINT_DIR = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/itip_fiab_checkpoints"
+
 # ── Export des analyses (restitution toujours en console ; écriture fichiers) ─
 EXPORT_ANALYSES    = False        # True = écrit les analyses sur disque (DBFS)
 EXPORT_FORMATS     = ("csv", "parquet", "excel", "json")  # ⊆ {csv, parquet, excel, json, delta}

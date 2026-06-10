@@ -264,8 +264,9 @@ def analyze_recup_statut_non(
     de toutes les métriques de valeur (chute, niveaux de PM, couverture) et
     présentés ici à part.
 
-    Ventilé par (CLAUSE, TYPE_CLAUSE, MRM_ACTION) + LATE_KEY (clé ayant permis
-    le repêchage, si présente). PM_CPT = enjeu compte récupéré ;
+    Ventilé par (CLAUSE, TYPE_CLAUSE, MRM_ACTION) + LATE_KEY (étape de la
+    cascade ayant permis le repêchage, ex. MATCH_EXACT / HORS_FENETRE, si
+    présente). PM_CPT = enjeu compte récupéré ;
     NB_PM_MRM_NON_NULLE contrôle l'hypothèse « PM MRM = 0 » (doit valoir 0).
 
     Colonnes : CLAUSE, TYPE_CLAUSE, MRM_ACTION, [LATE_KEY], NB_DOSSIERS,

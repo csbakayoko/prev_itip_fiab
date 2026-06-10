@@ -91,6 +91,58 @@ def _rechute_cond(relapse_days: int,
     return build
 
 
+# Cascade du repêchage (recover_late_declarations) : REJOUE le waterfall
+# principal dans le MÊME ORDRE (du plus strict au plus flexible). L'ordre
+# n'est pas qu'une question de couverture mais de QUALITÉ d'appariement : un
+# assuré à plusieurs sinistres (plusieurs survenances) partage la même clé
+# sans date — le dropDuplicates sur une clé lâche choisirait une contrepartie
+# arbitraire, alors que la clé stricte rapproche le bon dossier (bonne date,
+# bon n° de sinistre) avant que les clés flexibles ne ratissent le reste.
+# Deux étapes finales sans contrainte de date (HORS_FENETRE) récupèrent les
+# écarts de survenance au-delà des fenêtres ±WINDOW_DAYS / rechute — légitime
+# au repêchage : l'inventaire comparé n'est pas celui de l'exercice (N+1 ou
+# statut NON).
+# Élément : (label LATE_KEY, clé de join, condition supplémentaire ou None).
+RECOVERY_KEYS: Tuple = (
+    ("MATCH_EXACT",         "key_strict",        None),
+    ("MATCH_WINDOW",        "key_no_date",
+     _windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS)),
+    ("MATCH_TRONC",         "key_strict_tronc",  None),
+    ("MATCH_TRONC_WINDOW",  "key_no_date_tronc",
+     _windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS)),
+) + (
+    (("MATCH_IP",           "key_no_garantie",   _ip_cond(IP_GARANTIE_OFFSET)),)
+    if IP_GARANTIE_OFFSET is not None else ()
+) + (
+    ("MATCH_RECHUTE",       "key_no_date",       _rechute_cond(RELAPSE_WINDOW_DAYS)),
+    ("MATCH_RECHUTE_TRONC", "key_no_date_tronc", _rechute_cond(RELAPSE_WINDOW_DAYS)),
+    ("HORS_FENETRE",        "key_no_date",       None),
+    ("HORS_FENETRE_TRONC",  "key_no_date_tronc", None),
+)
+
+
+# ============================================================================
+# MATÉRIALISATION (troncature de lignée tolérante aux pertes d'executors)
+# ============================================================================
+
+def _materialize(df: DataFrame) -> DataFrame:
+    """Matérialise le DataFrame et TRONQUE LA LIGNÉE.
+
+    Si un checkpointDir est configuré (cf. CHECKPOINT_DIR dans profile.py) :
+    checkpoint FIABLE — les partitions sont écrites sur DBFS et survivent à la
+    perte d'un executor (autoscaling / nœuds spot Databricks).
+
+    Sinon : localCheckpoint — les blocs restent dans la mémoire des executors ;
+    un executor rendu au cluster ⇒ CHECKPOINT_RDD_BLOCK_ID_NOT_FOUND
+    irrécupérable (la lignée tronquée interdit le recalcul). À réserver aux
+    clusters à taille fixe.
+    """
+    sc = df.sparkSession.sparkContext
+    if sc.getCheckpointDir():
+        return df.checkpoint(eager=True)
+    return df.localCheckpoint(eager=True)
+
+
 # ============================================================================
 # EXÉCUTION D'UNE ÉTAPE DE MATCHING
 # ============================================================================
@@ -111,13 +163,15 @@ def execute_matching_step(
     - Anti-join sur `key` : toute ligne dont la clé apparaît dans matched
       sort du remaining.
 
-    Les remaining sont localCheckpoint(eager=True) pour TRONQUER LA LIGNÉE.
+    Les remaining sont matérialisés via _materialize() pour TRONQUER LA LIGNÉE.
     Attention : cache()/persist() ne suffit PAS — un InMemoryRelation expose son
     plan caché comme "inner child", donc la sérialisation du plan
     (AdaptiveSparkPlanExec.onUpdatePlan → explainStringLocal) ré-expose toute la
     chaîne précédente et le plan-string explose quand même (OutOfMemoryError
-    driver). localCheckpoint matérialise puis remplace la lignée par une feuille
+    driver). Le checkpoint matérialise puis remplace la lignée par une feuille
     RDD opaque, sans plan interne → le plan reste plat à chaque étape.
+    Checkpoint FIABLE (DBFS) si CHECKPOINT_DIR est configuré — indispensable
+    avec l'autoscaling (un localCheckpoint perd ses blocs avec l'executor).
     """
     print(f"[matching] ▶ {label} (clé={key})")
 
@@ -135,18 +189,17 @@ def execute_matching_step(
         df_matched = df_matched.filter(extra_cond())
     # Checkpoint du matched : matérialise + coupe la lignée (réutilisé pour
     # l'anti-join et l'union finale, sans ré-exposer le plan amont).
-    df_matched = (
+    df_matched = _materialize(
         df_matched.withColumn("TYPE_RECONCILIATION", F.lit(label))
-                  .localCheckpoint(eager=True)
     )
     n_matched = df_matched.count()
     print(f"[matching]   ↳ {label} : {n_matched:,} matchs")
 
     # Anti-join sur la clé : on retire des remaining les lignes dont la clé est
-    # dans matched. localCheckpoint coupe la lignée (cf. docstring).
+    # dans matched. _materialize coupe la lignée (cf. docstring).
     matched_keys = F.broadcast(df_matched.select(key).distinct())
-    df_cpt_rem = df_cpt.join(matched_keys, on=key, how="left_anti").localCheckpoint(eager=True)
-    df_mrm_rem = df_mrm.join(matched_keys, on=key, how="left_anti").localCheckpoint(eager=True)
+    df_cpt_rem = _materialize(df_cpt.join(matched_keys, on=key, how="left_anti"))
+    df_mrm_rem = _materialize(df_mrm.join(matched_keys, on=key, how="left_anti"))
 
     return df_matched, df_cpt_rem, df_mrm_rem
 
@@ -244,9 +297,9 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
         pass
 
     # Checkpoint initial : matérialise depuis la source + lignée propre pour la
-    # cascade (les étapes suivantes localCheckpoint à leur tour).
-    df_cpt = df_cpt_clean.localCheckpoint(eager=True)
-    df_mrm = df_mrm_clean.localCheckpoint(eager=True)
+    # cascade (les étapes suivantes se matérialisent à leur tour).
+    df_cpt = _materialize(df_cpt_clean)
+    df_mrm = _materialize(df_mrm_clean)
     n_cpt, n_mrm = df_cpt.count(), df_mrm.count()
     print(f"[matching] entrée : CPT={n_cpt:,} | MRM={n_mrm:,}")
 
@@ -335,7 +388,7 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
 def recover_late_declarations(
     df_result  : DataFrame,
     inventories: List[Tuple[str, DataFrame]],
-    keys       : Tuple[str, ...] = ("key_no_date",),
+    keys       : Tuple = RECOVERY_KEYS,
     label      : str = "CPT_LATE",
 ) -> DataFrame:
     """
@@ -343,13 +396,19 @@ def recover_late_declarations(
     sur les MRM au statut inventaire NON (repêchage).
 
     Cascade : chaque CPT_ONLY est testé contre les inventaires dans l'ordre,
-    et pour chaque inventaire contre les clés `keys` dans l'ordre (de la plus
-    stricte à la plus flexible, comme le waterfall principal). Le premier
-    (inventaire, clé) qui contient le dossier le récupère :
+    et pour chaque inventaire contre les étapes `keys` dans l'ordre.
+    RECOVERY_KEYS par défaut : le waterfall principal rejoué du plus strict au
+    plus flexible (EXACT → WINDOW → TRONC → TRONC_WINDOW → IP → RECHUTE →
+    HORS_FENETRE), cf. commentaire de la constante — l'ordre garantit qu'un
+    assuré à plusieurs sinistres est rapproché de la bonne contrepartie.
+    Une étape est (label, clé, condition supplémentaire ou None), ou un simple
+    nom de clé. La première (inventaire, étape) qui contient le dossier le
+    récupère :
         - TYPE_RECONCILIATION → `label` ("CPT_LATE" pour le N+1, "CPT_RECUP_NON"
                                 pour le repêchage via statut NON)
         - LATE_SOURCE         → tag de l'inventaire (ex: "MRM_N1", "STATUT_NON")
-        - LATE_KEY            → clé ayant permis le repêchage (traçabilité)
+        - LATE_KEY            → étape ayant permis le repêchage (traçabilité,
+                                ex: "MATCH_EXACT", "HORS_FENETRE")
         - colonnes MRM_*      → enrichies depuis l'inventaire
 
     Le label conditionne l'inclusion dans les métriques : "CPT_LATE" est inclus
@@ -360,7 +419,8 @@ def recover_late_declarations(
 
     Chaque inventaire est dédoublonné sur la clé courante et broadcasté.
     """
-    print(f"[late] === recovery démarré (label={label}, clés={list(keys)}) ===")
+    steps = [(k, k, None) if isinstance(k, str) else k for k in keys]
+    print(f"[late] === recovery démarré (label={label}, étapes={[s for s, _, _ in steps]}) ===")
     is_cpt_only = F.col("TYPE_RECONCILIATION") == "CPT_ONLY"
     rest = df_result.filter(~is_cpt_only)
 
@@ -373,21 +433,23 @@ def recover_late_declarations(
 
     recovered: List[DataFrame] = []
     for tag, df_mrm in inventories:
-        for key in keys:
-            print(f"[late] ▶ {tag} (clé={key})")
+        for step_label, key, cond in steps:
+            print(f"[late] ▶ {tag} ({step_label}, clé={key})")
             mrm_enrich = (
                 df_mrm.filter(F.col(key).isNotNull())
                       .select(key, *[c for c in df_mrm.columns if c.startswith("MRM_")])
                       .dropDuplicates([key])
             )
+            hit = remaining_cpt.join(F.broadcast(mrm_enrich), on=key, how="inner")
+            if cond is not None:
+                hit = hit.filter(cond())
             hit = (
-                remaining_cpt.join(F.broadcast(mrm_enrich), on=key, how="inner")
-                             .withColumn("TYPE_RECONCILIATION", F.lit(label))
-                             .withColumn("LATE_SOURCE", F.lit(tag))
-                             .withColumn("LATE_KEY", F.lit(key))
+                hit.withColumn("TYPE_RECONCILIATION", F.lit(label))
+                   .withColumn("LATE_SOURCE", F.lit(tag))
+                   .withColumn("LATE_KEY", F.lit(step_label))
             ).cache()
             n_hit = hit.count()
-            print(f"[late]   ↳ {tag}/{key} : {n_hit:,} retrouvés")
+            print(f"[late]   ↳ {tag}/{step_label} : {n_hit:,} retrouvés")
 
             remaining_cpt = remaining_cpt.join(
                 F.broadcast(hit.select(key).distinct()), on=key, how="left_anti"

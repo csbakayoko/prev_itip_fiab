@@ -24,6 +24,7 @@ from .profile import (
     FICHIER_MRM,
     FICHIER_MRM_N1,
     DEV_MODE,
+    CHECKPOINT_DIR,
     EXPORT_ANALYSES,
     EXPORT_FORMATS,
     EXPORT_DELTA_SCHEMA,

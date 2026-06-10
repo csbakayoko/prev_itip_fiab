@@ -36,9 +36,14 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
    sur les OUI + statut absent). Il sert **uniquement** à une passe de repêchage
    dédiée des `CPT_ONLY` restants (`recover_late_declarations(..., label=`
    `RECUP_NON_LABEL)`, calquée sur le N+1) :
-   - Le repêchage teste une **cascade de clés** (nominale complète
-     `key_no_date`, puis tronquée 20 chars `key_no_date_tronc`) — même logique
-     que le waterfall principal. La clé gagnante est tracée dans `LATE_KEY`.
+   - Le repêchage (N+1 comme statut NON) **rejoue le waterfall principal dans
+     le même ordre** (`RECOVERY_KEYS` : EXACT → WINDOW → TRONC → TRONC_WINDOW
+     → IP → RECHUTE → RECHUTE_TRONC), puis deux étapes finales sans contrainte
+     de date (`HORS_FENETRE`, `HORS_FENETRE_TRONC`) ratissent les écarts de
+     survenance au-delà des fenêtres. L'ordre strict → flexible garantit qu'un
+     assuré à plusieurs sinistres est rapproché de la **bonne** contrepartie
+     (une clé lâche seule choisirait un dossier arbitraire au dédoublonnage).
+     L'étape gagnante est tracée dans `LATE_KEY`.
    - Un `CPT_ONLY` retrouvé dans les MRM NON est tagué **`CPT_RECUP_NON`**
      (LATE_SOURCE = `STATUT_NON`) : anomalie résolue, mais **PM MRM = 0** → label
      distinct ⇒ **EXCLU par construction de TOUTES les métriques** (couverture,
