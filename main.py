@@ -71,7 +71,13 @@ def run(spark: SparkSession) -> DataFrame:
         # L'étape gagnante est tracée dans LATE_KEY.
         if RUN_PARAMS.get("fichier_mrm_n1"):
             mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
-            df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1)])
+            # Même règle de statut que l'exercice N : seuls les OUI (+ statut
+            # absent) du N+1 produisent des CPT_LATE — un NON du N+1 a une PM
+            # MRM = 0, le prendre comme contrepartie fausserait l'univers de
+            # chute (CPT_LATE est INCLUS dans les métriques). Les NON du N+1
+            # sont écartés ; le repêchage statut NON porte sur l'exercice N.
+            mrm_n1_oui, _ = _split_mrm_statut(mrm_n1)
+            df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1_oui)])
 
         # Repêchage via statut NON : les CPT_ONLY restants retrouvés dans les MRM
         # NON sont tagués CPT_RECUP_NON (LATE_SOURCE=STATUT_NON). Label distinct →

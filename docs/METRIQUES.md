@@ -67,7 +67,10 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
 
 3. **Récupérés N+1 (`CPT_LATE`)** — orphelins compte retrouvés dans un
    inventaire ultérieur, **avec** contrepartie MRM. **Inclus** dans l'univers
-   métriques (ils ont matché, sur un autre inventaire).
+   métriques (ils ont matché, sur un autre inventaire). Seuls les **OUI** (+
+   statut absent) du N+1 sont éligibles : un NON du N+1 (PM MRM = 0) est
+   écarté — sinon il entrerait dans l'univers de chute avec une PM nulle. Le
+   repêchage statut NON, lui, porte exclusivement sur l'exercice N.
 
 4. **Anomalies = `CPT_ONLY` définitifs** — sans contrepartie MRM, ni récupérés,
    ni explicables.
