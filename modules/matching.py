@@ -98,10 +98,9 @@ def _rechute_cond(relapse_days: int,
 # sans date — le dropDuplicates sur une clé lâche choisirait une contrepartie
 # arbitraire, alors que la clé stricte rapproche le bon dossier (bonne date,
 # bon n° de sinistre) avant que les clés flexibles ne ratissent le reste.
-# Deux étapes finales sans contrainte de date (HORS_FENETRE) récupèrent les
-# écarts de survenance au-delà des fenêtres ±WINDOW_DAYS / rechute — légitime
-# au repêchage : l'inventaire comparé n'est pas celui de l'exercice (N+1 ou
-# statut NON).
+# Mêmes règles et mêmes fenêtres que le waterfall : pas d'étape sans
+# contrainte de date (un écart de survenance au-delà des fenêtres n'est pas
+# considéré comme la même observation).
 # Élément : (label LATE_KEY, clé de join, condition supplémentaire ou None).
 RECOVERY_KEYS: Tuple = (
     ("MATCH_EXACT",         "key_strict",        None),
@@ -116,8 +115,6 @@ RECOVERY_KEYS: Tuple = (
 ) + (
     ("MATCH_RECHUTE",       "key_no_date",       _rechute_cond(RELAPSE_WINDOW_DAYS)),
     ("MATCH_RECHUTE_TRONC", "key_no_date_tronc", _rechute_cond(RELAPSE_WINDOW_DAYS)),
-    ("HORS_FENETRE",        "key_no_date",       None),
-    ("HORS_FENETRE_TRONC",  "key_no_date_tronc", None),
 )
 
 
@@ -399,7 +396,7 @@ def recover_late_declarations(
     et pour chaque inventaire contre les étapes `keys` dans l'ordre.
     RECOVERY_KEYS par défaut : le waterfall principal rejoué du plus strict au
     plus flexible (EXACT → WINDOW → TRONC → TRONC_WINDOW → IP → RECHUTE →
-    HORS_FENETRE), cf. commentaire de la constante — l'ordre garantit qu'un
+    RECHUTE_TRONC), cf. commentaire de la constante — l'ordre garantit qu'un
     assuré à plusieurs sinistres est rapproché de la bonne contrepartie.
     Une étape est (label, clé, condition supplémentaire ou None), ou un simple
     nom de clé. La première (inventaire, étape) qui contient le dossier le
@@ -408,7 +405,7 @@ def recover_late_declarations(
                                 pour le repêchage via statut NON)
         - LATE_SOURCE         → tag de l'inventaire (ex: "MRM_N1", "STATUT_NON")
         - LATE_KEY            → étape ayant permis le repêchage (traçabilité,
-                                ex: "MATCH_EXACT", "HORS_FENETRE")
+                                ex: "MATCH_EXACT", "MATCH_RECHUTE")
         - colonnes MRM_*      → enrichies depuis l'inventaire
 
     Le label conditionne l'inclusion dans les métriques : "CPT_LATE" est inclus

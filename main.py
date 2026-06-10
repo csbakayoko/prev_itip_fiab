@@ -67,7 +67,7 @@ def run(spark: SparkSession) -> DataFrame:
         # Déclarations tardives : CPT_ONLY retrouvés dans l'inventaire MRM N+1.
         # Les dossiers récupérés sont enrichis des infos MRM (TYPE_RECONCILIATION=
         # CPT_LATE). Cascade RECOVERY_KEYS : le waterfall principal rejoué dans
-        # l'ordre (strict → flexible) + étapes finales hors fenêtre de date.
+        # l'ordre (strict → flexible), mêmes règles et mêmes fenêtres.
         # L'étape gagnante est tracée dans LATE_KEY.
         if RUN_PARAMS.get("fichier_mrm_n1"):
             mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)

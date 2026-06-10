@@ -265,7 +265,7 @@ def analyze_recup_statut_non(
     présentés ici à part.
 
     Ventilé par (CLAUSE, TYPE_CLAUSE, MRM_ACTION) + LATE_KEY (étape de la
-    cascade ayant permis le repêchage, ex. MATCH_EXACT / HORS_FENETRE, si
+    cascade ayant permis le repêchage, ex. MATCH_EXACT / MATCH_RECHUTE, si
     présente). PM_CPT = enjeu compte récupéré ;
     NB_PM_MRM_NON_NULLE contrôle l'hypothèse « PM MRM = 0 » (doit valoir 0).
 

@@ -13,7 +13,7 @@ from typing import Tuple
 # MATCHING WATERFALL
 # ============================================================================
 
-WINDOW_DAYS = 7                              # tolérance ±jours pour les étapes "window"
+WINDOW_DAYS = 14                             # tolérance ±jours pour les étapes "window"
 
 # Regroupement pour la synthèse SODEXO :
 #   principale   = clé nominale complète (date jour ou ±WINDOW_DAYS)
