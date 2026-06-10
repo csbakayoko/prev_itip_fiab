@@ -4,7 +4,7 @@ from pyspark.sql import DataFrame, Window
 import pyspark.sql.functions as F
 from typing import Dict, List, Optional, Tuple
 
-from config import MATCH_LABELS
+from config import MATCH_LABELS, RECUP_NON_LABEL
 from modules.analysis.helpers import (
     _with_mrm_action, _statut_inv_dim, _pm_tranche_expr,
     _matched_universe, _CONSIGNE_ORDRE,
@@ -33,6 +33,12 @@ def analyze_suivi_consignes(
     │ MRM_DELETE │ MATCH_*              │ NON_CONFORME          │
     └────────────┴──────────────────────┴───────────────────────┘
 
+    Univers = MATCH_LABELS + MRM_MISSING + MRM_DELETE (cf. METRIQUES.md §5).
+    Les CPT_LATE (consigne issue d'un autre inventaire) et CPT_RECUP_NON
+    (repêchés via statut NON, hors métriques) portent une conclusion MRM
+    enrichie mais sont HORS univers conformité → exclus explicitement, sinon
+    ils seraient comptés à tort en NON_CONFORME.
+
     Colonnes du résultat summary :
         CLAUSE, MRM_ACTION, RESULTAT_AUDIT, nb_dossiers, pm_mrm, pct_nb, pct_pm
 
@@ -49,6 +55,7 @@ def analyze_suivi_consignes(
     df_audit = (
         _with_mrm_action(df_result, conclusion_col)
         .filter(F.col("MRM_ACTION").isNotNull())
+        .filter(is_matched | F.col("TYPE_RECONCILIATION").isin("MRM_MISSING", "MRM_DELETE"))
         .withColumn(
             "RESULTAT_AUDIT",
             F.when(is_matched  & (F.col("MRM_ACTION") == "MRM_KEEP"),   "CONFORME")
@@ -115,6 +122,10 @@ def analyze_consignes_ratios(
         # MRM_DELETE exclus : ces dossiers ne font pas partie du périmètre de
         # matching — les inclure dans le total fausserait les ratios KEEP/STUDY/ADD.
         .filter(F.col("MRM_ACTION") != "MRM_DELETE")
+        # CPT_RECUP_NON exclus : repêchés via un MRM statut NON (PM MRM = 0),
+        # hors métriques par construction — leur conclusion enrichie ne doit
+        # pas peser dans la distribution ni dans les totaux par clause.
+        .filter(F.col("TYPE_RECONCILIATION") != RECUP_NON_LABEL)
     )
 
     # Fenêtre par (clause, type_clause) pour calculer les totaux dans le scope de chaque clause

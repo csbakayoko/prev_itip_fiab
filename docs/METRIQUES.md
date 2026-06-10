@@ -36,16 +36,24 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
    sur les OUI + statut absent). Il sert **uniquement** à une passe de repêchage
    dédiée des `CPT_ONLY` restants (`recover_late_declarations(..., label=`
    `RECUP_NON_LABEL)`, calquée sur le N+1) :
+   - Le repêchage teste une **cascade de clés** (nominale complète
+     `key_no_date`, puis tronquée 20 chars `key_no_date_tronc`) — même logique
+     que le waterfall principal. La clé gagnante est tracée dans `LATE_KEY`.
    - Un `CPT_ONLY` retrouvé dans les MRM NON est tagué **`CPT_RECUP_NON`**
      (LATE_SOURCE = `STATUT_NON`) : anomalie résolue, mais **PM MRM = 0** → label
      distinct ⇒ **EXCLU par construction de TOUTES les métriques** (couverture,
-     chute, conformité). Présenté uniquement dans l'analyse dédiée
-     `recup_statut_non` (par clause, PM CPT) et dans la bulle COMPTE.
+     chute, conformité, audit consignes, ratios). Présenté uniquement dans
+     l'analyse dédiée `recup_statut_non` (onglet d'export dédié, par clause ×
+     consigne × clé) et en ligne séparée de la bulle COMPTE.
    - Un MRM NON qui ne repêche rien n'est **jamais unionné** → il disparaît
-     naturellement (pas de `MRM_MISSING` en statut NON). Aucune fonction de rejet
-     n'est nécessaire.
+     naturellement, **zéro empreinte dans la volumétrie** (pas de `MRM_MISSING`
+     en statut NON). Aucune fonction de rejet n'est nécessaire.
    - Conséquence : `MRM_MISSING` ne contient que des OUI ; les métriques de
      valeur ne sont jamais polluées par des couples à PM MRM = 0.
+   - **Auto-contrôle** : la synthèse vérifie l'hypothèse « NON ⇒ PM MRM = 0 »
+     sur les repêchés (`recup_non_pm_mrm_ok`, restitué console + colonne
+     `RECUP_NON_PM_MRM_OK` de `synthese_indicateurs`). Une violation est loguée
+     en warning : l'exclusion des métriques ne serait alors plus neutre en valeur.
 
 2. **Observations tardives IT (`CPT_OBS_TARDIVE`)** — sinistres clos avant
    l'inventaire suivant, jamais matchés, **sans** contrepartie MRM. **Exclues**
@@ -144,10 +152,10 @@ Comme global et par-consigne partagent **le même univers et la même formule**,
 le global est exactement l'agrégat pondéré des consignes → réconciliable ligne à
 ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
 
-> ⚠️ **Incohérence actuelle à corriger** : dans `compute_synthese`, le taux de
-> chute **par consigne** se calcule sur les **matchés seuls** (CPT_LATE exclu),
-> alors que le **global** inclut CPT_LATE. Les deux ne se réconcilient pas. La
-> formalisation impose le **même univers `MATCHÉS + CPT_LATE`** des deux côtés.
+> ✅ **Résolu** : `compute_synthese` (consigne et global) et les tables d'analyse
+> partagent le même univers `MATCHÉS + CPT_LATE` (`_matched_universe()`), et un
+> auto-contrôle vérifie à chaque run que global == Σ consignes
+> (`chute_coherente`, warning sinon).
 
 ### 4.3 Périmètre des consignes
 - **KEEP / ADD / STUDY** : chute pertinente (la PM doit être justifiée au

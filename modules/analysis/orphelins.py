@@ -264,18 +264,20 @@ def analyze_recup_statut_non(
     de toutes les métriques de valeur (chute, niveaux de PM, couverture) et
     présentés ici à part.
 
-    Ventilé par (CLAUSE, TYPE_CLAUSE, MRM_ACTION). PM_CPT = enjeu compte récupéré ;
+    Ventilé par (CLAUSE, TYPE_CLAUSE, MRM_ACTION) + LATE_KEY (clé ayant permis
+    le repêchage, si présente). PM_CPT = enjeu compte récupéré ;
     NB_PM_MRM_NON_NULLE contrôle l'hypothèse « PM MRM = 0 » (doit valoir 0).
 
-    Colonnes : CLAUSE, TYPE_CLAUSE, MRM_ACTION, NB_DOSSIERS, PM_CPT_TOTAL,
-               PM_MRM_TOTAL, NB_PM_MRM_NON_NULLE.
+    Colonnes : CLAUSE, TYPE_CLAUSE, MRM_ACTION, [LATE_KEY], NB_DOSSIERS,
+               PM_CPT_TOTAL, PM_MRM_TOTAL, NB_PM_MRM_NON_NULLE.
     """
+    key_dim = ["LATE_KEY"] if "LATE_KEY" in df_result.columns else []
     return (
         _with_mrm_action(
             df_result.filter(F.col("TYPE_RECONCILIATION") == RECUP_NON_LABEL),
             conclusion_col,
         )
-        .groupBy(clause_col, "TYPE_CLAUSE", "MRM_ACTION")
+        .groupBy(clause_col, "TYPE_CLAUSE", "MRM_ACTION", *key_dim)
         .agg(
             F.count("*").alias("NB_DOSSIERS"),
             F.round(F.coalesce(F.sum(pm_cpt_col), F.lit(0.0)), 2).alias("PM_CPT_TOTAL"),

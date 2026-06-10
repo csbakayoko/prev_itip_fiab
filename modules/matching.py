@@ -335,29 +335,32 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
 def recover_late_declarations(
     df_result  : DataFrame,
     inventories: List[Tuple[str, DataFrame]],
-    key        : str = "key_no_date",
+    keys       : Tuple[str, ...] = ("key_no_date",),
     label      : str = "CPT_LATE",
 ) -> DataFrame:
     """
     Donne une seconde chance aux CPT_ONLY sur des inventaires MRM ultérieurs OU
     sur les MRM au statut inventaire NON (repêchage).
 
-    Cascade : chaque CPT_ONLY est testé contre les inventaires dans l'ordre.
-    Le premier inventaire qui contient la clé récupère le dossier :
+    Cascade : chaque CPT_ONLY est testé contre les inventaires dans l'ordre,
+    et pour chaque inventaire contre les clés `keys` dans l'ordre (de la plus
+    stricte à la plus flexible, comme le waterfall principal). Le premier
+    (inventaire, clé) qui contient le dossier le récupère :
         - TYPE_RECONCILIATION → `label` ("CPT_LATE" pour le N+1, "CPT_RECUP_NON"
                                 pour le repêchage via statut NON)
         - LATE_SOURCE         → tag de l'inventaire (ex: "MRM_N1", "STATUT_NON")
+        - LATE_KEY            → clé ayant permis le repêchage (traçabilité)
         - colonnes MRM_*      → enrichies depuis l'inventaire
 
     Le label conditionne l'inclusion dans les métriques : "CPT_LATE" est inclus
     (vraie contrepartie N+1) ; "CPT_RECUP_NON" est un label distinct → exclu par
     construction de toutes les métriques (cf. RECUP_NON_LABEL). Les MRM de
     l'inventaire qui ne matchent rien ne sont JAMAIS unionnés (un NON non
-    repêché disparaît donc naturellement).
+    repêché disparaît donc naturellement, sans empreinte volumétrique).
 
-    Chaque inventaire est dédoublonné sur la clé et broadcasté.
+    Chaque inventaire est dédoublonné sur la clé courante et broadcasté.
     """
-    print(f"[late] === recovery démarré (label={label}) ===")
+    print(f"[late] === recovery démarré (label={label}, clés={list(keys)}) ===")
     is_cpt_only = F.col("TYPE_RECONCILIATION") == "CPT_ONLY"
     rest = df_result.filter(~is_cpt_only)
 
@@ -370,24 +373,26 @@ def recover_late_declarations(
 
     recovered: List[DataFrame] = []
     for tag, df_mrm in inventories:
-        print(f"[late] ▶ {tag}")
-        mrm_enrich = (
-            df_mrm.filter(F.col(key).isNotNull())
-                  .select(key, *[c for c in df_mrm.columns if c.startswith("MRM_")])
-                  .dropDuplicates([key])
-        )
-        hit = (
-            remaining_cpt.join(F.broadcast(mrm_enrich), on=key, how="inner")
-                         .withColumn("TYPE_RECONCILIATION", F.lit(label))
-                         .withColumn("LATE_SOURCE", F.lit(tag))
-        ).cache()
-        n_hit = hit.count()
-        print(f"[late]   ↳ {tag} : {n_hit:,} retrouvés")
+        for key in keys:
+            print(f"[late] ▶ {tag} (clé={key})")
+            mrm_enrich = (
+                df_mrm.filter(F.col(key).isNotNull())
+                      .select(key, *[c for c in df_mrm.columns if c.startswith("MRM_")])
+                      .dropDuplicates([key])
+            )
+            hit = (
+                remaining_cpt.join(F.broadcast(mrm_enrich), on=key, how="inner")
+                             .withColumn("TYPE_RECONCILIATION", F.lit(label))
+                             .withColumn("LATE_SOURCE", F.lit(tag))
+                             .withColumn("LATE_KEY", F.lit(key))
+            ).cache()
+            n_hit = hit.count()
+            print(f"[late]   ↳ {tag}/{key} : {n_hit:,} retrouvés")
 
-        remaining_cpt = remaining_cpt.join(
-            F.broadcast(hit.select(key).distinct()), on=key, how="left_anti"
-        )
-        recovered.append(hit)
+            remaining_cpt = remaining_cpt.join(
+                F.broadcast(hit.select(key).distinct()), on=key, how="left_anti"
+            )
+            recovered.append(hit)
 
     df_final = reduce(
         lambda a, b: a.unionByName(b, allowMissingColumns=True),

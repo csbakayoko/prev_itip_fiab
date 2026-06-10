@@ -121,6 +121,20 @@ def compute_synthese(df_result: DataFrame) -> dict:
     # présentés à part dans le compte (analyse dédiée recup_statut_non).
     nb_recup_non, pm_recup_non_cpt = cpt(lambda r: T(r) == RECUP_NON_LABEL)
 
+    # AUTO-CONTRÔLE : l'hypothèse métier « statut NON ⇒ PM MRM = 0 » doit tenir
+    # sur les repêchés. Si une PM MRM non nulle apparaît, l'exclusion des
+    # métriques n'est plus neutre en valeur → on le signale.
+    pm_recup_non_mrm    = agg("pm_mrm",       lambda r: T(r) == RECUP_NON_LABEL)
+    nb_recup_non_pm_nz  = agg("nb_pm_mrm_nz", lambda r: T(r) == RECUP_NON_LABEL)
+    recup_non_pm_mrm_ok = nb_recup_non_pm_nz == 0 and abs(pm_recup_non_mrm) <= 0.01
+    if not recup_non_pm_mrm_ok:
+        logger.warning(
+            "RECUP_NON : %d dossier(s) repêché(s) via statut NON avec PM MRM "
+            "non nulle (total %.2f €) — hypothèse « NON ⇒ PM MRM = 0 » violée, "
+            "vérifier la source MRM.",
+            nb_recup_non_pm_nz, pm_recup_non_mrm,
+        )
+
     # Matchés légitimes de l'inventaire courant.
     nb_match     = nb_princ + nb_aff + nb_recup
     pm_match_mrm = agg("pm_mrm", lambda r: T(r) in match)
@@ -265,7 +279,11 @@ def compute_synthese(df_result: DataFrame) -> dict:
         # Observations tardives IT = ANOMALIES (hors métriques, hors taux récup).
         "obs_nb"  : nb_obs,  "obs_pm"  : pm_obs_cpt,
         # Récupérés via MRM statut NON (anomalie résolue, hors métriques).
-        "recup_non_nb" : nb_recup_non, "recup_non_pm" : pm_recup_non_cpt,
+        "recup_non_nb"        : nb_recup_non,
+        "recup_non_pm"        : pm_recup_non_cpt,
+        "recup_non_pm_mrm"    : pm_recup_non_mrm,     # doit valoir 0 (contrôle)
+        "recup_non_pm_mrm_nz" : nb_recup_non_pm_nz,   # nb dossiers PM MRM ≠ 0
+        "recup_non_pm_mrm_ok" : recup_non_pm_mrm_ok,  # hypothèse NON ⇒ PM MRM = 0
         "def_nb"  : nb_def,  "def_pm"  : pm_def,
         # ── Indicateurs (taux) ──
         # Les obs tardives IT (sinistres clos avant l'inventaire suivant) sont
@@ -322,6 +340,8 @@ def build_synthese_indicateurs(df_result: DataFrame) -> DataFrame:
         "NB_MATCHES"            : int(d["match_nb"]),
         "NB_RECUP_N1"           : int(d["late_nb"]),
         "NB_RECUP_STATUT_NON"   : int(d["recup_non_nb"]),
+        "PM_CPT_RECUP_NON"      : float(d["recup_non_pm"]),
+        "RECUP_NON_PM_MRM_OK"   : bool(d["recup_non_pm_mrm_ok"]),
         "NB_CPT_ONLY"           : int(d["def_nb"]),
         "NB_MRM_MISSING"        : int(d["non_mappes_nb"]),
         "NB_A_SUPPRIMER"        : int(d["a_supprimer_nb"]),
@@ -486,6 +506,10 @@ def _render_indicateurs(d: dict) -> str:
         f"RÉCUPÉRÉS VIA MRM STATUT NON ({_n(d['recup_non_nb'])} dossiers, hors métriques)",
         f"  CPT_ONLY repêchés sur un MRM statut NON (PM MRM = 0, non remonté à la",
         f"  direction financière) : anomalie résolue. PM CPT {_n(d['recup_non_pm'])} €. Voir analyse dédiée.",
+        f"  ↳ contrôle PM MRM = 0 : "
+        + ("✔ vérifié" if d["recup_non_pm_mrm_ok"]
+           else f"✘ VIOLÉ — {_n(d['recup_non_pm_mrm_nz'])} dossier(s), "
+                f"PM MRM {_n(d['recup_non_pm_mrm'])} € (voir logs)"),
         "",
         f"ANOMALIES — CPT_ONLY définitifs ({_n(d['def_nb'])} dossiers, PM CPT {_n(d['def_pm'])} €)",
         f"  Dossiers compte sans contrepartie MRM, ni récupérés, ni explicables.",

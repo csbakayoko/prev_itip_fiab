@@ -66,9 +66,13 @@ def run(spark: SparkSession) -> DataFrame:
         # Repêchage via statut NON : les CPT_ONLY restants retrouvés dans les MRM
         # NON sont tagués CPT_RECUP_NON (LATE_SOURCE=STATUT_NON). Label distinct →
         # EXCLU de toutes les métriques, présenté dans une analyse dédiée. Les MRM
-        # NON non repêchés ne sont jamais unionnés (ils disparaissent).
+        # NON non repêchés ne sont jamais unionnés (ils disparaissent, zéro
+        # empreinte dans la volumétrie). Cascade de clés : nominale complète puis
+        # tronquée 20 chars (même logique que le waterfall principal).
         df_result = recover_late_declarations(
-            df_result, [("STATUT_NON", mrm_non)], label=RECUP_NON_LABEL,
+            df_result, [("STATUT_NON", mrm_non)],
+            keys=("key_no_date", "key_no_date_tronc"),
+            label=RECUP_NON_LABEL,
         )
 
         # Observations tardives IT : CPT_ONLY garantie 60 survenus en fin d'année,
