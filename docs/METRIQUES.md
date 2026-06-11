@@ -244,6 +244,15 @@ ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
 - **Colonnes dédiées** (`suivi_consignes`, `synthese_consignes`) :
   `nb_conformes`, `nb_non_conforme`, `nb_non_retrouve` — avec
   `nb_total = nb_conformes + nb_non_conforme + nb_non_retrouve`.
+- **Deux univers, réconciliés à l'affichage.** La restitution sépare
+  explicitement les deux périmètres au lieu de les mélanger sur une ligne :
+  - **CONFORMITÉ** (inventaire courant) : `total`, `conformes`, `%conf`, reste.
+  - **PROVISIONNEMENT** (inventaire + récupérés N+1) : `base`, `dont N+1`,
+    `PM MRM`, `PM CPT`, `chute`.
+  Pour KEEP / ADD / STUDY les conformes de l'inventaire sont exactement les
+  matchés inventaire de la base chute, d'où la réconciliation directe :
+  **`base = conformes + dont N+1`** (les récupérés N+1 servent au taux de chute
+  et à la volumétrie PM, pas à la conformité). DELETE : base PM non pertinente.
 - **Limite** : conformité = présence/absence, indépendante du montant.
 
 ### 5.2 Conformité globale

@@ -179,6 +179,8 @@ def compute_synthese(df_result: DataFrame) -> dict:
         # global = Σ consignes). cf. docs/METRIQUES.md §4.
         in_chute = lambda r: by_action(r) and in_metrics(r)
         nb_c     = agg("nb",           in_chute)
+        nb_late  = agg("nb", lambda r: by_action(r) and T(r) == "CPT_LATE")  # part N+1
+        nb_inv   = nb_c - nb_late                     # part inventaire courant
         pm_mrm_c = agg("pm_mrm",       in_chute)
         pm_cpt_c = agg("pm_cpt",       in_chute)
         nz       = agg("nb_pm_mrm_nz", in_chute)   # PM MRM ≠ 0
@@ -192,7 +194,8 @@ def compute_synthese(df_result: DataFrame) -> dict:
         return {
             "nb": nb, "conf": conf_nb, "pct": _pct(conf_nb, nb),
             "ko": ko, "ko_label": ko_label,
-            "nb_match": nb_c,
+            # Base PM / chute = retrouvés inventaire + récupérés N+1.
+            "nb_match": nb_c, "nb_inv": nb_inv, "nb_late": nb_late,
             "nz": nz,   "pct_nz":  _pct(nz, nb_c),
             "nz0": nz0, "pct_nz0": _pct(nz0, nb_c),
             "pm_mrm": pm_mrm_c, "pm_cpt": pm_cpt_c, "delta": delta,
@@ -468,10 +471,12 @@ def _resolve_date_inventaire(df_result: DataFrame) -> str:
 # RENDU ASCII
 # ============================================================================
 
-_B   = 34          # largeur d'une bulle
-_LBL = 27          # largeur du libellé dans la colonne latérale
-_RW  = 50          # largeur de la colonne latérale (libellé + nb + PM)
-_T   = 3 + _B + 3 + _RW   # largeur du contenu intérieur de la boîte
+_B    = 34         # largeur d'une bulle
+_LBL  = 27         # largeur du libellé dans la colonne latérale
+_NBW  = 7          # largeur du nombre de dossiers (jusqu'à 9 999 999)
+_PMW  = 13         # largeur de la PM (jusqu'aux milliards : "1 554 072 064")
+_RW   = _LBL + 2 + _NBW + 2 + _PMW + 2   # libellé + ": " + nb + "  " + pm + " €"
+_T    = 3 + _B + 3 + _RW   # largeur du contenu intérieur de la boîte
 
 
 def _n(x) -> str:
@@ -484,8 +489,8 @@ def _row(label: str, nb, pm) -> str:
 
     pm=None → colonne PM laissée vide (sous-total sans contrepartie PM pertinente).
     """
-    pm_txt = " " * 13 if pm is None else f"{_n(pm):>11} €"
-    return f"{label:<{_LBL}}: {_n(nb):>6}  {pm_txt}"
+    pm_txt = " " * (_PMW + 2) if pm is None else f"{_n(pm):>{_PMW}} €"
+    return f"{label:<{_LBL}}: {_n(nb):>{_NBW}}  {pm_txt}"
 
 
 def _bubble(*lines: str) -> list:
@@ -505,8 +510,8 @@ def _render_box(d: dict, client: str) -> str:
             f"     / PM {_n(d['mrm_pm'])} €",
         )
         + _bubble(
-            f"RETROUVÉS (base chute) = {_n(d['metrics_nb'])}",
-            f"  {_n(d['metrics_match_nb'])} inv. + {_n(d['metrics_late_nb'])} N+1 (K/A/S)",
+            f"RETROUVÉS base chute = {_n(d['metrics_nb'])}",
+            f" {_n(d['metrics_match_nb'])} inv. + {_n(d['metrics_late_nb'])} N+1",
             f" PM MRM   {_n(d['metrics_pm_mrm'])} €",
             f" PM CPT   {_n(d['metrics_pm_cpt'])} €",
             f" Δ PM     {_n(d['metrics_pm_ecart'])} €",
@@ -517,13 +522,18 @@ def _render_box(d: dict, client: str) -> str:
         )
     )
 
+    # « À supprimer » encore au compte (matchés DELETE) = sous-ensemble des
+    # retrouvés, non conformes. Affiché pour réconcilier avec la table consignes :
+    #   à supprimer (absents=OK) + encore au compte (KO) = total consigne à supprimer.
+    del_ko = d["consignes"]["À supprimer"]["ko"]
     right = [
         "",
-        _row("Consigne à supprimer",  d["a_supprimer_nb"], d["a_supprimer_pm"]),
+        _row("À supprimer — absents (OK)", d["a_supprimer_nb"], d["a_supprimer_pm"]),
         _row("À comparer",            d["a_comparer_nb"],  d["a_comparer_pm"]),
         _row("Retrouvés clé principale", d["principale_nb"], d["principale_pm"]),
         _row("Retrouvés clé affinée",    d["affinee_nb"],    d["affinee_pm_mrm"]),
         _row("Retrouvés récupération",   d["recup_nb"],      d["recup_pm_mrm"]),
+        _row("└ dont à supprimer (KO)",  del_ko,             None),
         _row("Non retrouvés au compte",  d["non_mappes_nb"], d["non_mappes_pm"]),
         _row("├ à conserver",         d["keep_nb"],        d["keep_pm"]),
         _row("├ à étudier",           d["study_nb"],       d["study_pm"]),
@@ -616,29 +626,43 @@ def _np(n, p) -> str:
 
 def _render_consignes(d: dict) -> str:
     """
-    Suivi des consignes :
-      - nb / %conf : sur tous les dossiers de la consigne
-      - matchés, PM nulle/non-nulle (avec %), PM MRM/CPT, taux de chute :
-        sur les dossiers matchés. "À supprimer" → analyse PM non pertinente.
+    Suivi des consignes — deux univers explicites et réconciliables :
+
+      CONFORMITÉ (inventaire courant)  : total = retrouvés + reste ; conformes ;
+        %conf = conformes / total ; reste = non conforme (conserver/supprimer)
+        ou non retrouvé (ajouter/étudier).
+      PROVISIONNEMENT (inventaire + N+1) : base = dossiers retrouvés servant à la
+        PM et au taux de chute (dont la part récupérée N+1) ; PM MRM, PM CPT,
+        chute. "À supprimer" → PM non pertinente.
+
+    Les deux univers partagent les retrouvés de l'inventaire ; ils diffèrent de
+    la part N+1 (colonne « dont N+1 ») côté PM et des « non retrouvés » côté
+    conformité — d'où total ≠ base, désormais tracé colonne par colonne.
     """
-    head = (f"  {'Consigne':<13}{'nb':>6}{'%conf':>8}{'retr.':>7}"
-            f"{'PM MRM nulle':>13}{'PM MRM≠0':>14}{'PM MRM':>15}{'PM CPT':>15}{'chute':>8}")
+    head = (f"  {'Consigne':<13}│{'total':>7}{'conformes':>11}{'%conf':>8}"
+            f"{'reste (statut)':>22}  │{'base':>7}{'dont N+1':>9}"
+            f"{'PM MRM':>16}{'PM CPT':>16}{'chute':>8}")
+    sep  = "  " + "─" * (len(head) - 2)
     lines = [
-        "SUIVI DES CONSIGNES — conformité (tous dossiers) ; PM & chute (dossiers retrouvés : inventaire + N+1)",
-        "  à conserver absent / à supprimer présent = non conforme | "
-        "à ajouter / à étudier absent = non retrouvé",
+        "SUIVI DES CONSIGNES",
+        "  CONFORMITÉ : univers inventaire courant (retrouvés vs non) — conformes / total.",
+        "  PROVISIONNEMENT : PM & taux de chute sur les dossiers retrouvés (inventaire + récupérés N+1).",
+        "  Reste : à conserver/supprimer = non conforme (anomalie) ; à ajouter/étudier = non retrouvé.",
         head,
+        sep,
     ]
     for label, c in d["consignes"].items():
-        ko_txt = f"  ({_n(c['ko'])} {c['ko_label']})" if c["ko"] else ""
-        base = f"  {label:<13}{_n(c['nb']):>6}{c['pct']:>6} %{_n(c['nb_match']):>7}"
+        statut = f"{_n(c['ko'])} {c['ko_label']}" if c["ko"] else "—"
+        left = (f"  {label:<13}│{_n(c['nb']):>7}{_n(c['conf']):>11}{c['pct']:>6} %"
+                f"{statut:>22}  │")
         if not c["pertinent"]:
-            lines.append(base + f"   — PM non pertinente (à supprimer){ko_txt} —")
+            lines.append(left + f"{_n(c['nb_match']):>7}{_n(c['nb_late']):>9}"
+                         + "      — PM non pertinente (à supprimer) —")
         else:
             lines.append(
-                base
-                + f"{_np(c['nz0'], c['pct_nz0']):>13}{_np(c['nz'], c['pct_nz']):>14}"
-                + f"{_n(c['pm_mrm']):>13} €{_n(c['pm_cpt']):>13} €{c['taux_chute']:>6} %"
+                left
+                + f"{_n(c['nb_match']):>7}{_n(c['nb_late']):>9}"
+                + f"{_n(c['pm_mrm']):>14} €{_n(c['pm_cpt']):>14} €{c['taux_chute']:>6} %"
             )
     return "\n".join(lines)
 
