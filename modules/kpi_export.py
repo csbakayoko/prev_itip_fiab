@@ -302,10 +302,12 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "chute_coherente"         : chute_coherente,        # global == Σ consignes ?
         "conformite_globale"      : _pct(conf_kas, total_kas),
         # ── Niveaux de PM (matchés légitimes + tardifs) ──
+        # Volontairement SANS pourcentage : le seul ratio de chute restitué est
+        # le taux de chute global KEEP/ADD/STUDY (un % sur cet univers-ci créait
+        # un doublon trompeur du taux de chute).
         "metrics_pm_mrm"   : pm_metrics_mrm,
         "metrics_pm_cpt"   : pm_metrics_cpt,
         "metrics_pm_ecart" : pm_metrics_mrm - pm_metrics_cpt,
-        "metrics_pm_pct"   : _pct(pm_metrics_mrm - pm_metrics_cpt, pm_metrics_mrm),
         "metrics_nb"       : nb_metrics,
         # ── Suivi des consignes (détail) ──
         "consignes" : {
@@ -355,7 +357,6 @@ def build_synthese_indicateurs(df_result: DataFrame) -> DataFrame:
         "PM_MRM"                : float(d["metrics_pm_mrm"]),
         "PM_CPT"                : float(d["metrics_pm_cpt"]),
         "PM_ECART"              : float(d["metrics_pm_ecart"]),
-        "PM_ECART_PCT"          : float(d["metrics_pm_pct"]),
         "COHERENT"              : bool(d["coherent"]),
     }
     # Schéma explicite → ordre de colonnes stable d'un run à l'autre.
@@ -558,7 +559,7 @@ def _render_indicateurs(d: dict) -> str:
         f"NIVEAUX DE PM (matchés + récupérés N+1, {_n(d['metrics_nb'])} dossiers)",
         f"  PM MRM   : {_n(d['metrics_pm_mrm']):>15} €",
         f"  PM CPT   : {_n(d['metrics_pm_cpt']):>15} €",
-        f"  Écart    : {_n(d['metrics_pm_ecart']):>15} €  ({d['metrics_pm_pct']} %)",
+        f"  Écart    : {_n(d['metrics_pm_ecart']):>15} €",
         "",
         f"RÉCUPÉRATION TARDIVE N+1 ({_n(d['late_nb'])} dossiers, INCLUS dans les métriques)",
         f"  Dossiers CPT orphelins retrouvés dans l'inventaire N+1  "
