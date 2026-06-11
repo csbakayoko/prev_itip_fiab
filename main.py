@@ -2,7 +2,10 @@
 Pipeline de fiabilisation ITIP-FIAB — point d'entrée.
 
 Spine essentiel, multi-périmètre :
-    load → clean → waterfall → synthèse (ASCII console) + analyses par clause
+    load → clean → waterfall → synthèse (ASCII console) → métriques + graphiques
+
+Le calcul des indicateurs vit dans modules.metrics (une passe Spark, tables
+sérialisables), leur mise en forme dans modules.viz (9 graphiques-messages).
 
 Périmètre piloté par config/profile.py (par défaut : toutes les clauses). Lancement :
     spark-submit main.py        (ou exécution dans un notebook Databricks)
@@ -19,15 +22,14 @@ from config import (
 )
 from modules.load_data import load_cpt_raw, load_mrm_raw
 from modules.transform import clean_cpt, clean_mrm
-from modules.matching import matching_waterfall, recover_late_declarations
-from modules.analysis import (
+from modules.matching import (
+    matching_waterfall,
+    recover_late_declarations,
     flag_late_it_observations,
     enrich_result_tags,
-    diagnose_mrm_fanout,
-    restituer_analyses,
-    export_analyses,
-    restituer_graphiques,
 )
+from modules.metrics import Metrics
+from modules.viz import restituer_graphiques
 from modules.kpi_export import print_synthese
 from modules._timing import timed
 import pyspark.sql.functions as F
@@ -103,51 +105,29 @@ def run(spark: SparkSession) -> DataFrame:
             df_result.count()  # force la matérialisation pour un timing fiable
 
         # ====================================================================
-        # ANALYSES PAS-À-PAS (étapes appelées après le matching).
-        # Sorties séparées, à vérifier une à une avant agrégation ultérieure
-        # dans un pipeline global. Univers PM/chute = matchés + récupérés N+1 ;
-        # obs tardives IT, MRM_MISSING et CPT_ONLY exclus des comparaisons.
+        # RESTITUTION : synthèse console, puis métriques + graphiques.
+        # Univers PM/chute = matchés + récupérés N+1 ; obs tardives IT,
+        # MRM_MISSING et CPT_ONLY exclus des comparaisons.
         # ====================================================================
 
         # ÉTAPE 0 — vue d'ensemble + taux distincts (matching vs récupération).
         with timed("ÉTAPE 0 synthèse"):
             print_synthese(df_result)
 
-        # ÉTAPE 1 — diagnostic du fan-out (écart MRM ↔ synthèse mrm_nb). Univers =
-        # MRM OUI (celui du matching principal ; les NON ne sont pas comparés ici).
-        with timed("ÉTAPE 1 diagnostic fan-out"):
-            diagnose_mrm_fanout(df_result, mrm_oui).show(30, truncate=False)
-
-        # ÉTAPE 2 — restitution console de toutes les analyses (clause taguée) :
-        # suivi consignes, taux de chute, consignes×PM, à supprimer non suivies,
-        # provisionnement, ventilation CPT_ONLY, obs tardives (clos avant N+1).
-        with timed("ÉTAPE 2 restitution analyses"):
-            restituer_analyses(df_result)
-
-            # Répartition CPT_ONLY par tag (segmentation actionnable des anomalies).
-            print("\n[CPT_ONLY] répartition par tag :")
-            (df_result.filter(F.col("TYPE_RECONCILIATION") == "CPT_ONLY")
-                      .groupBy("TAG_CPT_ONLY")
-                      .agg(F.count("*").alias("NB_DOSSIERS"),
-                           F.round(F.sum("CPT_PM"), 2).alias("PM_CPT_TOTAL"))
-                      .orderBy(F.desc("PM_CPT_TOTAL"))
-                      .show(truncate=False))
-
-        # ÉTAPE 3 — export multi-format sur DBFS (piloté par profile.py).
+        # ÉTAPE 1 — couche métriques : une passe Spark, toutes les tables de
+        # restitution (sérialisables CSV/JSON/Parquet/Excel/Delta).
+        with timed("ÉTAPE 1 métriques"):
+            m = Metrics(df_result)
         if EXPORT_ANALYSES:
-            with timed("ÉTAPE 3 export analyses"):
-                export_analyses(
-                    df_result,
-                    formats      = EXPORT_FORMATS,
-                    delta_schema = EXPORT_DELTA_SCHEMA,
-                )
+            with timed("ÉTAPE 1b export métriques"):
+                m.export(formats=EXPORT_FORMATS, delta_schema=EXPORT_DELTA_SCHEMA)
 
-        # ÉTAPE 4 — graphiques de restitution (titres-messages : justification
+        # ÉTAPE 2 — graphiques de restitution (titres-messages : justification
         # du compte, couverture des listes d'arrêts, chute par clause/consigne,
         # conformité des consignes, anomalies). Affichés en notebook + PNG DBFS.
         if EXPORT_GRAPHS:
-            with timed("ÉTAPE 4 graphiques"):
-                restituer_graphiques(df_result)
+            with timed("ÉTAPE 2 graphiques"):
+                restituer_graphiques(m)
     return df_result
 
 

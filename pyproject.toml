@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "itip-fiab"
+version = "2.0.0"
+description = "Fiabilisation de la réconciliation CPT/MRM (prévoyance ITIP)"
+requires-python = ">=3.9"
+# pyspark / pandas / matplotlib / openpyxl : fournis par le runtime Databricks,
+# volontairement non épinglés ici pour ne pas entrer en conflit avec le DBR.
+dependencies = []
+
+[tool.setuptools]
+packages = ["config", "modules"]
+py-modules = ["main"]

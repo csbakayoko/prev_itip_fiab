@@ -43,5 +43,10 @@ htmlcov/
 # =========================
 # IDE (Éditeurs de code)
 # =========================
-.idea/             # Pour PyCharm
-.vscode/           # Pour VS Code
+# PyCharm
+.idea/
+# VS Code
+.vscode/
+
+# Fichier de notes, à ignorer
+notes.txt

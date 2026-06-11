@@ -343,53 +343,6 @@ def compute_synthese(df_result: DataFrame) -> dict:
     }
 
 
-def build_synthese_indicateurs(df_result: DataFrame) -> DataFrame:
-    """
-    Table d'indicateurs de synthèse — UNE ligne par run.
-
-    Aplati les scalaires de compute_synthese (taux de couverture, récupération
-    N+1, chute global, conformité, niveaux de PM, volumétries) en un DataFrame
-    d'une ligne : historisable en base (suivi dans le temps) et directement
-    lisible en présentation. Périmètre + date d'inventaire en tête.
-    """
-    d = compute_synthese(df_result)
-    cons = d["consignes"]
-    nb_non_retrouve = int(cons["À ajouter"]["ko"] + cons["À étudier"]["ko"])
-    nb_non_conforme = int(cons["À conserver"]["ko"] + cons["À supprimer"]["ko"])
-    row = {
-        "PERIMETRE"             : CLIENT_NAME,
-        "DATE_INVENTAIRE"       : d["date_inventaire"],
-        "NB_MATCHES"            : int(d["match_nb"]),
-        "NB_RECUP_N1"           : int(d["late_nb"]),
-        "NB_RECUP_STATUT_NON"   : int(d["recup_non_nb"]),
-        "PM_CPT_RECUP_NON"      : float(d["recup_non_pm"]),
-        "RECUP_NON_PM_MRM_OK"   : bool(d["recup_non_pm_mrm_ok"]),
-        "NB_CPT_ONLY"           : int(d["def_nb"]),
-        "NB_MRM_MISSING"        : int(d["non_mappes_nb"]),
-        "NB_A_SUPPRIMER"        : int(d["a_supprimer_nb"]),
-        "TAUX_COUVERTURE_MRM"   : float(d["taux_couverture_mrm"]),
-        "TAUX_COUVERTURE_COMPTE": float(d["taux_couverture_compte"]),
-        "TAUX_RECUP_TARDIVE"    : float(d["taux_recup_tardive"]),
-        "TAUX_RECUP_GLOBAL"     : float(d["taux_recup_global"]),
-        "TAUX_CHUTE_GLOBAL"     : float(d["taux_chute_global"]),
-        "CHUTE_COHERENTE"       : bool(d["chute_coherente"]),
-        "CONFORMITE_GLOBALE"    : float(d["conformite_globale"]),
-        "NB_NON_CONFORME"       : nb_non_conforme,   # KEEP absent + DELETE présent
-        "NB_NON_RETROUVE"       : nb_non_retrouve,   # ADD/STUDY non retrouvés (informatif)
-        "PM_MRM"                : float(d["metrics_pm_mrm"]),
-        "PM_CPT"                : float(d["metrics_pm_cpt"]),
-        "PM_ECART"              : float(d["metrics_pm_ecart"]),
-        "COHERENT"              : bool(d["coherent"]),
-    }
-    # Schéma explicite → ordre de colonnes stable d'un run à l'autre.
-    from pyspark.sql.types import (
-        StructType, StructField, StringType, LongType, DoubleType, BooleanType,
-    )
-    _t = {bool: BooleanType(), int: LongType(), float: DoubleType(), str: StringType()}
-    schema = StructType([StructField(k, _t[type(v)], True) for k, v in row.items()])
-    return df_result.sparkSession.createDataFrame([tuple(row.values())], schema=schema)
-
-
 def kas_totaux(d: dict) -> dict:
     """Totaux KEEP+ADD+STUDY depuis les scalaires de compute_synthese.
 
@@ -404,55 +357,6 @@ def kas_totaux(d: dict) -> dict:
         "pm_cpt" : sum(c["pm_cpt"] for c in kas),
         "delta"  : sum(c["delta"]  for c in kas),
     }
-
-
-def build_ratios_globaux(df_result: DataFrame) -> DataFrame:
-    """
-    Ratios GLOBAUX de restitution — une ligne par indicateur, avec NUMÉRATEUR
-    et DÉNOMINATEUR explicites (les chiffres se réconcilient avec la synthèse
-    et les onglets taux_chute / suivi_consignes). Livrable direct pour les
-    clients internes (direction financière, engagements).
-
-    Colonnes : PERIMETRE, DATE_INVENTAIRE, INDICATEUR, VALEUR_PCT,
-               NUMERATEUR, DENOMINATEUR, UNITE, LECTURE.
-    """
-    d = compute_synthese(df_result)
-    k = kas_totaux(d)
-    m, l, anom, miss = d["match_nb"], d["late_nb"], d["def_nb"], d["non_mappes_nb"]
-    rows = [
-        ("Taux de chute global (conserver/étudier/ajouter)", d["taux_chute_global"],
-         round(k["delta"], 2), round(k["pm_mrm"], 2), "€",
-         "Σ(PM MRM − PM CPT) / Σ PM MRM, dossiers retrouvés (inventaire + N+1) ; > 0 = sous-provisionné (risque)"),
-        ("Conformité globale des consignes", d["conformite_globale"],
-         float(k["conf"]), float(k["nb"]), "dossiers",
-         "consignes conserver/étudier/ajouter retrouvées au compte / total de ces consignes"),
-        ("Taux de couverture MRM", d["taux_couverture_mrm"],
-         float(m), float(m + miss), "dossiers",
-         "retrouvés / revue à comparer (consignes à supprimer exclues)"),
-        ("Taux de couverture compte", d["taux_couverture_compte"],
-         float(m), float(m + l + anom), "dossiers",
-         "retrouvés (inventaire courant) / compte réconciliable"),
-        ("Taux de récupération tardive N+1", d["taux_recup_tardive"],
-         float(l), float(l + anom), "dossiers",
-         "retrouvés dans l'inventaire N+1 / dossiers compte restant à justifier"),
-        ("Taux de récupération global", d["taux_recup_global"],
-         float(m + l), float(m + l + anom), "dossiers",
-         "(retrouvés inventaire + N+1) / compte réconciliable"),
-    ]
-    from pyspark.sql.types import StructType, StructField, StringType, DoubleType
-    schema = StructType([
-        StructField("PERIMETRE",       StringType(), True),
-        StructField("DATE_INVENTAIRE", StringType(), True),
-        StructField("INDICATEUR",      StringType(), True),
-        StructField("VALEUR_PCT",      DoubleType(), True),
-        StructField("NUMERATEUR",      DoubleType(), True),
-        StructField("DENOMINATEUR",    DoubleType(), True),
-        StructField("UNITE",           StringType(), True),
-        StructField("LECTURE",         StringType(), True),
-    ])
-    data = [(CLIENT_NAME, d["date_inventaire"], n, float(v), float(num), float(den), u, lec)
-            for n, v, num, den, u, lec in rows]
-    return df_result.sparkSession.createDataFrame(data, schema=schema)
 
 
 def _resolve_date_inventaire(df_result: DataFrame) -> str:
