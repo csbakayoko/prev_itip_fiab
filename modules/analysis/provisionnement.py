@@ -4,8 +4,6 @@ from pyspark.sql import DataFrame, Window
 import pyspark.sql.functions as F
 from typing import Dict, List, Optional, Tuple
 
-from config import MATCH_LABELS
-from modules.matching import categorize_mrm_conclusion
 from modules.analysis.helpers import (
     _with_mrm_action, _filter_matched_keep_add_study, DEFAULT_ECART_TRANCHES,
 )
@@ -185,8 +183,10 @@ def study_provisionnement(
     Écart = MRM_PM − CPT_PM (positif = sous-provisionnement). Taux de chute =
     Σécart / ΣMRM_PM × 100, cohérent avec la synthèse.
 
-    Univers : matchs légitimes (MATCH_LABELS) + déclarations tardives (CPT_LATE),
-    consigne MRM_DELETE exclue. PM nulles ramenées à 0 pour la comparaison.
+    Univers : celui du taux de chute global — matchés (MATCH_LABELS) +
+    récupérés N+1 (CPT_LATE), consignes KEEP/ADD/STUDY uniquement
+    (_filter_matched_keep_add_study) ⇒ l'agrégat des lignes redonne exactement
+    le taux de chute global. PM nulles ramenées à 0 pour la comparaison.
 
     Ventilé par (CLAUSE, TYPE_CLAUSE) ; les pourcentages (PCT_NB, PCT_PM_MRM)
     sont calculés dans le scope de chaque clause.
@@ -200,15 +200,11 @@ def study_provisionnement(
     Returns:
         DataFrame de stats par clause × catégorie, prêt pour visualisation.
     """
-    matched = list(MATCH_LABELS) + ["CPT_LATE"]
-    pm_mrm  = F.coalesce(F.col("MRM_PM"), F.lit(0.0))
-    pm_cpt  = F.coalesce(F.col("CPT_PM"), F.lit(0.0))
+    pm_mrm = F.coalesce(F.col("MRM_PM"), F.lit(0.0))
+    pm_cpt = F.coalesce(F.col("CPT_PM"), F.lit(0.0))
 
     df = (
-        df_result
-        .filter(F.col("TYPE_RECONCILIATION").isin(matched))
-        .withColumn("_ACTION", categorize_mrm_conclusion(F.col(conclusion_col)))
-        .filter(F.col("_ACTION").isNull() | (F.col("_ACTION") != "MRM_DELETE"))
+        _filter_matched_keep_add_study(_with_mrm_action(df_result, conclusion_col))
         .withColumn("ECART", pm_mrm - pm_cpt)            # > 0 → sous-provisionné
         .withColumn("ECART_ABS", F.abs(pm_mrm - pm_cpt))
         .withColumn("CATEGORIE_PROVISION",

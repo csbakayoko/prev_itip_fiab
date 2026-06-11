@@ -176,9 +176,12 @@ ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
   chute (sinon le « global » mêle deux grandeurs de natures différentes).
 
 ### 4.4 Niveaux de PM
-- **PM MRM**, **PM CPT**, **écart** (`PM_MRM − PM_CPT`) et **% écart** sur
-  l'univers métriques `MATCHÉS + CPT_LATE`. Donne l'enjeu **en euros** derrière
-  le pourcentage de chute.
+- **PM MRM**, **PM CPT** et **écart** (`PM_MRM − PM_CPT`) sur **l'univers du
+  taux de chute global** (`MATCHÉS + CPT_LATE`, consignes KEEP/ADD/STUDY) :
+  ce sont les **composantes exactes** du taux — `écart / PM_MRM × 100 ==
+  taux_chute_global` partout (synthèse, `synthese_indicateurs`,
+  `ratios_globaux`, graphiques). Aucun % affiché sur ce bloc (le seul ratio
+  de chute restitué est le global + le par-consigne).
 
 ---
 
@@ -215,7 +218,7 @@ ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
 | `taux_chute` | chute par consigne (sous/sur/conforme, poids) | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
 | `taux_chute_par_clause` | chute globale par clause (consignes confondues, poids PM) | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
 | `consignes_pm` | chute par consigne × catégorie × tranche PM | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
-| `provisionnement` | sous/sur/conforme par consigne | `MATCHÉS + CPT_LATE`, hors DELETE |
+| `provisionnement` | sous/sur/conforme par consigne | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
 | `ecarts_tranches` | distribution des écarts par tranche € | sous/sur-provisionnés |
 | `delete_non_suivies` | DELETE matché (PM non supprimée) | `MRM_DELETE ∩ MATCHÉS` |
 | `ventilation_cpt_only` | concentration PM des orphelins compte | `CPT_ONLY` |

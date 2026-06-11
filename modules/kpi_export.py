@@ -142,10 +142,7 @@ def compute_synthese(df_result: DataFrame) -> dict:
 
     # Univers MÉTRIQUES PM = matchés légitimes + récupérés N+1 réels (CPT_LATE).
     # Les obs tardives IT (CPT_OBS_TARDIVE) sont EXCLUES : jamais matchées.
-    in_metrics     = lambda r: T(r) in match or T(r) == "CPT_LATE"
-    pm_metrics_mrm = pm_match_mrm + pm_late_mrm
-    pm_metrics_cpt = pm_match_cpt + pm_late_cpt
-    nb_metrics     = nb_match + nb_late
+    in_metrics = lambda r: T(r) in match or T(r) == "CPT_LATE"
 
     # Totaux exhaustifs des deux univers d'entrée.
     #   MRM en entrée   = matchés + à supprimer + non mappés (CPT_LATE exclu : il
@@ -207,9 +204,13 @@ def compute_synthese(df_result: DataFrame) -> dict:
     conf_kas  = agg("nb", lambda r: A(r) in _KAS and T(r) in match)
 
     # ── Taux de chute (KEEP/ADD/STUDY, univers métriques = matchés + tardifs) ─
+    # UNIVERS DE RÉFÉRENCE UNIQUE pour toute grandeur "globale" de chute :
+    # taux, niveaux de PM et écart partagent ces mêmes composantes partout
+    # (synthèse, synthese_indicateurs, ratios_globaux, graphiques).
     in_kas_metrics = lambda r: A(r) in _KAS and in_metrics(r)
     pm_mrm_kas = agg("pm_mrm", in_kas_metrics)
     pm_cpt_kas = agg("pm_cpt", in_kas_metrics)
+    nb_kas     = agg("nb",     in_kas_metrics)
     global_delta = pm_mrm_kas - pm_cpt_kas
     taux_chute_global = _pct(global_delta, pm_mrm_kas)
 
@@ -301,14 +302,15 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "taux_chute_consignes"    : taux_chute_consignes,   # Σ chutes par consigne (contrôle)
         "chute_coherente"         : chute_coherente,        # global == Σ consignes ?
         "conformite_globale"      : _pct(conf_kas, total_kas),
-        # ── Niveaux de PM (matchés légitimes + tardifs) ──
-        # Volontairement SANS pourcentage : le seul ratio de chute restitué est
-        # le taux de chute global KEEP/ADD/STUDY (un % sur cet univers-ci créait
-        # un doublon trompeur du taux de chute).
-        "metrics_pm_mrm"   : pm_metrics_mrm,
-        "metrics_pm_cpt"   : pm_metrics_cpt,
-        "metrics_pm_ecart" : pm_metrics_mrm - pm_metrics_cpt,
-        "metrics_nb"       : nb_metrics,
+        # ── Niveaux de PM — UNIVERS DU TAUX DE CHUTE GLOBAL ──
+        # Mêmes composantes que taux_chute_global (matchés + N+1, KEEP/ADD/
+        # STUDY) : Écart / PM MRM × 100 == taux_chute_global, partout. Pas de
+        # pourcentage affiché ici (le seul ratio de chute restitué est le taux
+        # de chute global + le par-consigne).
+        "metrics_pm_mrm"   : pm_mrm_kas,
+        "metrics_pm_cpt"   : pm_cpt_kas,
+        "metrics_pm_ecart" : global_delta,
+        "metrics_nb"       : nb_kas,
         # ── Suivi des consignes (détail) ──
         "consignes" : {
             "À conserver" : keep,
@@ -556,7 +558,8 @@ def _render_indicateurs(d: dict) -> str:
         f"    Conformité globale des consignes                       : {d['conformite_globale']:>5} %",
         "  (dénominateurs compte hors sinistres clos avant inventaire suivant)",
         "",
-        f"NIVEAUX DE PM (matchés + récupérés N+1, {_n(d['metrics_nb'])} dossiers)",
+        f"NIVEAUX DE PM — univers du taux de chute global ({_n(d['metrics_nb'])} dossiers,",
+        "  matchés + récupérés N+1, consignes à conserver/étudier/ajouter)",
         f"  PM MRM   : {_n(d['metrics_pm_mrm']):>15} €",
         f"  PM CPT   : {_n(d['metrics_pm_cpt']):>15} €",
         f"  Écart    : {_n(d['metrics_pm_ecart']):>15} €",
