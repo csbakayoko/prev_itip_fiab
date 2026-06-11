@@ -184,8 +184,14 @@ def compute_synthese(df_result: DataFrame) -> dict:
         nz       = agg("nb_pm_mrm_nz", in_chute)   # PM MRM ≠ 0
         nz0      = nb_c - nz                         # PM MRM nulle (null ou 0)
         delta    = pm_mrm_c - pm_cpt_c
+        # Nature du KO (3 états — cf. METRIQUES.md §5.1) : pour ADD/STUDY le non
+        # matché est "non retrouvé" (PM à ajouter/étudier pas encore au compte,
+        # informatif) ; pour KEEP/DELETE c'est "non conforme" (anomalie).
+        ko        = nb - conf_nb
+        ko_label  = "non retrouvé" if action in ("MRM_ADD", "MRM_STUDY") else "non conforme"
         return {
             "nb": nb, "conf": conf_nb, "pct": _pct(conf_nb, nb),
+            "ko": ko, "ko_label": ko_label,
             "nb_match": nb_c,
             "nz": nz,   "pct_nz":  _pct(nz, nb_c),
             "nz0": nz0, "pct_nz0": _pct(nz0, nb_c),
@@ -211,6 +217,10 @@ def compute_synthese(df_result: DataFrame) -> dict:
     pm_mrm_kas = agg("pm_mrm", in_kas_metrics)
     pm_cpt_kas = agg("pm_cpt", in_kas_metrics)
     nb_kas     = agg("nb",     in_kas_metrics)
+    # Décomposition de la base chute : matchés inventaire courant vs récupérés
+    # N+1, pour expliciter que "matchés (base chute) = matchés inv. + N+1".
+    nb_kas_late = agg("nb", lambda r: A(r) in _KAS and T(r) == "CPT_LATE")
+    nb_kas_inv  = nb_kas - nb_kas_late
     global_delta = pm_mrm_kas - pm_cpt_kas
     taux_chute_global = _pct(global_delta, pm_mrm_kas)
 
@@ -311,6 +321,8 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "metrics_pm_cpt"   : pm_cpt_kas,
         "metrics_pm_ecart" : global_delta,
         "metrics_nb"       : nb_kas,
+        "metrics_match_nb" : nb_kas_inv,    # matchés inventaire courant (KAS)
+        "metrics_late_nb"  : nb_kas_late,   # récupérés N+1 (KAS) inclus dans la base chute
         # ── Suivi des consignes (détail) ──
         "consignes" : {
             "À conserver" : keep,
@@ -338,6 +350,9 @@ def build_synthese_indicateurs(df_result: DataFrame) -> DataFrame:
     lisible en présentation. Périmètre + date d'inventaire en tête.
     """
     d = compute_synthese(df_result)
+    cons = d["consignes"]
+    nb_non_retrouve = int(cons["À ajouter"]["ko"] + cons["À étudier"]["ko"])
+    nb_non_conforme = int(cons["À conserver"]["ko"] + cons["À supprimer"]["ko"])
     row = {
         "PERIMETRE"             : CLIENT_NAME,
         "DATE_INVENTAIRE"       : d["date_inventaire"],
@@ -356,6 +371,8 @@ def build_synthese_indicateurs(df_result: DataFrame) -> DataFrame:
         "TAUX_CHUTE_GLOBAL"     : float(d["taux_chute_global"]),
         "CHUTE_COHERENTE"       : bool(d["chute_coherente"]),
         "CONFORMITE_GLOBALE"    : float(d["conformite_globale"]),
+        "NB_NON_CONFORME"       : nb_non_conforme,   # KEEP absent + DELETE présent
+        "NB_NON_RETROUVE"       : nb_non_retrouve,   # ADD/STUDY non retrouvés (informatif)
         "PM_MRM"                : float(d["metrics_pm_mrm"]),
         "PM_CPT"                : float(d["metrics_pm_cpt"]),
         "PM_ECART"              : float(d["metrics_pm_ecart"]),
@@ -402,22 +419,22 @@ def build_ratios_globaux(df_result: DataFrame) -> DataFrame:
     rows = [
         ("Taux de chute global (conserver/étudier/ajouter)", d["taux_chute_global"],
          round(k["delta"], 2), round(k["pm_mrm"], 2), "€",
-         "Σ(PM MRM − PM CPT) / Σ PM MRM, matchés + récupérés N+1 ; > 0 = sous-provisionné (risque)"),
+         "Σ(PM MRM − PM CPT) / Σ PM MRM, dossiers retrouvés (inventaire + N+1) ; > 0 = sous-provisionné (risque)"),
         ("Conformité globale des consignes", d["conformite_globale"],
          float(k["conf"]), float(k["nb"]), "dossiers",
          "consignes conserver/étudier/ajouter retrouvées au compte / total de ces consignes"),
         ("Taux de couverture MRM", d["taux_couverture_mrm"],
          float(m), float(m + miss), "dossiers",
-         "matchés / revue à comparer (consignes à supprimer exclues)"),
+         "retrouvés / revue à comparer (consignes à supprimer exclues)"),
         ("Taux de couverture compte", d["taux_couverture_compte"],
          float(m), float(m + l + anom), "dossiers",
-         "matchés inventaire courant / compte réconciliable"),
+         "retrouvés (inventaire courant) / compte réconciliable"),
         ("Taux de récupération tardive N+1", d["taux_recup_tardive"],
          float(l), float(l + anom), "dossiers",
-         "orphelins retrouvés dans l'inventaire N+1 / orphelins post-inventaire"),
+         "retrouvés dans l'inventaire N+1 / dossiers compte restant à justifier"),
         ("Taux de récupération global", d["taux_recup_global"],
          float(m + l), float(m + l + anom), "dossiers",
-         "(matchés + récupérés N+1) / compte réconciliable"),
+         "(retrouvés inventaire + N+1) / compte réconciliable"),
     ]
     from pyspark.sql.types import StructType, StructField, StringType, DoubleType
     schema = StructType([
@@ -488,10 +505,11 @@ def _render_box(d: dict, client: str) -> str:
             f"     / PM {_n(d['mrm_pm'])} €",
         )
         + _bubble(
-            f"MATCHÉS = {_n(d['match_nb'])} ({_n(d['principale_nb'])}+{_n(d['affinee_nb'])}+{_n(d['recup_nb'])})",
-            f" PM MRM   {_n(d['match_pm_mrm'])} €",
-            f" PM CPT   {_n(d['match_pm_cpt'])} €",
-            f" Δ PM     {_n(d['match_pm_ecart'])} €",
+            f"RETROUVÉS (base chute) = {_n(d['metrics_nb'])}",
+            f"  {_n(d['metrics_match_nb'])} inv. + {_n(d['metrics_late_nb'])} N+1 (K/A/S)",
+            f" PM MRM   {_n(d['metrics_pm_mrm'])} €",
+            f" PM CPT   {_n(d['metrics_pm_cpt'])} €",
+            f" Δ PM     {_n(d['metrics_pm_ecart'])} €",
         )
         + _bubble(
             f"COMPTE = {_n(d['cpt_nb'])} dossiers",
@@ -503,20 +521,20 @@ def _render_box(d: dict, client: str) -> str:
         "",
         _row("Consigne à supprimer",  d["a_supprimer_nb"], d["a_supprimer_pm"]),
         _row("À comparer",            d["a_comparer_nb"],  d["a_comparer_pm"]),
-        _row("Mappés clé principale", d["principale_nb"],  d["principale_pm"]),
-        _row("Mappés clé affinée",    d["affinee_nb"],     d["affinee_pm_mrm"]),
-        _row("Mappés récupération",   d["recup_nb"],       d["recup_pm_mrm"]),
-        _row("Non mappés (MISSING)",  d["non_mappes_nb"],  d["non_mappes_pm"]),
+        _row("Retrouvés clé principale", d["principale_nb"], d["principale_pm"]),
+        _row("Retrouvés clé affinée",    d["affinee_nb"],    d["affinee_pm_mrm"]),
+        _row("Retrouvés récupération",   d["recup_nb"],      d["recup_pm_mrm"]),
+        _row("Non retrouvés au compte",  d["non_mappes_nb"], d["non_mappes_pm"]),
         _row("├ à conserver",         d["keep_nb"],        d["keep_pm"]),
         _row("├ à étudier",           d["study_nb"],       d["study_pm"]),
         _row("└ à ajouter",           d["add_nb"],         d["add_pm"]),
         "",
         _row("Total CPT (compte)",          d["cpt_nb"],     d["cpt_pm"]),
-        _row("├ matchés inventaire",        d["match_nb"],   d["match_pm_cpt"]),
-        _row("├ récupérés N+1",             d["late_nb"],    d["late_pm"]),
-        _row("├ récupérés via NON",         d["recup_non_nb"], d["recup_non_pm"]),
+        _row("├ retrouvés (inventaire)",    d["match_nb"],   d["match_pm_cpt"]),
+        _row("├ retrouvés via N+1",         d["late_nb"],    d["late_pm"]),
+        _row("├ repêchés (statut MRM non)", d["recup_non_nb"], d["recup_non_pm"]),
         _row("├ clos avant inv. N+1",       d["obs_nb"],     d["obs_pm"]),
-        _row("└ CPT_ONLY (anomalies)",      d["def_nb"],     d["def_pm"]),
+        _row("└ sans contrepartie (anom.)", d["def_nb"],     d["def_pm"]),
         "",
     ]
 
@@ -544,13 +562,16 @@ def _render_indicateurs(d: dict) -> str:
            else f" — labels non pris en compte : {', '.join(d['labels_inconnus']) or 'n/d'}")
     )
     lines = [
+        "LEXIQUE : retrouvé = dossier de la revue présent au compte | non retrouvé = absent du compte",
+        "          conforme = consigne respectée (à conserver → retrouvé ; à supprimer → non retrouvé)",
+        "",
         "INDICATEURS",
         "  COUVERTURE",
-        f"    Taux de couverture MRM (matchés / à comparer MRM)      : {d['taux_couverture_mrm']:>5} %",
-        f"    Taux de couverture compte (matchés inventaire / compte): {d['taux_couverture_compte']:>5} %",
+        f"    Taux de couverture MRM (retrouvés / à comparer)        : {d['taux_couverture_mrm']:>5} %",
+        f"    Taux de couverture compte (retrouvés inv. / compte)   : {d['taux_couverture_compte']:>5} %",
         "  RÉCUPÉRATION (compte, déclarations tardives N+1)",
-        f"    Taux de récupération tardive (récupérés / orphelins)   : {d['taux_recup_tardive']:>5} %",
-        f"    Taux de récupération global (matchés + N+1 / compte)   : {d['taux_recup_global']:>5} %",
+        f"    Taux de récupération tardive (retrouvés N+1 / restes) : {d['taux_recup_tardive']:>5} %",
+        f"    Taux de récupération global (retrouvés + N+1 / compte): {d['taux_recup_global']:>5} %",
         "  PROVISIONNEMENT",
         f"    Taux de chute global (KEEP/ADD/STUDY)                  : {d['taux_chute_global']:>5} %",
         f"      ↳ contrôle Σ par consigne : {d['taux_chute_consignes']:>5} %  "
@@ -558,8 +579,8 @@ def _render_indicateurs(d: dict) -> str:
         f"    Conformité globale des consignes                       : {d['conformite_globale']:>5} %",
         "  (dénominateurs compte hors sinistres clos avant inventaire suivant)",
         "",
-        f"NIVEAUX DE PM — univers du taux de chute global ({_n(d['metrics_nb'])} dossiers,",
-        "  matchés + récupérés N+1, consignes à conserver/étudier/ajouter)",
+        f"NIVEAUX DE PM — base du taux de chute ({_n(d['metrics_nb'])} dossiers retrouvés,",
+        "  inventaire + récupérés N+1, consignes à conserver/étudier/ajouter)",
         f"  PM MRM   : {_n(d['metrics_pm_mrm']):>15} €",
         f"  PM CPT   : {_n(d['metrics_pm_cpt']):>15} €",
         f"  Écart    : {_n(d['metrics_pm_ecart']):>15} €",
@@ -600,16 +621,19 @@ def _render_consignes(d: dict) -> str:
       - matchés, PM nulle/non-nulle (avec %), PM MRM/CPT, taux de chute :
         sur les dossiers matchés. "À supprimer" → analyse PM non pertinente.
     """
-    head = (f"  {'Consigne':<13}{'nb':>6}{'%conf':>8}{'match.':>7}"
+    head = (f"  {'Consigne':<13}{'nb':>6}{'%conf':>8}{'retr.':>7}"
             f"{'PM MRM nulle':>13}{'PM MRM≠0':>14}{'PM MRM':>15}{'PM CPT':>15}{'chute':>8}")
     lines = [
-        "SUIVI DES CONSIGNES — conformité (tous dossiers) ; PM & chute (matchés + récupérés N+1)",
+        "SUIVI DES CONSIGNES — conformité (tous dossiers) ; PM & chute (dossiers retrouvés : inventaire + N+1)",
+        "  à conserver absent / à supprimer présent = non conforme | "
+        "à ajouter / à étudier absent = non retrouvé",
         head,
     ]
     for label, c in d["consignes"].items():
+        ko_txt = f"  ({_n(c['ko'])} {c['ko_label']})" if c["ko"] else ""
         base = f"  {label:<13}{_n(c['nb']):>6}{c['pct']:>6} %{_n(c['nb_match']):>7}"
         if not c["pertinent"]:
-            lines.append(base + "   — analyse PM non pertinente (consigne à supprimer) —")
+            lines.append(base + f"   — PM non pertinente (à supprimer){ko_txt} —")
         else:
             lines.append(
                 base

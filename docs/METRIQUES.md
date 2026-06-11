@@ -8,6 +8,30 @@
 
 ---
 
+## 0. Lexique de restitution (vocabulaire client unifié)
+
+Un seul vocabulaire à **deux couches** dans toute la restitution (console,
+graphiques, exports). On n'emploie plus « matché » / « mappé » / « MISSING »
+côté affichage : ce sont des termes techniques internes.
+
+| Terme affiché | Sens | Remplace (jargon interne) |
+|---|---|---|
+| **retrouvé** | le dossier de la revue a une contrepartie au compte | matché / mappé |
+| **non retrouvé** | le dossier de la revue n'a pas de contrepartie au compte | non mappé / MRM_MISSING / orphelin MRM |
+| **conforme** | la consigne est respectée | — |
+| **non conforme** | la consigne n'est PAS respectée (à conserver non retrouvé, à supprimer retrouvé) | — |
+
+- **Couche 1 — le fait** : *retrouvé* / *non retrouvé* (présence au compte).
+- **Couche 2 — le verdict** : *conforme* / *non conforme* (la consigne est-elle
+  tenue ?). Cas particulier des consignes **à ajouter / à étudier** non
+  retrouvées : on les nomme **« non retrouvé »** (sans les qualifier de « non
+  conforme ») — ce n'est pas une anomalie mais une PM pas encore au compte.
+
+Règle de lecture, une phrase : *« retrouvé » = présent au compte ; « conforme »
+= consigne respectée (à conserver → retrouvé ; à supprimer → non retrouvé)*.
+
+---
+
 ## 1. Univers de calcul et règles de population
 
 Toutes les métriques se lisent à partir de `df_result` (sortie du waterfall),
@@ -182,23 +206,51 @@ ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
   taux_chute_global` partout (synthèse, `synthese_indicateurs`,
   `ratios_globaux`, graphiques). Aucun % affiché sur ce bloc (le seul ratio
   de chute restitué est le global + le par-consigne).
+- **« Matchés » = base du taux de chute.** Partout où des « matchés » sont
+  présentés à côté de la PM / du taux de chute (bulle MATCHÉS de la synthèse,
+  graphiques), le décompte affiché est celui de **l'univers chute** :
+  `metrics_nb = matchés inventaire (KEEP/ADD/STUDY) + récupérés N+1`
+  (`metrics_match_nb + metrics_late_nb`). Le `Δ PM` de la bulle est donc
+  exactement `metrics_pm_ecart`, le numérateur du taux de chute. Le décompte
+  « tous matchés » (toutes consignes, DELETE compris, inventaire courant) reste
+  disponible pour la **couverture** (`match_nb`), mais n'est jamais juxtaposé à
+  un écart de chute pour éviter deux « écart » différents.
 
 ---
 
 ## 5. Suivi des consignes
 
-### 5.1 Conformité par consigne
+### 5.1 Conformité par consigne — **3 états**
 - **Problématique** : la consigne MRM a-t-elle été appliquée au compte ?
-- **Règle** :
-  - KEEP / ADD / STUDY → **conforme = retrouvé au compte** (matché).
-  - DELETE → **conforme = absent du compte** (orphelin, donc supprimé).
+- **Règle (3 états)** :
+
+  | Consigne | Retrouvé au compte (matché) | Non retrouvé (orphelin MRM) |
+  |---|---|---|
+  | KEEP (à conserver) | **CONFORME** | **NON_CONFORME** (anomalie : PM attendue absente) |
+  | ADD (à ajouter) | **CONFORME** | **NON_RETROUVE** (informatif) |
+  | STUDY (à étudier) | **CONFORME** | **NON_RETROUVE** (informatif) |
+  | DELETE (à supprimer) | **NON_CONFORME** (suppression non suivie) | **CONFORME** |
+
+  - **NON_CONFORME** = vraie anomalie : un KEEP qui devait être au compte n'y est
+    pas, ou un DELETE qui devait disparaître y est encore.
+  - **NON_RETROUVE** = ADD/STUDY absents du compte. Ce **n'est pas** une non-conformité :
+    c'est une PM à ajouter / à étudier qui n'apparaît pas (encore) au compte. On
+    la **nomme distinctement** mais elle **reste au dénominateur** du taux.
 - **Univers** : pour KEEP/ADD/STUDY = `MATCHÉS + MRM_MISSING` portant la
   consigne ; pour DELETE = `MATCHÉS + MRM_DELETE`.
-- **Formule** : `nb(conformes) / nb(univers consigne)`.
+- **Formule** : `pct_conformite = nb(conformes) / nb(univers consigne)`
+  (inchangée : le « non retrouvé » est un renommage du KO d'ADD/STUDY, pas une
+  exclusion du dénominateur).
+- **Colonnes dédiées** (`suivi_consignes`, `synthese_consignes`) :
+  `nb_conformes`, `nb_non_conforme`, `nb_non_retrouve` — avec
+  `nb_total = nb_conformes + nb_non_conforme + nb_non_retrouve`.
 - **Limite** : conformité = présence/absence, indépendante du montant.
 
 ### 5.2 Conformité globale
-- `nb(conformes KEEP+ADD+STUDY) / nb(univers KEEP+ADD+STUDY)`.
+- `nb(conformes KEEP+ADD+STUDY) / nb(univers KEEP+ADD+STUDY)`. Les ADD/STUDY non
+  retrouvés restent au dénominateur (catégorie « non retrouvé », distincte des
+  KEEP « non conforme »). Volumétries historisées :
+  `synthese_indicateurs.NB_NON_CONFORME` et `NB_NON_RETROUVE`.
 
 ### 5.3 Consignes « à supprimer » non suivies (DELETE matché)
 - **Problématique** : PM qui aurait dû disparaître mais toujours au compte.

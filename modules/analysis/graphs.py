@@ -25,6 +25,7 @@ import os
 import logging
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 from pyspark.sql import DataFrame
 
 from modules.kpi_export import compute_synthese, kas_totaux
@@ -94,11 +95,11 @@ def _title(fig, message: str, contexte: str):
 def graph_compte_justification(d: dict):
     """Le compte client est-il justifié par la revue d'inventaire ?"""
     cats = [
-        ("Matchés inventaire",   d["match_nb"], d["match_pm_cpt"], C_BLEU),
-        ("Récupérés N+1",        d["late_nb"],  d["late_pm"],      C_OCEAN),
-        ("Récupérés via NON",    d["recup_non_nb"], d["recup_non_pm"], C_GRIS),
-        ("Clos avant inv. N+1",  d["obs_nb"],   d["obs_pm"],       C_SIENNE),
-        ("Anomalies (CPT_ONLY)", d["def_nb"],   d["def_pm"],       C_ROUGE),
+        ("Retrouvés (inventaire)",     d["match_nb"], d["match_pm_cpt"], C_BLEU),
+        ("Retrouvés via N+1",          d["late_nb"],  d["late_pm"],      C_OCEAN),
+        ("Repêchés (statut MRM non)",  d["recup_non_nb"], d["recup_non_pm"], C_GRIS),
+        ("Clos avant inv. N+1",        d["obs_nb"],   d["obs_pm"],       C_SIENNE),
+        ("Sans contrepartie (anom.)",  d["def_nb"],   d["def_pm"],       C_ROUGE),
     ]
     fig, axes = plt.subplots(1, 2, figsize=(14, 4.8))
     for ax, idx, lbl in ((axes[0], 1, "Dossiers"), (axes[1], 2, "PM compte")):
@@ -123,7 +124,7 @@ def graph_compte_justification(d: dict):
     _title(
         fig,
         f"Justification du compte client : {_pct(d['taux_recup_global'])} des dossiers "
-        f"rapprochés d'un inventaire (courant ou N+1)",
+        f"retrouvés à un inventaire (courant ou N+1)",
         f"Compte = {_n(d['cpt_nb'])} dossiers / {_meur(d['cpt_pm'])} de PM — anomalies "
         f"résiduelles : {_n(d['def_nb'])} ({_meur(d['def_pm'])}) — inventaire {d['date_inventaire']}",
     )
@@ -145,10 +146,10 @@ def graph_couverture_mrm(d: dict):
 
     bars = [
         # (libellé, nb, pct affiché, PM MRM, couleur, hachures)
-        ("Matchés au compte",        d["match_nb"], pct(d["match_nb"], base), None,          C_TEAL,   None),
-        ("Non mappés — à conserver", d["keep_nb"],  pct(d["keep_nb"],  base), d["keep_pm"],  C_ROUGE,  None),
-        ("Non mappés — à étudier",   d["study_nb"], pct(d["study_nb"], base), d["study_pm"], C_SIENNE, None),
-        ("Non mappés — à ajouter",   d["add_nb"],   pct(d["add_nb"],   base), d["add_pm"],   C_SIENNE, None),
+        ("Retrouvés au compte",      d["match_nb"], pct(d["match_nb"], base), None,          C_TEAL,   None),
+        ("À conserver non retrouvé (non conforme)", d["keep_nb"],  pct(d["keep_nb"],  base), d["keep_pm"],  C_ROUGE,  None),
+        ("À étudier non retrouvé",   d["study_nb"], pct(d["study_nb"], base), d["study_pm"], C_SIENNE, None),
+        ("À ajouter non retrouvé",   d["add_nb"],   pct(d["add_nb"],   base), d["add_pm"],   C_SIENNE, None),
         ("« À supprimer » retrouvées au compte",
                                      del_ko, pct(del_ko, c_del["nb"]), c_del["pm_mrm"], C_ROUGE, "//"),
     ]
@@ -165,7 +166,7 @@ def graph_couverture_mrm(d: dict):
         fig,
         f"Listes d'arrêts de travail : {_pct(d['taux_couverture_mrm'])} de la revue MRM "
         f"retrouvée au compte",
-        f"Revue à comparer = {_n(d['a_comparer_nb'])} dossiers — non mappés : "
+        f"Revue à comparer = {_n(d['a_comparer_nb'])} dossiers — non retrouvés : "
         f"{_n(d['non_mappes_nb'])} / {_meur(d['non_mappes_pm'])} de PM MRM à instruire",
     )
     fig.subplots_adjust(top=0.80, bottom=0.14, left=0.27, right=0.97)
@@ -206,7 +207,7 @@ def graph_chute_par_clause(df_result: DataFrame, d: dict, top: int = 12):
         fig,
         f"Provisionnement par clause : taux de chute global {_pct(d['taux_chute_global'])} "
         f"(écart {_meur(k['delta'])})",
-        f"Top {len(pdf)} clauses par PM MRM — univers matchés + récupérés N+1, "
+        f"Top {len(pdf)} clauses par PM MRM — dossiers retrouvés au compte (inventaire + N+1), "
         f"consignes conserver / étudier / ajouter",
     )
     fig.subplots_adjust(top=max(0.80, 1 - 1.3 / h), bottom=1.1 / h, left=0.18, right=0.97)
@@ -241,7 +242,7 @@ def graph_chute_par_consigne(d: dict):
     _title(
         fig,
         "Le taux de chute global est la moyenne pondérée (par la PM MRM) des consignes",
-        "Positif = sous-provisionné (risque) — univers matchés + récupérés N+1, "
+        "Positif = sous-provisionné (risque) — dossiers retrouvés au compte (inventaire + N+1), "
         "« à supprimer » suivie à part",
     )
     fig.subplots_adjust(top=0.78, bottom=0.10, left=0.10, right=0.96)
@@ -253,32 +254,45 @@ def graph_chute_par_consigne(d: dict):
 # ============================================================================
 
 def graph_conformite_consignes(d: dict):
-    """Les consignes de la revue sont-elles appliquées au compte ?"""
+    """Les consignes de la revue sont-elles appliquées au compte ?
+
+    Le reste-à-100 % est qualifié selon la consigne (3 états) : « non conforme »
+    pour KEEP absent / à supprimer encore présent (anomalie), « non retrouvé »
+    pour à ajouter / à étudier absents (informatif)."""
     items = list(d["consignes"].items())[::-1]
     labels = [c for c, _ in items]
     conf   = [v["pct"] for _, v in items]
     nonc   = [round(100 - v["pct"], 1) for _, v in items]
+    # Couleur du KO selon sa nature : sienne = non retrouvé, rouge = non conforme.
+    ko_colors = [C_SIENNE if v["ko_label"] == "non retrouvé" else C_ROUGE
+                 for _, v in items]
 
     fig, ax = plt.subplots(figsize=(12, 5))
-    ax.barh(labels, conf, color=C_TEAL, height=0.5, label="Conforme")
-    ax.barh(labels, nonc, left=conf, color=C_ROUGE, height=0.5, label="Non conforme")
+    ax.barh(labels, conf, color=C_TEAL, height=0.5)
     for i, (c, v) in enumerate(items):
+        ax.barh([c], [nonc[i]], left=conf[i], color=ko_colors[i], height=0.5)
         ax.text(min(v["pct"], 92) / 2, i, _pct(v["pct"]),
                 ha="center", va="center", fontsize=F_TXT,
                 color="white", fontweight="bold")
-        ax.text(103, i, f"{_n(v['conf'])} / {_n(v['nb'])} dossiers",
+        ko_txt = f" — {_n(v['ko'])} {v['ko_label']}" if v["ko"] else ""
+        ax.text(103, i, f"{_n(v['conf'])} / {_n(v['nb'])} dossiers{ko_txt}",
                 va="center", fontsize=F_TXT)
-    ax.set_xlim(0, 140)
+    ax.set_xlim(0, 150)
     ax.set_xticks([0, 25, 50, 75, 100])
-    fig.legend(loc="lower center", ncol=2, fontsize=F_LEG, frameon=False,
-               columnspacing=2.0)
+    handles = [
+        Patch(color=C_TEAL,   label="Conforme (consigne respectée)"),
+        Patch(color=C_ROUGE,  label="Non conforme (KEEP absent / à supprimer présent)"),
+        Patch(color=C_SIENNE, label="Non retrouvé (à ajouter / à étudier absent)"),
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=F_LEG,
+               frameon=False, columnspacing=1.6)
     _style(ax, xlabel="Part des dossiers conformes (%)")
     _title(
         fig,
         f"Application des consignes de la revue : {_pct(d['conformite_globale'])} de "
         f"conformité globale (hors « à supprimer »)",
-        "Conserver / étudier / ajouter : conforme = retrouvé au compte — "
-        "à supprimer : conforme = absent du compte",
+        "Conserver : conforme = retrouvé — ajouter / étudier : retrouvé ou « non "
+        "retrouvé » — à supprimer : conforme = absent du compte",
     )
     fig.subplots_adjust(top=0.78, bottom=0.26, left=0.15, right=0.97)
     return fig
@@ -311,7 +325,7 @@ def graph_anomalies_cpt_only(df_result: DataFrame, d: dict):
         f"Anomalies résiduelles : {_n(d['def_nb'])} dossiers sans contrepartie MRM "
         f"({_meur(d['def_pm'])}), dont {round(pm_fin / pm_total * 100)} % de la PM "
         f"survenus en fin d'année",
-        "CPT_ONLY par mois de survenance (étiquette = nb de dossiers) — "
+        "Dossiers compte sans contrepartie revue, par mois de survenance (étiquette = nb) — "
         "Oct-Déc : déclarations tardives probables",
     )
     fig.subplots_adjust(top=0.78, bottom=0.10, left=0.08, right=0.97)
@@ -353,7 +367,7 @@ def graph_kpi_chute_globale(d: dict):
         fig,
         f"Taux de chute global : {_pct(val)} — le compte porte "
         f"{_meur(abs(k['delta']))} de {'moins' if sous_prov else 'plus'} que la revue",
-        "Σ(PM MRM − PM CPT) / Σ PM MRM — univers matchés + récupérés N+1, "
+        "Σ(PM MRM − PM CPT) / Σ PM MRM — dossiers retrouvés au compte (inventaire + N+1), "
         "consignes conserver / étudier / ajouter",
     )
     fig.subplots_adjust(top=0.76, bottom=0.18, left=0.03, right=0.96, wspace=0.30)
@@ -364,9 +378,10 @@ def graph_kpi_chute_globale(d: dict):
 # 8. KPI — CONFORMITÉ GLOBALE DES CONSIGNES
 # ============================================================================
 
-def _donut(ax, ok: float, ko: float, pct_centre: str, sous_label: str, caption: str):
-    """Donut conforme/non conforme avec taux au centre et légende dessous."""
-    ax.pie([ok, ko], colors=[C_TEAL, C_ROUGE], startangle=90,
+def _donut(ax, vals: list, colors: list, pct_centre: str, sous_label: str,
+           caption: str):
+    """Donut (2 ou 3 segments) avec taux au centre et légende dessous."""
+    ax.pie(vals, colors=colors, startangle=90,
            counterclock=False, wedgeprops=dict(width=0.36, edgecolor="white"))
     ax.text(0, 0.10, pct_centre, ha="center", va="center",
             fontsize=28, fontweight="bold", color=C_TEAL)
@@ -376,20 +391,36 @@ def _donut(ax, ok: float, ko: float, pct_centre: str, sous_label: str, caption: 
 
 
 def graph_kpi_conformite_globale(d: dict):
-    """Suivi des consignes au global : conformité KAS + suppression effective."""
-    k = kas_totaux(d)
-    conf, non_conf = k["conf"], k["nb"] - k["conf"]
+    """Suivi des consignes au global : conformité KAS + suppression effective.
+
+    Donut gauche en 3 parts (conforme / non retrouvé / non conforme) : pour les
+    consignes conserver/étudier/ajouter, le « non retrouvé » (à ajouter/étudier
+    absents) est distingué du « non conforme » (KEEP absent)."""
+    k    = kas_totaux(d)
+    cons = d["consignes"]
+    conf = k["conf"]
+    nr   = cons["À ajouter"]["ko"] + cons["À étudier"]["ko"]   # non retrouvés
+    nc   = cons["À conserver"]["ko"]                           # non conformes (KEEP)
     c_del  = d["consignes"]["À supprimer"]
     del_ok = c_del["conf"]                      # effectivement supprimées
     del_ko = c_del["nb"] - del_ok               # retrouvées au compte (non suivies)
 
     fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(13, 5.6))
-    _donut(ax0, conf, non_conf, _pct(d["conformite_globale"]),
+    _donut(ax0, [conf, nr, nc], [C_TEAL, C_SIENNE, C_ROUGE],
+           _pct(d["conformite_globale"]),
            "consignes conserver /\nétudier / ajouter",
-           f"Conformes (retrouvées au compte) : {_n(conf)} / {_n(k['nb'])}")
-    _donut(ax1, del_ok, del_ko, _pct(c_del["pct"]),
+           f"Conformes : {_n(conf)} / {_n(k['nb'])}  —  "
+           f"non retrouvés : {_n(nr)}  —  non conformes : {_n(nc)}")
+    _donut(ax1, [del_ok, del_ko], [C_TEAL, C_ROUGE], _pct(c_del["pct"]),
            "consignes\n« à supprimer »",
            f"Encore au compte : {_n(del_ko)} dossiers — PM MRM {_meur(c_del['pm_mrm'])} non supprimée")
+    handles = [
+        Patch(color=C_TEAL,   label="Conforme"),
+        Patch(color=C_SIENNE, label="Non retrouvé (à ajouter / étudier)"),
+        Patch(color=C_ROUGE,  label="Non conforme"),
+    ]
+    fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=F_LEG,
+               frameon=False, columnspacing=1.6)
     _title(
         fig,
         f"Suivi des consignes : {_pct(d['conformite_globale'])} appliquées au compte — "
@@ -397,7 +428,7 @@ def graph_kpi_conformite_globale(d: dict):
         "Gauche : conserver / étudier / ajouter (conforme = retrouvé au compte) — "
         "droite : à supprimer (conforme = absent du compte)",
     )
-    fig.subplots_adjust(top=0.80, bottom=0.10, left=0.04, right=0.96, wspace=0.25)
+    fig.subplots_adjust(top=0.80, bottom=0.16, left=0.04, right=0.96, wspace=0.25)
     return fig
 
 
@@ -438,7 +469,7 @@ def graph_pm_par_consigne(d: dict):
         f"PM revue vs PM compte par consigne : Δ global {_meur(k['delta'])} "
         f"({_pct(d['taux_chute_global'])})",
         "Δ = PM MRM − PM compte (positif = sous-provisionné) — "
-        "univers matchés + récupérés N+1",
+        "dossiers retrouvés au compte (inventaire + N+1)",
     )
     fig.subplots_adjust(top=0.78, bottom=0.10, left=0.08, right=0.96)
     return fig

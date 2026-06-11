@@ -19,25 +19,35 @@ def analyze_suivi_consignes(
     """
     Audit de conformité des consignes MRM par clause.
 
-    Logique métier :
+    Logique métier (3 états — cf. METRIQUES.md §5.1) :
     ┌────────────┬──────────────────────┬───────────────────────┐
     │ Consigne   │ TYPE_RECONCILIATION  │ Résultat audit        │
     ├────────────┼──────────────────────┼───────────────────────┤
     │ MRM_KEEP   │ MATCH_*              │ CONFORME              │
     │ MRM_KEEP   │ MRM_MISSING          │ NON_CONFORME          │
     │ MRM_ADD    │ MATCH_*              │ CONFORME              │
-    │ MRM_ADD    │ MRM_MISSING          │ NON_CONFORME          │
+    │ MRM_ADD    │ MRM_MISSING          │ NON_RETROUVE          │
     │ MRM_STUDY  │ MATCH_*              │ CONFORME              │
-    │ MRM_STUDY  │ MRM_MISSING          │ NON_CONFORME          │
+    │ MRM_STUDY  │ MRM_MISSING          │ NON_RETROUVE          │
     │ MRM_DELETE │ MRM_MISSING          │ CONFORME              │
     │ MRM_DELETE │ MATCH_*              │ NON_CONFORME          │
     └────────────┴──────────────────────┴───────────────────────┘
+
+    Trois états distincts :
+      - CONFORME     : la consigne est respectée (KEEP/ADD/STUDY retrouvés au
+                       compte, DELETE bien absent).
+      - NON_CONFORME : anomalie de provisionnement — KEEP attendu mais absent du
+                       compte, ou DELETE encore présent (suppression non suivie).
+      - NON_RETROUVE : ADD/STUDY non retrouvés au compte. Ce n'est PAS une
+                       anomalie de conformité mais une catégorie informative
+                       (PM à ajouter / à étudier qui n'apparaît pas encore au
+                       compte). Reste au dénominateur du taux de conformité.
 
     Univers = MATCH_LABELS + MRM_MISSING + MRM_DELETE (cf. METRIQUES.md §5).
     Les CPT_LATE (consigne issue d'un autre inventaire) et CPT_RECUP_NON
     (repêchés via statut NON, hors métriques) portent une conclusion MRM
     enrichie mais sont HORS univers conformité → exclus explicitement, sinon
-    ils seraient comptés à tort en NON_CONFORME.
+    ils seraient comptés à tort en NON_CONFORME / NON_RETROUVE.
 
     Colonnes du résultat summary :
         CLAUSE, MRM_ACTION, RESULTAT_AUDIT, nb_dossiers, pm_mrm, pct_nb, pct_pm
@@ -63,9 +73,9 @@ def analyze_suivi_consignes(
              .when(~is_matched & (F.col("MRM_ACTION") == "MRM_DELETE"), "CONFORME")
              .when(is_matched  & (F.col("MRM_ACTION") == "MRM_DELETE"), "NON_CONFORME")
              .when(is_matched  & (F.col("MRM_ACTION") == "MRM_STUDY"),  "CONFORME")
-             .when(~is_matched & (F.col("MRM_ACTION") == "MRM_STUDY"),  "NON_CONFORME")
+             .when(~is_matched & (F.col("MRM_ACTION") == "MRM_STUDY"),  "NON_RETROUVE")
              .when(is_matched  & (F.col("MRM_ACTION") == "MRM_ADD"),    "CONFORME")
-             .when(~is_matched & (F.col("MRM_ACTION") == "MRM_ADD"),    "NON_CONFORME")
+             .when(~is_matched & (F.col("MRM_ACTION") == "MRM_ADD"),    "NON_RETROUVE")
              .otherwise("AUTRE")
         )
     )
@@ -221,19 +231,23 @@ def analyze_suivi_consignes_global(
         de la synthèse et que la table taux_chute ⇒ les chiffres se
         réconcilient exactement (Σ par consigne = global).
 
-    Conformité :
-        KEEP / STUDY / ADD → conforme = retrouvé au compte (matché)
-        DELETE             → conforme = absent du compte (orphelin, donc
-                             supprimé) ; taux de chute non pertinent (null).
+    Conformité (3 états — cf. METRIQUES.md §5.1) :
+        KEEP   → conforme = retrouvé ; non retrouvé = NON_CONFORME (anomalie).
+        ADD / STUDY → conforme = retrouvé ; non retrouvé = NON_RETROUVE (PM à
+                      ajouter / étudier pas encore au compte, pas une anomalie).
+        DELETE → conforme = absent du compte (supprimé) ; encore présent =
+                 NON_CONFORME ; taux de chute non pertinent (null).
+        Le taux de conformité = nb_conformes / nb_total dans tous les cas
+        (les non retrouvés restent au dénominateur).
 
     par_clause=True  → une ligne par (CLAUSE, TYPE_CLAUSE, consigne).
     par_clause=False → une ligne par consigne, toutes clauses confondues
                        (onglet suivi_consignes_global).
 
     Colonnes : [CLAUSE, TYPE_CLAUSE,] MRM_ACTION, ORDRE, nb_total, nb_matches,
-               nb_orphelins, nb_conformes, pct_conformite, nb_pm_univers,
-               nb_pm_nulle, nb_pm_non_nulle, pm_mrm, pm_cpt, ecart,
-               taux_chute_pct.
+               nb_orphelins, nb_conformes, nb_non_conforme, nb_non_retrouve,
+               pct_conformite, nb_pm_univers, nb_pm_nulle, nb_pm_non_nulle,
+               pm_mrm, pm_cpt, ecart, taux_chute_pct.
     """
     is_m    = F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS))
     is_pm   = F.col("TYPE_RECONCILIATION").isin(_matched_universe())   # + CPT_LATE
@@ -265,12 +279,22 @@ def analyze_suivi_consignes_global(
         ordre_expr = F.when(F.col("MRM_ACTION") == action, idx).otherwise(ordre_expr)
 
     is_delete = F.col("MRM_ACTION") == "MRM_DELETE"
+    is_add_study = F.col("MRM_ACTION").isin("MRM_ADD", "MRM_STUDY")
     return (
         agg
         .withColumn("ORDRE", ordre_expr)
         .withColumn("nb_orphelins", F.col("nb_total") - F.col("nb_matches"))
         .withColumn("nb_conformes",
             F.when(is_delete, F.col("nb_orphelins")).otherwise(F.col("nb_matches")))
+        # Ventilation du KO selon la consigne (3 états) :
+        #   ADD/STUDY non retrouvés → NON_RETROUVE (informatif, pas une anomalie)
+        #   KEEP absent / DELETE encore présent → NON_CONFORME (anomalie)
+        .withColumn("nb_non_retrouve",
+            F.when(is_add_study, F.col("nb_orphelins")).otherwise(F.lit(0)))
+        .withColumn("nb_non_conforme",
+            F.when(is_delete, F.col("nb_matches"))
+             .when(is_add_study, F.lit(0))
+             .otherwise(F.col("nb_orphelins")))      # KEEP : orphelins = non conformes
         .withColumn("pct_conformite",
             F.round(F.col("nb_conformes") / F.col("nb_total") * 100, 2))
         .withColumn("nb_pm_nulle", F.col("nb_pm_univers") - F.col("nb_pm_non_nulle"))
@@ -280,7 +304,8 @@ def analyze_suivi_consignes_global(
              .otherwise(F.round(F.col("ecart") / F.col("pm_mrm") * 100, 2)))
         .select(
             *group, "ORDRE", "nb_total", "nb_matches", "nb_orphelins",
-            "nb_conformes", "pct_conformite", "nb_pm_univers", "nb_pm_nulle",
+            "nb_conformes", "nb_non_conforme", "nb_non_retrouve",
+            "pct_conformite", "nb_pm_univers", "nb_pm_nulle",
             "nb_pm_non_nulle", "pm_mrm", "pm_cpt", "ecart", "taux_chute_pct",
         )
         .orderBy(*group[:-1], "ORDRE")
