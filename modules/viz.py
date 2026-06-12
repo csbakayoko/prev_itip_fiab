@@ -1,8 +1,10 @@
 """
 Restitution graphique des métriques (matplotlib) — titres porteurs de message.
 
-Consomme exclusivement la couche métriques (modules.metrics.Metrics) : viz ne
-calcule rien, elle met en forme. Chaque graphique répond à une question de la
+Consomme exclusivement la couche métriques (modules.metrics) : viz ne calcule
+rien, elle met en forme. Chaque graphique prend `d` (le dict de
+compute_synthese, une seule passe Spark) ; les graphes 3 et 6 prennent en plus
+la table pandas de leur métrique. Chaque graphique répond à une question de la
 problématique de fiabilisation (direction financière et engagements) :
     1. compte_justification   — le compte client est-il justifié par la revue ?
     2. couverture_mrm         — challenge des listes d'arrêts de travail :
@@ -17,12 +19,11 @@ problématique de fiabilisation (direction financière et engagements) :
     9. pm_par_consigne        — PM revue vs PM compte par consigne (Δ en € et en %)
 
 Usage (notebook Databricks) :
-    from modules.metrics import Metrics
     from modules.viz import restituer_graphiques
 
-    m = Metrics(df_result)                            # une passe Spark
-    figs = restituer_graphiques(m)                    # affiche + PNG DBFS
-    figs = restituer_graphiques(m, save_dir=None)     # affiche seulement
+    d = print_synthese(df_result)                          # la passe Spark
+    figs = restituer_graphiques(df_result, d)              # affiche + PNG DBFS
+    figs = restituer_graphiques(df_result, d, save_dir=None)  # affiche seulement
 """
 
 import os
@@ -31,7 +32,10 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from pyspark.sql import DataFrame
 
-from modules.metrics import Metrics, output_dir, _to_local
+from modules.kpi_export import compute_synthese, kas_totaux
+from modules.metrics import (
+    chute_par_clause, anomalies_cpt_only, output_dir, _to_local,
+)
 
 # Palette AXA en priorité, complétée quand la sémantique l'exige.
 C_BLEU   = "#00008F"   # AXA Blue   — référence (revue MRM, matchés)
@@ -89,9 +93,8 @@ def _title(fig, message: str, contexte: str):
 # 1. JUSTIFICATION DU COMPTE CLIENT
 # ============================================================================
 
-def graph_compte_justification(m: Metrics):
+def graph_compte_justification(d: dict):
     """Le compte client est-il justifié par la revue d'inventaire ?"""
-    d = m.d
     cats = [
         ("Retrouvés (inventaire)",     d["match_nb"], d["match_pm_cpt"], C_BLEU),
         ("Retrouvés via N+1",          d["late_nb"],  d["late_pm"],      C_OCEAN),
@@ -134,10 +137,9 @@ def graph_compte_justification(m: Metrics):
 # 2. COUVERTURE DE LA REVUE MRM (challenge des listes d'arrêts de travail)
 # ============================================================================
 
-def graph_couverture_mrm(m: Metrics):
+def graph_couverture_mrm(d: dict):
     """Quelle part de la revue MRM est retrouvée au compte ? (+ « à supprimer »
     retrouvées : consignes de suppression non suivies)."""
-    d = m.d
     base  = d["a_comparer_nb"] or 1
     c_del = d["consignes"]["À supprimer"]
     del_ko = c_del["nb"] - c_del["conf"]          # retrouvées alors qu'à supprimer
@@ -176,10 +178,12 @@ def graph_couverture_mrm(m: Metrics):
 # 3. TAUX DE CHUTE PAR CLAUSE (challenge du provisionnement)
 # ============================================================================
 
-def graph_chute_par_clause(m: Metrics, top: int = 12):
-    """Quelles clauses portent l'écart de provisionnement ?"""
-    d, k = m.d, m.k
-    pdf = m.chute_par_clause(top=top).data[::-1]
+def graph_chute_par_clause(pdf_clauses, d: dict):
+    """Quelles clauses portent l'écart de provisionnement ?
+
+    pdf_clauses = metrics.chute_par_clause(df_result, top=N)."""
+    k = kas_totaux(d)
+    pdf = pdf_clauses[::-1]
     labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_CLAUSE"])]
     colors = [C_SIENNE if v > 0 else C_OCEAN for v in pdf["taux_chute_pct"]]
 
@@ -213,9 +217,8 @@ def graph_chute_par_clause(m: Metrics, top: int = 12):
 # 4. TAUX DE CHUTE PAR CONSIGNE
 # ============================================================================
 
-def graph_chute_par_consigne(m: Metrics):
+def graph_chute_par_consigne(d: dict):
     """L'écart de provision selon la consigne posée par la revue."""
-    d = m.d
     consignes = [(c, v) for c, v in d["consignes"].items() if v["pertinent"]]
     labels = [c for c, _ in consignes]
     taux   = [v["taux_chute"] for _, v in consignes]
@@ -249,13 +252,12 @@ def graph_chute_par_consigne(m: Metrics):
 # 5. CONFORMITÉ DES CONSIGNES (toutes les consignes, « à supprimer » incluse)
 # ============================================================================
 
-def graph_conformite_consignes(m: Metrics):
+def graph_conformite_consignes(d: dict):
     """Les consignes de la revue sont-elles appliquées au compte ?
 
     Le reste-à-100 % est qualifié selon la consigne (3 états) : « non conforme »
     pour KEEP absent / à supprimer encore présent (anomalie), « non retrouvé »
     pour à ajouter / à étudier absents (informatif)."""
-    d = m.d
     items = list(d["consignes"].items())[::-1]
     labels = [c for c, _ in items]
     conf   = [v["pct"] for _, v in items]
@@ -299,10 +301,10 @@ def graph_conformite_consignes(m: Metrics):
 # 6. ANOMALIES RÉSIDUELLES CPT_ONLY (saisonnalité)
 # ============================================================================
 
-def graph_anomalies_cpt_only(m: Metrics):
-    """Volume / PM des anomalies par mois de survenance — effet fin d'année."""
-    d = m.d
-    pdf = m.anomalies_cpt_only().data
+def graph_anomalies_cpt_only(pdf, d: dict):
+    """Volume / PM des anomalies par mois de survenance — effet fin d'année.
+
+    pdf = metrics.anomalies_cpt_only(df_result)."""
     pm_total = float(pdf["PM_CPT"].sum()) or 1.0
     pm_fin   = float(pdf.loc[pdf["IS_FIN_ANNEE"], "PM_CPT"].sum())
     colors   = [C_ROUGE if fin else C_GRIS for fin in pdf["IS_FIN_ANNEE"]]
@@ -329,9 +331,9 @@ def graph_anomalies_cpt_only(m: Metrics):
 # 7. KPI — TAUX DE CHUTE GLOBAL
 # ============================================================================
 
-def graph_kpi_chute_globale(m: Metrics):
+def graph_kpi_chute_globale(d: dict):
     """Le ratio de chute global en un visuel : gros chiffre + PM en regard."""
-    d, k = m.d, m.k
+    k = kas_totaux(d)
     val = d["taux_chute_global"]
     sous_prov = val > 0
     couleur = C_ROUGE if sous_prov else C_BLEU
@@ -383,13 +385,13 @@ def _donut(ax, vals: list, colors: list, pct_centre: str, sous_label: str,
     ax.text(0, -1.45, caption, ha="center", va="center", fontsize=F_TXT)
 
 
-def graph_kpi_conformite_globale(m: Metrics):
+def graph_kpi_conformite_globale(d: dict):
     """Suivi des consignes au global : conformité KAS + suppression effective.
 
     Donut gauche en 3 parts (conforme / non retrouvé / non conforme) : pour les
     consignes conserver/étudier/ajouter, le « non retrouvé » (à ajouter/étudier
     absents) est distingué du « non conforme » (KEEP absent)."""
-    d, k = m.d, m.k
+    k    = kas_totaux(d)
     cons = d["consignes"]
     conf = k["conf"]
     nr   = cons["À ajouter"]["ko"] + cons["À étudier"]["ko"]   # non retrouvés
@@ -429,9 +431,9 @@ def graph_kpi_conformite_globale(m: Metrics):
 # 9. PM REVUE vs PM COMPTE PAR CONSIGNE (Δ en € et en %)
 # ============================================================================
 
-def graph_pm_par_consigne(m: Metrics):
+def graph_pm_par_consigne(d: dict):
     """Pour chaque consigne : PM MRM et PM CPT côte à côte, le delta au-dessus."""
-    d, k = m.d, m.k
+    k = kas_totaux(d)
     consignes = [(c, v) for c, v in d["consignes"].items() if v["pertinent"]]
     x = list(range(len(consignes)))
     w = 0.34
@@ -473,32 +475,34 @@ def graph_pm_par_consigne(m: Metrics):
 # ============================================================================
 
 def restituer_graphiques(
-    metrics  : "Metrics | DataFrame",
+    df_result: DataFrame,
+    d        : dict = None,
     save_dir : str = GRAPHS_DIR_DEFAULT,
     show     : bool = True,
+    top      : int = 12,
 ) -> dict:
     """
     Construit les 9 graphiques de restitution, les affiche (notebook) et les
     écrit en PNG (save_dir, DBFS). save_dir=None → pas d'écriture.
 
-    Accepte un objet Metrics (passe Spark déjà faite, à privilégier) ou un
-    df_result brut (la passe est alors lancée ici).
+    `d` = dict de compute_synthese si déjà calculé (ex. retour de
+    print_synthese) — sinon la passe Spark est lancée ici.
 
     Returns:
         dict {nom: Figure} — réutilisable (insertion Excel/PowerPoint).
     """
-    m = metrics if isinstance(metrics, Metrics) else Metrics(metrics)
+    d = d if d is not None else compute_synthese(df_result)
 
     figs = {
-        "1_compte_justification"   : graph_compte_justification(m),
-        "2_couverture_mrm"         : graph_couverture_mrm(m),
-        "3_chute_par_clause"       : graph_chute_par_clause(m),
-        "4_chute_par_consigne"     : graph_chute_par_consigne(m),
-        "5_conformite_consignes"   : graph_conformite_consignes(m),
-        "6_anomalies_cpt_only"     : graph_anomalies_cpt_only(m),
-        "7_kpi_chute_globale"      : graph_kpi_chute_globale(m),
-        "8_kpi_conformite_globale" : graph_kpi_conformite_globale(m),
-        "9_pm_par_consigne"        : graph_pm_par_consigne(m),
+        "1_compte_justification"   : graph_compte_justification(d),
+        "2_couverture_mrm"         : graph_couverture_mrm(d),
+        "3_chute_par_clause"       : graph_chute_par_clause(chute_par_clause(df_result, top=top), d),
+        "4_chute_par_consigne"     : graph_chute_par_consigne(d),
+        "5_conformite_consignes"   : graph_conformite_consignes(d),
+        "6_anomalies_cpt_only"     : graph_anomalies_cpt_only(anomalies_cpt_only(df_result), d),
+        "7_kpi_chute_globale"      : graph_kpi_chute_globale(d),
+        "8_kpi_conformite_globale" : graph_kpi_conformite_globale(d),
+        "9_pm_par_consigne"        : graph_pm_par_consigne(d),
     }
 
     if save_dir:

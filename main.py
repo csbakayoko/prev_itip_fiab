@@ -4,8 +4,9 @@ Pipeline de fiabilisation ITIP-FIAB — point d'entrée.
 Spine essentiel, multi-périmètre :
     load → clean → waterfall → synthèse (ASCII console) → métriques + graphiques
 
-Le calcul des indicateurs vit dans modules.metrics (une passe Spark, tables
-sérialisables), leur mise en forme dans modules.viz (9 graphiques-messages).
+Le calcul des indicateurs vit dans modules.metrics (des fonctions qui
+reshapent le dict de la synthèse — une passe Spark — en tables pandas),
+leur mise en forme dans modules.viz (9 graphiques-messages).
 
 Périmètre piloté par config/profile.py (par défaut : toutes les clauses). Lancement :
     spark-submit main.py        (ou exécution dans un notebook Databricks)
@@ -28,7 +29,7 @@ from modules.matching import (
     flag_late_it_observations,
     enrich_result_tags,
 )
-from modules.metrics import Metrics
+from modules.metrics import export_metriques
 from modules.viz import restituer_graphiques
 from modules.kpi_export import print_synthese
 from modules._timing import timed
@@ -111,23 +112,24 @@ def run(spark: SparkSession) -> DataFrame:
         # ====================================================================
 
         # ÉTAPE 0 — vue d'ensemble + taux distincts (matching vs récupération).
+        # print_synthese renvoie le dict de compute_synthese : la passe Spark
+        # est faite UNE fois, réutilisée par les métriques et les graphiques.
         with timed("ÉTAPE 0 synthèse"):
-            print_synthese(df_result)
+            d = print_synthese(df_result)
 
-        # ÉTAPE 1 — couche métriques : une passe Spark, toutes les tables de
-        # restitution (sérialisables CSV/JSON/Parquet/Excel/Delta).
-        with timed("ÉTAPE 1 métriques"):
-            m = Metrics(df_result)
+        # ÉTAPE 1 — export des métriques (tables pandas sérialisées
+        # CSV/JSON/Parquet/Excel/Delta sur DBFS).
         if EXPORT_ANALYSES:
-            with timed("ÉTAPE 1b export métriques"):
-                m.export(formats=EXPORT_FORMATS, delta_schema=EXPORT_DELTA_SCHEMA)
+            with timed("ÉTAPE 1 export métriques"):
+                export_metriques(df_result, d, formats=EXPORT_FORMATS,
+                                 delta_schema=EXPORT_DELTA_SCHEMA)
 
         # ÉTAPE 2 — graphiques de restitution (titres-messages : justification
         # du compte, couverture des listes d'arrêts, chute par clause/consigne,
         # conformité des consignes, anomalies). Affichés en notebook + PNG DBFS.
         if EXPORT_GRAPHS:
             with timed("ÉTAPE 2 graphiques"):
-                restituer_graphiques(m)
+                restituer_graphiques(df_result, d)
     return df_result
 
 

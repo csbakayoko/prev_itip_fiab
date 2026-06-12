@@ -2,13 +2,13 @@
 # MAGIC %md
 # MAGIC # ITIP-FIAB — Notebook principal
 # MAGIC
-# MAGIC Pipeline de fiabilisation CPT/MRM, puis **couche métriques** (`modules.metrics.Metrics`).
+# MAGIC Pipeline de fiabilisation CPT/MRM, puis **couche métriques** (`modules.metrics`).
 # MAGIC
 # MAGIC Déroulé :
 # MAGIC 1. Setup (Spark + config)
 # MAGIC 2. Construction de `df_result` (chargement → matching → récupérations → enrichissement)
 # MAGIC 3. Synthèse console (rappel)
-# MAGIC 4. **Métriques** : une méthode par indicateur, affichées en table
+# MAGIC 4. **Métriques** : une fonction par indicateur, affichées en table
 # MAGIC 5. **Export** des métriques (CSV / JSON / Parquet) sur DBFS
 # MAGIC 6. Graphiques de restitution *(optionnel)*
 # MAGIC
@@ -93,25 +93,26 @@ print("df_result :", df_result.count(), "lignes")
 
 # MAGIC %md
 # MAGIC ## 3. Synthèse console (rappel)
+# MAGIC
+# MAGIC `print_synthese` renvoie `d`, le dict de `compute_synthese` : la passe
+# MAGIC Spark est faite **une seule fois**, réutilisée par toutes les métriques.
 
 # COMMAND ----------
 
-_ = print_synthese(df_result)
+d = print_synthese(df_result)
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 4. Métriques
 # MAGIC
-# MAGIC `Metrics(df_result)` calcule `compute_synthese` **une seule fois** ;
-# MAGIC chaque méthode renvoie un `Metric` sérialisable
-# MAGIC (`.to_pandas()` / `.to_spark()` / `.to_json()` / `.to_csv()` / `.to_parquet()`).
+# MAGIC Des fonctions simples (`modules.metrics`) : les métriques scalaires
+# MAGIC prennent `d` et renvoient un DataFrame pandas ; `chute_par_clause` et
+# MAGIC `anomalies_cpt_only` ré-agrègent `df_result` côté Spark.
 
 # COMMAND ----------
 
-from modules.metrics import Metrics
-
-m = Metrics(df_result)   # une passe Spark
+from modules import metrics
 
 # COMMAND ----------
 
@@ -120,11 +121,11 @@ m = Metrics(df_result)   # une passe Spark
 
 # COMMAND ----------
 
-display(m.synthese().to_pandas())
+display(metrics.synthese(d))
 
 # COMMAND ----------
 
-display(m.taux_chute_global().to_pandas())
+display(metrics.taux_chute_global(d))
 
 # COMMAND ----------
 
@@ -133,7 +134,7 @@ display(m.taux_chute_global().to_pandas())
 
 # COMMAND ----------
 
-display(m.consignes().to_pandas())
+display(metrics.consignes(d))
 
 # COMMAND ----------
 
@@ -142,46 +143,35 @@ display(m.consignes().to_pandas())
 
 # COMMAND ----------
 
-display(m.compte_justification().to_pandas())   # graphe 1
+display(metrics.compte_justification(d))            # graphe 1
 
 # COMMAND ----------
 
-display(m.couverture_mrm().to_pandas())          # graphe 2
+display(metrics.couverture_mrm(d))                  # graphe 2
 
 # COMMAND ----------
 
-display(m.chute_par_clause(top=12).to_pandas())  # graphe 3
+display(metrics.chute_par_clause(df_result, top=12))  # graphe 3
 
 # COMMAND ----------
 
-display(m.chute_par_consigne().to_pandas())      # graphe 4
+display(metrics.chute_par_consigne(d))              # graphe 4
 
 # COMMAND ----------
 
-display(m.conformite_consignes().to_pandas())    # graphe 5
+display(metrics.conformite_consignes(d))            # graphe 5
 
 # COMMAND ----------
 
-display(m.anomalies_cpt_only().to_pandas())      # graphe 6
+display(metrics.anomalies_cpt_only(df_result))      # graphe 6
 
 # COMMAND ----------
 
-display(m.conformite_globale().to_pandas())      # graphe 8
+display(metrics.conformite_globale(d))              # graphe 8
 
 # COMMAND ----------
 
-display(m.pm_par_consigne().to_pandas())         # graphe 9
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC #### Exemples de sérialisation
-# MAGIC Chaque métrique se sort aussi en JSON (str), Spark DataFrame, etc.
-
-# COMMAND ----------
-
-print(m.taux_chute_global().to_json())
-# m.consignes().to_spark().show(truncate=False)   # version Spark DataFrame
+display(metrics.pm_par_consigne(d))                 # graphe 9
 
 # COMMAND ----------
 
@@ -192,7 +182,7 @@ print(m.taux_chute_global().to_json())
 
 # COMMAND ----------
 
-_ = m.export(formats=("csv", "json", "parquet"))
+_ = metrics.export_metriques(df_result, d, formats=("csv", "json", "parquet"))
 
 # COMMAND ----------
 
@@ -204,7 +194,7 @@ _ = m.export(formats=("csv", "json", "parquet"))
 # COMMAND ----------
 
 # from modules.viz import restituer_graphiques
-# figs = restituer_graphiques(m)
+# figs = restituer_graphiques(df_result, d)
 
 # COMMAND ----------
 
