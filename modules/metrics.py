@@ -120,17 +120,14 @@ def _with_mrm_action(df: DataFrame) -> DataFrame:
 
 
 def _filter_chute_universe(df: DataFrame) -> DataFrame:
-    """Univers UNIQUE du taux de chute : TOUS les dossiers matchés (inventaire
-    courant + récupérés N+1), hors consigne « à supprimer » et hors statut
-    inventaire NON. Les matchés sans consigne reconnue (MRM_ACTION null) sont
-    INCLUS. Garantit la cohérence du taux par clause ↔ par consigne ↔ global
-    (cf. docs/METRIQUES.md §4). CPT_OBS_TARDIVE / CPT_RECUP_NON exclus
-    (jamais matchés / PM MRM = 0)."""
-    cond = (
-        F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS) + ["CPT_LATE"])
-        # null-safe : une MRM_ACTION absente/inconnue reste dans l'univers.
-        & F.coalesce(F.col("MRM_ACTION") != "MRM_DELETE", F.lit(True))
-    )
+    """Univers UNIQUE du taux de chute = TOUS les retrouvés : matchés de
+    l'inventaire courant (consignes confondues, « à supprimer » encore au
+    compte incluses) + tous les récupérés N+1, hors statut inventaire NON
+    uniquement. Identique à la bulle RETROUVÉS de la synthèse. Garantit la
+    cohérence du taux par clause ↔ par consigne ↔ global (cf.
+    docs/METRIQUES.md §4). CPT_OBS_TARDIVE / CPT_RECUP_NON exclus (jamais
+    matchés / PM MRM = 0)."""
+    cond = F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS) + ["CPT_LATE"])
     if "MRM_STATUT_INV" in df.columns:
         cond &= F.coalesce(F.upper(F.trim(F.col("MRM_STATUT_INV"))) != "NON", F.lit(True))
     return df.filter(cond)
@@ -162,11 +159,11 @@ def synthese(d: dict) -> pd.DataFrame:
         "TAUX_COUVERTURE_COMPTE_PCT" : d["taux_couverture_compte"],
         "TAUX_RECUP_TARDIVE_PCT" : d["taux_recup_tardive"],
         "TAUX_RECUP_GLOBAL_PCT"  : d["taux_recup_global"],
-        # Retrouvés = tous les matchés + tous les N+1 (bulle de la synthèse).
+        # Retrouvés = tous les matchés + tous les N+1 (bulle de la synthèse)
+        # = base du taux de chute (hors statut NON, structurellement absent).
         "NB_RETROUVES"           : d["trouves_nb"],
         "PM_MRM_RETROUVES"       : d["trouves_pm_mrm"],
         "PM_CPT_RETROUVES"       : d["trouves_pm_cpt"],
-        # Base chute = retrouvés hors « à supprimer » / statut NON.
         "NB_BASE_CHUTE"          : d["metrics_nb"],
         "PM_MRM_BASE_CHUTE"      : d["metrics_pm_mrm"],
         "PM_CPT_BASE_CHUTE"      : d["metrics_pm_cpt"],
@@ -187,11 +184,11 @@ def synthese(d: dict) -> pd.DataFrame:
 def taux_chute_global(d: dict) -> pd.DataFrame:
     """Taux de chute global, PM MRM et PM Compte (base chute + retrouvés) — graphe 7.
 
-    Base chute = sous-ensemble des retrouvés hors consigne « à supprimer » et
-    hors statut inventaire NON (sans-consigne reconnue inclus) — l'univers de
-    référence du taux de chute. Retrouvés = tous les matchés + tous les N+1
-    (bulle de la synthèse). PM totales = grands totaux des deux univers
-    d'entrée (MRM, Compte).
+    Base chute = TOUS les retrouvés (matchés inventaire courant, consignes
+    confondues, + récupérés N+1), hors statut inventaire NON — identique à la
+    bulle RETROUVÉS (NB/PM_*_RETROUVES == NB/PM_*_BASE_CHUTE par
+    construction, les deux sont exposés pour l'audit). PM totales = grands
+    totaux des deux univers d'entrée (MRM, Compte).
     """
     return pd.DataFrame([{
         "TAUX_CHUTE_GLOBAL_PCT" : d["taux_chute_global"],
