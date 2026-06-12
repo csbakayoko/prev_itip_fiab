@@ -130,7 +130,20 @@ display(metrics.taux_chute_global(d))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Analyse des consignes (conformité + PM + chute)
+# MAGIC ### Chute par exercice (inventaire / N+1 / global) + suivi des consignes N+1
+
+# COMMAND ----------
+
+display(metrics.chute_par_exercice(d))
+
+# COMMAND ----------
+
+display(metrics.suivi_n1(d))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Analyse des consignes (conformité + PM + chute) — exercice courant pur
 
 # COMMAND ----------
 
@@ -151,7 +164,7 @@ display(metrics.couverture_mrm(d))                  # graphe 2
 
 # COMMAND ----------
 
-display(metrics.chute_par_clause(df_result, top=12))  # graphe 3
+display(metrics.chute_par_clause(df_result, top=12))  # graphe 3 — top 12 par bloc EXERCICE
 
 # COMMAND ----------
 

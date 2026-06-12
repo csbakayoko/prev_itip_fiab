@@ -212,6 +212,12 @@ taux_chute_global     = (écart_inventaire + écart_N+1) / (PM_MRM_inv + PM_MRM_
 > (inventaire) et `n1_sans_consigne` (N+1) ; la décomposition par exercice
 > dans `chute_inv_*` / `chute_n1_*` (table `chute_par_exercice`).
 
+La ventilation **par clause** (`chute_par_clause`, graphe 3) porte la même
+décomposition : trois blocs `EXERCICE` (« Inventaire courant » / « Récupérés
+N+1 » / « Global (inv. + N+1) », ce dernier = Σ par clause des deux premiers).
+Dans chaque bloc, Σ clauses (Σ écart / Σ PM MRM) == le taux correspondant du
+§4.2, et les poids PM se lisent dans le bloc.
+
 ### 4.3 Périmètre des consignes
 - **KEEP / ADD / STUDY** : chute pertinente (la PM doit être justifiée au
   compte). Entrent dans le taux de chute par consigne **et** dans le global.
@@ -302,7 +308,7 @@ taux_chute_global     = (écart_inventaire + écart_N+1) / (PM_MRM_inv + PM_MRM_
 | `suivi_consignes` | conformité + PM + chute par consigne | conformité : matchés + missing ; PM/chute : `MATCHÉS + CPT_LATE` |
 | `suivi_consignes_global` | ratios de suivi des consignes toutes clauses confondues | mêmes univers que `suivi_consignes` |
 | `taux_chute` | chute par consigne (sous/sur/conforme, poids) | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
-| `taux_chute_par_clause` | chute globale par clause (consignes confondues, poids PM) | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
+| `chute_par_clause` | chute par clause × exercice (3 blocs : inventaire / N+1 / global — Σ clauses d'un bloc = taux du bloc, cf. §4.2) | univers de chute global, décomposé par exercice |
 | `consignes_pm` | chute par consigne × catégorie × tranche PM | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
 | `provisionnement` | sous/sur/conforme par consigne | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
 | `ecarts_tranches` | distribution des écarts par tranche € | sous/sur-provisionnés |

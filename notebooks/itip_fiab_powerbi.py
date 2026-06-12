@@ -8,18 +8,20 @@
 # MAGIC 1. **Setup** — session Spark + config (fichiers source et périmètre pilotés par `config/profile.py`)
 # MAGIC 2. **Pipeline** — chargement → nettoyage → matching → récupérations (N+1, statut NON) → tags
 # MAGIC 3. **Synthèse** — contrôles de cohérence console (`chute_coherente`, lignes classées)
-# MAGIC 4. **Export Power BI** — les 11 tables métriques écrites en Delta (+ fichiers DBFS)
+# MAGIC 4. **Export Power BI** — les 13 tables métriques écrites en Delta (+ fichiers DBFS)
 # MAGIC
 # MAGIC Tables produites (tidy, une table par question métier) :
 # MAGIC
 # MAGIC | Table | Contenu |
 # MAGIC |---|---|
 # MAGIC | `synthese` | 1 ligne / run — tous les KPI (chute, conformité, couvertures, retrouvés vs base chute) — **historisable** |
-# MAGIC | `taux_chute_global` | le taux + ses composantes PM (base chute, retrouvés, totaux) |
-# MAGIC | `consignes` | conformité + PM + chute, 1 ligne / consigne |
+# MAGIC | `taux_chute_global` | les 3 taux (inventaire / N+1 / global) + composantes PM (base chute, retrouvés, totaux) |
+# MAGIC | `chute_par_exercice` | 1 ligne / exercice (inventaire, N+1, global) — nb, PM, écart, taux |
+# MAGIC | `suivi_n1` | consignes des récupérés N+1 (analyse séparée), 1 ligne / consigne N+1 |
+# MAGIC | `consignes` | conformité + PM + chute (exercice courant pur), 1 ligne / consigne |
 # MAGIC | `compte_justification` | décomposition du compte (retrouvés, N+1, repêchés, clos, anomalies) |
 # MAGIC | `couverture_mrm` | part de la revue retrouvée au compte + non retrouvés par consigne |
-# MAGIC | `chute_par_clause` | taux de chute ventilé par CLAUSE × TYPE_CLAUSE |
+# MAGIC | `chute_par_clause` | taux de chute par CLAUSE × TYPE_CLAUSE × EXERCICE (inventaire / N+1 / global) |
 # MAGIC | `chute_par_consigne` / `pm_par_consigne` | chute et PM par consigne pertinente |
 # MAGIC | `conformite_consignes` / `conformite_globale` | application des consignes (détail + segments) |
 # MAGIC | `anomalies_cpt_only` | anomalies par mois de survenance (effet fin d'année) |
@@ -130,7 +132,7 @@ assert d["chute_coherente"], (
 # MAGIC %md
 # MAGIC ## 4. Export Power BI
 # MAGIC
-# MAGIC Une passe : les 11 tables métriques écrites en Delta + parquet/csv sur DBFS.
+# MAGIC Une passe : les 13 tables métriques écrites en Delta + parquet/csv sur DBFS.
 
 # COMMAND ----------
 

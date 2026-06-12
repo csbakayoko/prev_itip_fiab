@@ -17,7 +17,7 @@ le formatage (M€, %, séparateurs FR) reste au niveau restitution.
 Correspondance avec les 9 graphiques (modules.viz) :
     1. compte_justification   → compte_justification(d)
     2. couverture_mrm         → couverture_mrm(d)
-    3. chute_par_clause       → chute_par_clause(df_result)
+    3. chute_par_clause       → chute_par_clause(df_result)  [× exercice]
     4. chute_par_consigne     → chute_par_consigne(d)
     5. conformite_consignes   → conformite_consignes(d)
     6. anomalies_cpt_only     → anomalies_cpt_only(df_result)
@@ -38,7 +38,7 @@ import os
 from typing import Dict, Iterable, Optional
 
 import pandas as pd
-from pyspark.sql import DataFrame, Window
+from pyspark.sql import DataFrame
 import pyspark.sql.functions as F
 
 from config import (
@@ -387,43 +387,74 @@ def conformite_consignes(d: dict) -> pd.DataFrame:
 # MÉTRIQUES PAR AXE (ré-agrégation Spark de df_result)
 # ============================================================================
 
-def chute_par_clause(df_result: DataFrame, top: Optional[int] = None) -> pd.DataFrame:
-    """Taux de chute par clause (KEEP/ADD/STUDY confondues), trié par PM MRM — graphe 3.
+# Libellés des trois blocs EXERCICE de chute_par_clause — alignés sur
+# chute_par_exercice (mêmes sous-univers disjoints, cf. METRIQUES.md §4.2).
+EXERCICE_INV    = "Inventaire courant"
+EXERCICE_N1     = "Récupérés N+1"
+EXERCICE_GLOBAL = "Global (inv. + N+1)"
+_EXERCICE_ORDRE = {EXERCICE_INV: 0, EXERCICE_N1: 1, EXERCICE_GLOBAL: 2}
 
-    Même univers et même formule agrégée que le taux de chute global :
-    Σ des lignes (Σ écart / Σ PM MRM) redonne le taux de chute global.
-    top=N → ne garde que les N clauses de plus forte PM MRM.
+
+def chute_par_clause(df_result: DataFrame, top: Optional[int] = None) -> pd.DataFrame:
+    """Taux de chute par clause × exercice, trié par PM MRM — graphe 3.
+
+    Trois blocs EXERCICE : « Inventaire courant », « Récupérés N+1 » et
+    « Global (inv. + N+1) » (Σ des deux sous-univers disjoints). Même univers
+    et même formule agrégée que les trois taux de chute : dans chaque bloc,
+    Σ des lignes (Σ écart / Σ PM MRM) redonne le taux correspondant
+    (taux_chute_inventaire / taux_chute_n1 / taux_chute_global), et les poids
+    PM se lisent dans le bloc. top=N → ne garde que les N clauses de plus
+    forte PM MRM de chaque bloc.
     """
     df = (
         _filter_chute_universe(_with_mrm_action(derive_clause_column(df_result)))
+        .withColumn("EXERCICE",
+            F.when(F.col("TYPE_RECONCILIATION") == "CPT_LATE", F.lit(EXERCICE_N1))
+             .otherwise(F.lit(EXERCICE_INV)))
         .withColumn("_ecart", F.coalesce(F.col("MRM_PM"), F.lit(0.0))
                             - F.coalesce(F.col("CPT_PM"), F.lit(0.0)))
     )
-    agg = (
-        df.groupBy("CLAUSE", "TYPE_CLAUSE")
+    pdf = (
+        df.groupBy("EXERCICE", "CLAUSE", "TYPE_CLAUSE")
         .agg(
             F.count("*").alias("nb_dossiers"),
             F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("nb_sous"),
             F.sum(F.when(F.col("_ecart") < 0, 1).otherwise(0)).alias("nb_sur"),
             F.sum(F.when(F.col("_ecart") == 0, 1).otherwise(0)).alias("nb_conforme"),
-            F.round(F.sum("MRM_PM"), 2).alias("pm_mrm"),
-            F.round(F.sum("CPT_PM"), 2).alias("pm_cpt"),
-            F.round(F.sum("_ecart"), 2).alias("ecart_signe"),
+            F.coalesce(F.sum("MRM_PM"), F.lit(0.0)).alias("pm_mrm"),
+            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("pm_cpt"),
+            F.sum("_ecart").alias("ecart_signe"),
         )
-        .withColumn("taux_chute_pct",
-            F.round(F.when(F.col("pm_mrm") != 0,
-                           F.col("ecart_signe") / F.col("pm_mrm") * 100).otherwise(0.0), 2))
-        # Poids de la clause dans la PM MRM totale : le global est la moyenne
-        # PONDÉRÉE des taux par clause (pas leur somme).
-        .withColumn("poids_pm_pct",
-            F.round(F.col("pm_mrm") / F.sum("pm_mrm").over(Window.partitionBy()) * 100, 2))
+        .toPandas()
     )
+    return _finalise_chute_par_clause(pdf, top)
+
+
+def _finalise_chute_par_clause(pdf: pd.DataFrame, top: Optional[int] = None) -> pd.DataFrame:
+    """Ajoute le bloc global (Σ par clause des deux exercices, sous-univers
+    disjoints) puis taux et poids PM calculés DANS chaque bloc — pure pandas
+    (vérifiable sans Spark)."""
+    mesures = ["nb_dossiers", "nb_sous", "nb_sur", "nb_conforme",
+               "pm_mrm", "pm_cpt", "ecart_signe"]
+    glob = pdf.groupby(["CLAUSE", "TYPE_CLAUSE"], as_index=False)[mesures].sum()
+    glob.insert(0, "EXERCICE", EXERCICE_GLOBAL)
+    pdf = pd.concat([pdf, glob], ignore_index=True)
+    pdf[["pm_mrm", "pm_cpt", "ecart_signe"]] = pdf[["pm_mrm", "pm_cpt", "ecart_signe"]].round(2)
+    pdf["taux_chute_pct"] = (
+        (pdf["ecart_signe"] / pdf["pm_mrm"] * 100).where(pdf["pm_mrm"] != 0, 0.0).round(2)
+    )
+    # Poids de la clause dans la PM MRM de SON exercice : le taux du bloc est
+    # la moyenne PONDÉRÉE des taux par clause (pas leur somme).
+    tot = pdf.groupby("EXERCICE")["pm_mrm"].transform("sum")
+    pdf["poids_pm_pct"] = (pdf["pm_mrm"] / tot * 100).where(tot != 0, 0.0).round(2)
     pdf = (
-        agg.toPandas()
-        .sort_values("pm_mrm", ascending=False)
+        pdf.sort_values(["EXERCICE", "pm_mrm"], ascending=[True, False],
+                        key=lambda s: s.map(_EXERCICE_ORDRE) if s.name == "EXERCICE" else s)
         .reset_index(drop=True)
     )
-    return pdf.head(top) if top else pdf
+    if top:
+        pdf = pdf.groupby("EXERCICE", sort=False).head(top).reset_index(drop=True)
+    return pdf
 
 
 def anomalies_cpt_only(

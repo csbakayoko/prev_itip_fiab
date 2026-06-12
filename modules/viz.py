@@ -10,11 +10,12 @@ problématique de fiabilisation (direction financière et engagements) :
     2. couverture_mrm         — challenge des listes d'arrêts de travail :
                                 quelle part de la revue MRM est au compte ?
     3. chute_par_clause       — challenge du provisionnement : quelles clauses
-                                portent l'écart de provision ?
+                                portent l'écart ? (global, part N+1 explicitée)
     4. chute_par_consigne     — l'écart de provision selon la consigne de la revue
     5. conformite_consignes   — les consignes de la revue sont-elles appliquées ?
     6. anomalies_cpt_only     — les anomalies résiduelles : volume, PM, saisonnalité
-    7. kpi_chute_globale      — LE ratio de chute global (gros chiffre + PM en regard)
+    7. kpi_chute_globale      — LES trois taux de chute (inventaire en tête,
+                                N+1 et global en regard, PM base chute globale)
     8. kpi_conformite_globale — LE ratio de suivi des consignes au global (donut)
     9. pm_par_consigne        — PM revue vs PM compte par consigne (Δ en € et en %)
 
@@ -35,6 +36,7 @@ from pyspark.sql import DataFrame
 from modules.kpi_export import compute_synthese, kas_totaux
 from modules.metrics import (
     chute_par_clause, anomalies_cpt_only, output_dir, _to_local,
+    EXERCICE_GLOBAL, EXERCICE_N1,
 )
 
 # Palette AXA en priorité, complétée quand la sémantique l'exige.
@@ -181,21 +183,32 @@ def graph_couverture_mrm(d: dict):
 def graph_chute_par_clause(pdf_clauses, d: dict):
     """Quelles clauses portent l'écart de provisionnement ?
 
-    pdf_clauses = metrics.chute_par_clause(df_result, top=N)."""
-    pdf = pdf_clauses[::-1]
+    pdf_clauses = metrics.chute_par_clause(df_result, top=N), ventilée par
+    EXERCICE. Barres = bloc « Global (inv. + N+1) », part N+1 de l'écart dans
+    l'étiquette ; taux inventaire courant et global en lignes de référence."""
+    pdf = pdf_clauses[pdf_clauses["EXERCICE"] == EXERCICE_GLOBAL][::-1]
+    ecart_n1 = (pdf_clauses[pdf_clauses["EXERCICE"] == EXERCICE_N1]
+                .set_index(["CLAUSE", "TYPE_CLAUSE"])["ecart_signe"])
     labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_CLAUSE"])]
     colors = [C_SIENNE if v > 0 else C_OCEAN for v in pdf["taux_chute_pct"]]
 
     h = 0.6 * len(pdf) + 3.2
     fig, ax = plt.subplots(figsize=(12, h))
     ax.barh(labels, pdf["taux_chute_pct"], color=colors, height=0.55)
-    for i, (v, e, p) in enumerate(zip(pdf["taux_chute_pct"], pdf["ecart_signe"], pdf["poids_pm_pct"])):
+    for i, (v, e, p, c, t) in enumerate(zip(pdf["taux_chute_pct"], pdf["ecart_signe"],
+                                            pdf["poids_pm_pct"], pdf["CLAUSE"], pdf["TYPE_CLAUSE"])):
+        dont_n1 = ecart_n1.get((c, t), 0.0)
+        dont = f" dont N+1 {_meur(dont_n1)}" if dont_n1 else ""
         ax.text(v + (0.5 if v >= 0 else -0.5), i,
-                f"{_pct(v)}   (écart {_meur(e)}, poids {_pct(p)})",
+                f"{_pct(v)}   (écart {_meur(e)}{dont}, poids {_pct(p)})",
                 va="center", ha="left" if v >= 0 else "right", fontsize=F_TXT - 1)
     ax.axvline(0, color="#333333", linewidth=0.8, zorder=0.5)
+    ax.axvline(d["taux_chute_inventaire"], color=C_BLEU, linewidth=1.4, linestyle=":",
+               zorder=0.5,
+               label=f"chute inventaire courant : {_pct(d['taux_chute_inventaire'])}")
     ax.axvline(d["taux_chute_global"], color=C_GRIS, linewidth=1.4, linestyle="--",
-               zorder=0.5, label=f"taux de chute global : {_pct(d['taux_chute_global'])}")
+               zorder=0.5,
+               label=f"chute globale (inv. + N+1) : {_pct(d['taux_chute_global'])}")
     ax.legend(loc="lower right", fontsize=F_LEG, frameon=False)
     lo = min(float(pdf["taux_chute_pct"].min()), 0)
     hi = max(float(pdf["taux_chute_pct"].max()), 0)
@@ -203,10 +216,10 @@ def graph_chute_par_clause(pdf_clauses, d: dict):
     _style(ax, xlabel="Taux de chute (%) — positif = sous-provisionné (risque), négatif = sur-provisionné")
     _title(
         fig,
-        f"Provisionnement par clause : taux de chute global {_pct(d['taux_chute_global'])} "
-        f"(écart {_meur(d['metrics_pm_ecart'])})",
-        f"Top {len(pdf)} clauses par PM MRM — base chute globale : retrouvés (inventaire "
-        f"+ N+1) hors « à supprimer » et statut inventaire NON",
+        f"Provisionnement par clause : chute inventaire {_pct(d['taux_chute_inventaire'])} — "
+        f"globale {_pct(d['taux_chute_global'])} (écart {_meur(d['metrics_pm_ecart'])})",
+        f"Top {len(pdf)} clauses par PM MRM — barres = base chute globale (inv. + N+1, hors "
+        f"« à supprimer » / statut NON) ; chute N+1 : {_pct(d['taux_chute_n1'])} (analyse séparée)",
     )
     fig.subplots_adjust(top=max(0.80, 1 - 1.3 / h), bottom=1.1 / h, left=0.18, right=0.97)
     return fig
@@ -333,19 +346,27 @@ def graph_anomalies_cpt_only(pdf, d: dict):
 # ============================================================================
 
 def graph_kpi_chute_globale(d: dict):
-    """Le ratio de chute global en un visuel : gros chiffre + PM en regard."""
+    """Les trois taux de chute en un visuel : inventaire courant en tête (gros
+    chiffre — le taux de la revue auditée), N+1 et global en regard, PM de la
+    base chute globale à droite."""
     pm_mrm, pm_cpt = d["metrics_pm_mrm"], d["metrics_pm_cpt"]
     delta = d["metrics_pm_ecart"]
-    val = d["taux_chute_global"]
+    delta_inv = d["chute_inv_pm_mrm"] - d["chute_inv_pm_cpt"]
+    delta_n1  = d["chute_n1_pm_mrm"] - d["chute_n1_pm_cpt"]
+    val = d["taux_chute_inventaire"]
     sous_prov = val > 0
     couleur = C_ROUGE if sous_prov else C_BLEU
 
     fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(13, 4.6), width_ratios=[1, 1.5])
-    ax0.text(0.5, 0.62, _pct(val), ha="center", va="center",
+    ax0.text(0.5, 0.68, _pct(val), ha="center", va="center",
              fontsize=42, fontweight="bold", color=couleur)
-    ax0.text(0.5, 0.30,
-             "sous-provisionnement (risque)" if sous_prov else "sur-provisionnement (marge)",
+    ax0.text(0.5, 0.42,
+             "inventaire courant — "
+             + ("sous-provisionnement (risque)" if sous_prov else "sur-provisionnement (marge)"),
              ha="center", fontsize=F_AXE, color="#555555")
+    ax0.text(0.5, 0.18,
+             f"N+1 : {_pct(d['taux_chute_n1'])}    ·    global : {_pct(d['taux_chute_global'])}",
+             ha="center", fontsize=F_AXE + 1, fontweight="bold", color="#555555")
     ax0.axis("off")
 
     bars = [("PM revue MRM", pm_mrm, C_BLEU), ("PM compte client", pm_cpt, C_OCEAN)]
@@ -356,16 +377,18 @@ def graph_kpi_chute_globale(d: dict):
                  _meur(b[1]), va="center", fontsize=F_TXT + 1, fontweight="bold")
     ax1.set_xlim(0, max(pm_mrm, pm_cpt) / 1e6 * 1.28)
     ax1.set_xticks([])
-    fig.text(0.52, 0.07, f"Écart (PM MRM − PM compte) : {_meur(delta)}",
+    fig.text(0.52, 0.07,
+             f"Écart (PM MRM − PM compte) : {_meur(delta)} — "
+             f"inv. {_meur(delta_inv)} + N+1 {_meur(delta_n1)}",
              fontsize=F_TXT + 1, fontweight="bold", color=couleur)
     _style(ax1)
     ax1.grid(False)
     _title(
         fig,
-        f"Taux de chute global : {_pct(val)} — le compte porte "
-        f"{_meur(abs(delta))} de {'moins' if sous_prov else 'plus'} que la revue",
-        "Σ(PM MRM − PM CPT) / Σ PM MRM — base chute globale : retrouvés (inventaire "
-        "+ N+1) hors « à supprimer » et statut inventaire NON",
+        f"Taux de chute : {_pct(val)} sur l'inventaire courant — "
+        f"{_pct(d['taux_chute_global'])} en global (inv. + N+1)",
+        f"Σ(PM MRM − PM CPT) / Σ PM MRM — PM affichées = base chute globale, hors "
+        f"« à supprimer » / statut NON ; N+1 : {_pct(d['taux_chute_n1'])} (analyse séparée)",
     )
     fig.subplots_adjust(top=0.76, bottom=0.18, left=0.03, right=0.96, wspace=0.30)
     return fig
