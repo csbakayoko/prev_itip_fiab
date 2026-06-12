@@ -17,18 +17,19 @@ côté affichage : ce sont des termes techniques internes.
 | Terme affiché | Sens | Remplace (jargon interne) |
 |---|---|---|
 | **retrouvé** | le dossier de la revue a une contrepartie au compte | matché / mappé |
-| **non retrouvé** | le dossier de la revue n'a pas de contrepartie au compte | non mappé / MRM_MISSING / orphelin MRM |
+| **non retrouvé** | le dossier de la revue n'a pas de contrepartie au compte | non mappé / MRM_MISSING / orphelin MRM / « non conforme » (KEEP absent) |
 | **conforme** | la consigne est respectée | — |
-| **non conforme** | la consigne n'est PAS respectée (à conserver non retrouvé, à supprimer retrouvé) | — |
+| **encore au compte** | « à supprimer » non suivie : le dossier devait disparaître mais est retrouvé | « non conforme » (DELETE présent) |
 
 - **Couche 1 — le fait** : *retrouvé* / *non retrouvé* (présence au compte).
-- **Couche 2 — le verdict** : *conforme* / *non conforme* (la consigne est-elle
-  tenue ?). Cas particulier des consignes **à ajouter / à étudier** non
-  retrouvées : on les nomme **« non retrouvé »** (sans les qualifier de « non
-  conforme ») — ce n'est pas une anomalie mais une PM pas encore au compte.
+- **Couche 2 — le verdict** : *conforme* / KO. Le KO est nommé par le **fait**,
+  jamais « non conforme » : pour conserver / ajouter / étudier le KO est
+  **« non retrouvé »** (absent du compte) ; pour à supprimer le KO est
+  **« encore au compte »** (présent alors qu'il devait disparaître).
 
 Règle de lecture, une phrase : *« retrouvé » = présent au compte ; « conforme »
-= consigne respectée (à conserver → retrouvé ; à supprimer → non retrouvé)*.
+= consigne respectée (conserver/étudier/ajouter → retrouvé ; à supprimer →
+absent)*.
 
 ---
 
@@ -227,30 +228,26 @@ le global est exactement l'agrégat pondéré des consignes KAS plus le bloc
 
 ## 5. Suivi des consignes
 
-### 5.1 Conformité par consigne — **3 états**
+### 5.1 Conformité par consigne — conforme / KO nommé par le fait
 - **Problématique** : la consigne MRM a-t-elle été appliquée au compte ?
-- **Règle (3 états)** :
+- **Règle** :
 
   | Consigne | Retrouvé au compte (matché) | Non retrouvé (orphelin MRM) |
   |---|---|---|
-  | KEEP (à conserver) | **CONFORME** | **NON_CONFORME** (anomalie : PM attendue absente) |
+  | KEEP (à conserver) | **CONFORME** | **NON_RETROUVE** (PM attendue absente) |
   | ADD (à ajouter) | **CONFORME** | **NON_RETROUVE** (informatif) |
   | STUDY (à étudier) | **CONFORME** | **NON_RETROUVE** (informatif) |
-  | DELETE (à supprimer) | **NON_CONFORME** (suppression non suivie) | **CONFORME** |
+  | DELETE (à supprimer) | **ENCORE_AU_COMPTE** (suppression non suivie) | **CONFORME** |
 
-  - **NON_CONFORME** = vraie anomalie : un KEEP qui devait être au compte n'y est
-    pas, ou un DELETE qui devait disparaître y est encore.
-  - **NON_RETROUVE** = ADD/STUDY absents du compte. Ce **n'est pas** une non-conformité :
-    c'est une PM à ajouter / à étudier qui n'apparaît pas (encore) au compte. On
-    la **nomme distinctement** mais elle **reste au dénominateur** du taux.
+  - Le KO est toujours nommé par le **fait constaté**, jamais « non conforme » :
+    **NON_RETROUVE** = consigne conserver/ajouter/étudier absente du compte ;
+    **ENCORE_AU_COMPTE** = « à supprimer » toujours présente. Le KO **reste au
+    dénominateur** du taux de conformité.
 - **Univers** : pour KEEP/ADD/STUDY = `MATCHÉS + MRM_MISSING` portant la
   consigne ; pour DELETE = `MATCHÉS + MRM_DELETE`.
-- **Formule** : `pct_conformite = nb(conformes) / nb(univers consigne)`
-  (inchangée : le « non retrouvé » est un renommage du KO d'ADD/STUDY, pas une
-  exclusion du dénominateur).
-- **Colonnes dédiées** (`suivi_consignes`, `synthese_consignes`) :
-  `nb_conformes`, `nb_non_conforme`, `nb_non_retrouve` — avec
-  `nb_total = nb_conformes + nb_non_conforme + nb_non_retrouve`.
+- **Formule** : `pct_conformite = nb(conformes) / nb(univers consigne)`.
+- **Colonnes dédiées** (`consignes`, `NATURE_KO`) : `nb_conformes`, `nb_ko` —
+  avec `nb_total = nb_conformes + nb_ko`.
 - **Deux univers, réconciliés à l'affichage.** La restitution sépare
   explicitement les deux périmètres au lieu de les mélanger sur une ligne :
   - **CONFORMITÉ** (inventaire courant) : `total`, `conformes`, `%conf`, reste.
@@ -263,10 +260,9 @@ le global est exactement l'agrégat pondéré des consignes KAS plus le bloc
 - **Limite** : conformité = présence/absence, indépendante du montant.
 
 ### 5.2 Conformité globale
-- `nb(conformes KEEP+ADD+STUDY) / nb(univers KEEP+ADD+STUDY)`. Les ADD/STUDY non
-  retrouvés restent au dénominateur (catégorie « non retrouvé », distincte des
-  KEEP « non conforme »). Volumétries historisées :
-  `synthese_indicateurs.NB_NON_CONFORME` et `NB_NON_RETROUVE`.
+- `nb(conformes KEEP+ADD+STUDY) / nb(univers KEEP+ADD+STUDY)`. Les non
+  retrouvés (KEEP/ADD/STUDY confondus) restent au dénominateur. Volumétries
+  historisées : `synthese.NB_NON_RETROUVE` et `NB_ENCORE_AU_COMPTE`.
 
 ### 5.3 Consignes « à supprimer » non suivies (DELETE matché)
 - **Problématique** : PM qui aurait dû disparaître mais toujours au compte.

@@ -171,8 +171,9 @@ def synthese(d: dict) -> pd.DataFrame:
         "NB_RECUP_N1"            : d["late_nb"],
         "NB_CPT_ONLY"            : d["def_nb"],
         "NB_MRM_MISSING"         : d["non_mappes_nb"],
-        "NB_NON_CONFORME"        : cons["À conserver"]["ko"] + cons["À supprimer"]["ko"],
-        "NB_NON_RETROUVE"        : cons["À ajouter"]["ko"] + cons["À étudier"]["ko"],
+        "NB_NON_RETROUVE"        : (cons["À conserver"]["ko"] + cons["À ajouter"]["ko"]
+                                    + cons["À étudier"]["ko"]),
+        "NB_ENCORE_AU_COMPTE"    : cons["À supprimer"]["ko"],
         "COHERENT"               : d["coherent"],
     }])
 
@@ -214,7 +215,7 @@ def consignes(d: dict) -> pd.DataFrame:
             "NB_CONFORMES"    : c["conf"],
             "PCT_CONFORMITE"  : c["pct"],
             "NB_KO"           : c["ko"],
-            "NATURE_KO"       : c["ko_label"],     # non conforme | non retrouvé
+            "NATURE_KO"       : c["ko_label"],     # non retrouvé | encore au compte
             "NB_BASE_CHUTE"   : c["nb_match"],
             "NB_INVENTAIRE"   : c["nb_inv"],
             "NB_RECUP_N1"     : c["nb_late"],
@@ -262,7 +263,7 @@ def couverture_mrm(d: dict) -> pd.DataFrame:
     del_ko = c_del["nb"] - c_del["conf"]
     rows = [
         ("Retrouvés au compte",                  d["match_nb"], round(d["match_nb"] / base * 100, 1), None),
-        ("À conserver non retrouvé (non conf.)", d["keep_nb"],  round(d["keep_nb"]  / base * 100, 1), d["keep_pm"]),
+        ("À conserver non retrouvé",             d["keep_nb"],  round(d["keep_nb"]  / base * 100, 1), d["keep_pm"]),
         ("À étudier non retrouvé",               d["study_nb"], round(d["study_nb"] / base * 100, 1), d["study_pm"]),
         ("À ajouter non retrouvé",               d["add_nb"],   round(d["add_nb"]   / base * 100, 1), d["add_pm"]),
         ("« À supprimer » retrouvées au compte", del_ko,        round(del_ko / (c_del["nb"] or 1) * 100, 1), c_del["pm_mrm"]),
@@ -276,24 +277,22 @@ def couverture_mrm(d: dict) -> pd.DataFrame:
 
 
 def conformite_globale(d: dict) -> pd.DataFrame:
-    """Suivi des consignes au global — graphe 8 : segments conforme / non
-    retrouvé / non conforme (consignes conserver/étudier/ajouter) + suppression
-    effective.
+    """Suivi des consignes au global — graphe 8 : segments conforme /
+    non retrouvé (consignes conserver/étudier/ajouter) + suppression effective.
 
     Une ligne par segment, deux groupes (KAS = conserver/étudier/ajouter,
     DELETE = à supprimer), avec le taux du groupe.
     """
     k = kas_totaux(d)
     cons = d["consignes"]
-    nr = cons["À ajouter"]["ko"] + cons["À étudier"]["ko"]     # non retrouvés
-    nc = cons["À conserver"]["ko"]                             # non conformes
+    nr = (cons["À conserver"]["ko"] + cons["À ajouter"]["ko"]
+          + cons["À étudier"]["ko"])                           # non retrouvés
     c_del  = cons["À supprimer"]
     del_ok = c_del["conf"]
     del_ko = c_del["nb"] - del_ok
     rows = [
         ("conserver/étudier/ajouter", "Conforme",        k["conf"], d["conformite_globale"]),
         ("conserver/étudier/ajouter", "Non retrouvé",    nr,        d["conformite_globale"]),
-        ("conserver/étudier/ajouter", "Non conforme",    nc,        d["conformite_globale"]),
         ("à supprimer",               "Supprimé (OK)",   del_ok,    c_del["pct"]),
         ("à supprimer",               "Encore au compte", del_ko,   c_del["pct"]),
     ]
@@ -328,7 +327,7 @@ def conformite_consignes(d: dict) -> pd.DataFrame:
     out = consignes(d)[
         ["CONSIGNE", "NB_TOTAL", "NB_CONFORMES", "PCT_CONFORMITE", "NB_KO", "NATURE_KO"]
     ].copy()
-    out["PCT_NON_CONFORME"] = (100 - out["PCT_CONFORMITE"]).round(1)
+    out["PCT_KO"] = (100 - out["PCT_CONFORMITE"]).round(1)
     return out
 
 

@@ -202,11 +202,11 @@ def compute_synthese(df_result: DataFrame) -> dict:
         nz       = agg("nb_pm_mrm_nz", chute_c)   # PM MRM ≠ 0
         nz0      = nb_c - nz                         # PM MRM nulle (null ou 0)
         delta    = pm_mrm_c - pm_cpt_c
-        # Nature du KO (3 états — cf. METRIQUES.md §5.1) : pour ADD/STUDY le non
-        # matché est "non retrouvé" (PM à ajouter/étudier pas encore au compte,
-        # informatif) ; pour KEEP/DELETE c'est "non conforme" (anomalie).
+        # Nature du KO (cf. METRIQUES.md §5.1) : pour KEEP/ADD/STUDY le non
+        # matché est "non retrouvé" (absent du compte) ; pour DELETE c'est
+        # l'inverse — la consigne non suivie est "encore au compte".
         ko        = nb - conf_nb
-        ko_label  = "non retrouvé" if action in ("MRM_ADD", "MRM_STUDY") else "non conforme"
+        ko_label  = "encore au compte" if action == "MRM_DELETE" else "non retrouvé"
         return {
             "nb": nb, "conf": conf_nb, "pct": _pct(conf_nb, nb),
             "ko": ko, "ko_label": ko_label,
@@ -456,7 +456,7 @@ def _render_box(d: dict, client: str) -> str:
     )
 
     # « À supprimer » encore au compte (matchés DELETE) = sous-ensemble des
-    # retrouvés, non conformes. Affiché pour réconcilier avec la table consignes :
+    # retrouvés, consigne non suivie. Affiché pour réconcilier avec la table consignes :
     #   à supprimer (absents=OK) + encore au compte (KO) = total consigne à supprimer.
     del_ko = d["consignes"]["À supprimer"]["ko"]
     right = [
@@ -506,7 +506,7 @@ def _render_indicateurs(d: dict) -> str:
     )
     lines = [
         "LEXIQUE : retrouvé = dossier de la revue présent au compte | non retrouvé = absent du compte",
-        "          conforme = consigne respectée (à conserver → retrouvé ; à supprimer → non retrouvé)",
+        "          conforme = consigne respectée (conserver/étudier/ajouter → retrouvé ; à supprimer → absent)",
         "",
         "INDICATEURS",
         "  COUVERTURE",
@@ -564,8 +564,8 @@ def _render_consignes(d: dict) -> str:
     Suivi des consignes — deux univers explicites et réconciliables :
 
       CONFORMITÉ (inventaire courant)  : total = retrouvés + reste ; conformes ;
-        %conf = conformes / total ; reste = non conforme (conserver/supprimer)
-        ou non retrouvé (ajouter/étudier).
+        %conf = conformes / total ; reste = non retrouvé (conserver/étudier/
+        ajouter absents du compte) ou encore au compte (à supprimer non suivie).
       PROVISIONNEMENT (inventaire + N+1) : base = dossiers retrouvés servant à la
         PM et au taux de chute (dont la part récupérée N+1) ; PM MRM, PM CPT,
         chute. "À supprimer" → PM non pertinente.
@@ -582,7 +582,7 @@ def _render_consignes(d: dict) -> str:
         "SUIVI DES CONSIGNES",
         "  CONFORMITÉ : univers inventaire courant (retrouvés vs non) — conformes / total.",
         "  PROVISIONNEMENT : PM & taux de chute sur les dossiers retrouvés (inventaire + récupérés N+1).",
-        "  Reste : à conserver/supprimer = non conforme (anomalie) ; à ajouter/étudier = non retrouvé.",
+        "  Reste : conserver/étudier/ajouter = non retrouvé (absent du compte) ; à supprimer = encore au compte.",
         head,
         sep,
     ]

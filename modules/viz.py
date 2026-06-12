@@ -42,7 +42,7 @@ C_BLEU   = "#00008F"   # AXA Blue   — référence (revue MRM, matchés)
 C_OCEAN  = "#4976BA"   # AXA Ocean  — compte / récupérés N+1 / sur-provisionné
 C_TEAL   = "#027180"   # AXA Teal   — conforme / couvert
 C_SIENNE = "#F07662"   # AXA Sienna — sous-provisionné, à étudier (risque modéré)
-C_ROUGE  = "#FF1721"   # AXA Red    — anomalies / non conforme (alerte)
+C_ROUGE  = "#FF1721"   # AXA Red    — anomalies / consigne non suivie (alerte)
 C_GRIS   = "#999999"   # neutre     — hors métriques / contexte
 
 # Typographie commune (lisibilité slide / écran partagé)
@@ -148,7 +148,7 @@ def graph_couverture_mrm(d: dict):
     bars = [
         # (libellé, nb, pct affiché, PM MRM, couleur, hachures)
         ("Retrouvés au compte",      d["match_nb"], pct(d["match_nb"], base), None,          C_TEAL,   None),
-        ("À conserver non retrouvé (non conforme)", d["keep_nb"],  pct(d["keep_nb"],  base), d["keep_pm"],  C_ROUGE,  None),
+        ("À conserver non retrouvé", d["keep_nb"],  pct(d["keep_nb"],  base), d["keep_pm"],  C_SIENNE, None),
         ("À étudier non retrouvé",   d["study_nb"], pct(d["study_nb"], base), d["study_pm"], C_SIENNE, None),
         ("À ajouter non retrouvé",   d["add_nb"],   pct(d["add_nb"],   base), d["add_pm"],   C_SIENNE, None),
         ("« À supprimer » retrouvées au compte",
@@ -254,14 +254,14 @@ def graph_chute_par_consigne(d: dict):
 def graph_conformite_consignes(d: dict):
     """Les consignes de la revue sont-elles appliquées au compte ?
 
-    Le reste-à-100 % est qualifié selon la consigne (3 états) : « non conforme »
-    pour KEEP absent / à supprimer encore présent (anomalie), « non retrouvé »
-    pour à ajouter / à étudier absents (informatif)."""
+    Le reste-à-100 % est qualifié selon la consigne : « non retrouvé » pour
+    conserver / ajouter / étudier absents du compte, « encore au compte » pour
+    les à supprimer non suivies."""
     items = list(d["consignes"].items())[::-1]
     labels = [c for c, _ in items]
     conf   = [v["pct"] for _, v in items]
     nonc   = [round(100 - v["pct"], 1) for _, v in items]
-    # Couleur du KO selon sa nature : sienne = non retrouvé, rouge = non conforme.
+    # Couleur du KO selon sa nature : sienne = non retrouvé, rouge = encore au compte.
     ko_colors = [C_SIENNE if v["ko_label"] == "non retrouvé" else C_ROUGE
                  for _, v in items]
 
@@ -279,8 +279,8 @@ def graph_conformite_consignes(d: dict):
     ax.set_xticks([0, 25, 50, 75, 100])
     handles = [
         Patch(color=C_TEAL,   label="Conforme (consigne respectée)"),
-        Patch(color=C_ROUGE,  label="Non conforme (KEEP absent / à supprimer présent)"),
-        Patch(color=C_SIENNE, label="Non retrouvé (à ajouter / à étudier absent)"),
+        Patch(color=C_SIENNE, label="Non retrouvé (absent du compte)"),
+        Patch(color=C_ROUGE,  label="Encore au compte (à supprimer non suivie)"),
     ]
     fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=F_LEG,
                frameon=False, columnspacing=1.6)
@@ -289,8 +289,8 @@ def graph_conformite_consignes(d: dict):
         fig,
         f"Application des consignes de la revue : {_pct(d['conformite_globale'])} de "
         f"conformité globale (hors « à supprimer »)",
-        "Conserver : conforme = retrouvé — ajouter / étudier : retrouvé ou « non "
-        "retrouvé » — à supprimer : conforme = absent du compte",
+        "Conserver / ajouter / étudier : conforme = retrouvé au compte — "
+        "à supprimer : conforme = absent du compte",
     )
     fig.subplots_adjust(top=0.78, bottom=0.26, left=0.15, right=0.97)
     return fig
@@ -388,31 +388,29 @@ def _donut(ax, vals: list, colors: list, pct_centre: str, sous_label: str,
 def graph_kpi_conformite_globale(d: dict):
     """Suivi des consignes au global : conformité KAS + suppression effective.
 
-    Donut gauche en 3 parts (conforme / non retrouvé / non conforme) : pour les
-    consignes conserver/étudier/ajouter, le « non retrouvé » (à ajouter/étudier
-    absents) est distingué du « non conforme » (KEEP absent)."""
+    Donut gauche en 2 parts (conforme / non retrouvé) pour les consignes
+    conserver/étudier/ajouter ; donut droit = suppression effective."""
     k    = kas_totaux(d)
     cons = d["consignes"]
     conf = k["conf"]
-    nr   = cons["À ajouter"]["ko"] + cons["À étudier"]["ko"]   # non retrouvés
-    nc   = cons["À conserver"]["ko"]                           # non conformes (KEEP)
+    nr   = (cons["À conserver"]["ko"] + cons["À ajouter"]["ko"]
+            + cons["À étudier"]["ko"])          # non retrouvés
     c_del  = d["consignes"]["À supprimer"]
     del_ok = c_del["conf"]                      # effectivement supprimées
     del_ko = c_del["nb"] - del_ok               # retrouvées au compte (non suivies)
 
     fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(13, 5.6))
-    _donut(ax0, [conf, nr, nc], [C_TEAL, C_SIENNE, C_ROUGE],
+    _donut(ax0, [conf, nr], [C_TEAL, C_SIENNE],
            _pct(d["conformite_globale"]),
            "consignes conserver /\nétudier / ajouter",
-           f"Conformes : {_n(conf)} / {_n(k['nb'])}  —  "
-           f"non retrouvés : {_n(nr)}  —  non conformes : {_n(nc)}")
+           f"Conformes : {_n(conf)} / {_n(k['nb'])}  —  non retrouvés : {_n(nr)}")
     _donut(ax1, [del_ok, del_ko], [C_TEAL, C_ROUGE], _pct(c_del["pct"]),
            "consignes\n« à supprimer »",
            f"Encore au compte : {_n(del_ko)} dossiers — PM MRM {_meur(c_del['pm_mrm'])} non supprimée")
     handles = [
         Patch(color=C_TEAL,   label="Conforme"),
-        Patch(color=C_SIENNE, label="Non retrouvé (à ajouter / étudier)"),
-        Patch(color=C_ROUGE,  label="Non conforme"),
+        Patch(color=C_SIENNE, label="Non retrouvé (absent du compte)"),
+        Patch(color=C_ROUGE,  label="Encore au compte (à supprimer non suivie)"),
     ]
     fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=F_LEG,
                frameon=False, columnspacing=1.6)
