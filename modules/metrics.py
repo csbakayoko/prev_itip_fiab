@@ -120,17 +120,14 @@ def _with_mrm_action(df: DataFrame) -> DataFrame:
 
 
 def _filter_chute_universe(df: DataFrame) -> DataFrame:
-    """Univers UNIQUE du taux de chute : matchés de l'inventaire courant hors
-    consigne « à supprimer » et hors statut inventaire NON, + TOUS les
-    récupérés N+1 (leur consigne vient de l'inventaire N+1, elle ne s'applique
-    pas à l'exercice comparé). Les matchés sans consigne reconnue (MRM_ACTION
-    null) sont INCLUS. Garantit la cohérence du taux par clause ↔ par consigne
-    ↔ global (cf. docs/METRIQUES.md §4). CPT_OBS_TARDIVE / CPT_RECUP_NON
-    exclus (jamais matchés / PM MRM = 0)."""
+    """Univers UNIQUE du taux de chute : TOUS les dossiers matchés (inventaire
+    courant + récupérés N+1), hors consigne « à supprimer » et hors statut
+    inventaire NON. Les matchés sans consigne reconnue (MRM_ACTION null) sont
+    INCLUS. Garantit la cohérence du taux par clause ↔ par consigne ↔ global
+    (cf. docs/METRIQUES.md §4). CPT_OBS_TARDIVE / CPT_RECUP_NON exclus
+    (jamais matchés / PM MRM = 0)."""
     cond = (
-        F.col("TYPE_RECONCILIATION") == "CPT_LATE"
-    ) | (
-        F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS))
+        F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS) + ["CPT_LATE"])
         # null-safe : une MRM_ACTION absente/inconnue reste dans l'univers.
         & F.coalesce(F.col("MRM_ACTION") != "MRM_DELETE", F.lit(True))
     )
@@ -184,9 +181,9 @@ def synthese(d: dict) -> pd.DataFrame:
 def taux_chute_global(d: dict) -> pd.DataFrame:
     """Taux de chute global, PM MRM et PM Compte (base chute + totales) — graphe 7.
 
-    Base chute = matchés de l'inventaire courant hors « à supprimer » / statut
-    inventaire NON, + TOUS les récupérés N+1 — l'univers de référence du taux
-    de chute (sans-consigne reconnue et N+1 « à supprimer » inclus).
+    Base chute = tous les dossiers retrouvés (inventaire + N+1), hors consigne
+    « à supprimer » et hors statut inventaire NON — l'univers de référence du
+    taux de chute (les matchés sans consigne reconnue sont inclus).
     PM totales = grands totaux des deux univers d'entrée (MRM, Compte).
     """
     return pd.DataFrame([{

@@ -205,8 +205,8 @@ def graph_chute_par_clause(pdf_clauses, d: dict):
         fig,
         f"Provisionnement par clause : taux de chute global {_pct(d['taux_chute_global'])} "
         f"(écart {_meur(d['metrics_pm_ecart'])})",
-        f"Top {len(pdf)} clauses par PM MRM — dossiers retrouvés au compte : inventaire "
-        f"hors « à supprimer » / statut NON + tous les récupérés N+1",
+        f"Top {len(pdf)} clauses par PM MRM — tous les dossiers retrouvés au compte "
+        f"(inventaire + N+1), hors « à supprimer » et statut inventaire NON",
     )
     fig.subplots_adjust(top=max(0.80, 1 - 1.3 / h), bottom=1.1 / h, left=0.18, right=0.97)
     return fig
@@ -362,8 +362,8 @@ def graph_kpi_chute_globale(d: dict):
         fig,
         f"Taux de chute global : {_pct(val)} — le compte porte "
         f"{_meur(abs(delta))} de {'moins' if sous_prov else 'plus'} que la revue",
-        "Σ(PM MRM − PM CPT) / Σ PM MRM — dossiers retrouvés au compte : inventaire "
-        "hors « à supprimer » / statut NON + tous les récupérés N+1",
+        "Σ(PM MRM − PM CPT) / Σ PM MRM — tous les dossiers retrouvés au compte "
+        "(inventaire + N+1), hors « à supprimer » et statut inventaire NON",
     )
     fig.subplots_adjust(top=0.76, bottom=0.18, left=0.03, right=0.96, wspace=0.30)
     return fig
