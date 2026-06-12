@@ -106,9 +106,10 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
   `MATCHÉS + MRM_MISSING + MRM_DELETE`.
 - **Univers compte réconciliable** (vision « le compte est-il justifié ? ») :
   `MATCHÉS + CPT_LATE + CPT_ONLY`. (Obs. tardives IT exclues.)
-- **Univers métriques PM / chute** : `MATCHÉS + CPT_LATE` — les seuls dossiers
-  ayant une contrepartie MRM comparable — **hors consigne « à supprimer » et
-  hors statut inventaire NON** (les sans-consigne reconnue sont inclus).
+- **Univers métriques PM / chute** : `MATCHÉS` (inventaire courant, **hors
+  consigne « à supprimer » et hors statut inventaire NON**) + **tous les
+  `CPT_LATE`** — les seuls dossiers ayant une contrepartie MRM comparable.
+  Les sans-consigne reconnue et les N+1 « à supprimer » sont inclus.
 
 ---
 
@@ -173,11 +174,13 @@ Formule **agrégée** (somme des écarts / somme des PM), robuste aux valeurs
 extrêmes par dossier (on n'agrège jamais une moyenne de ratios).
 
 ### 4.2 Univers commun — règle de cohérence
-**Décision : un seul univers pour TOUTE chute** = **tous les dossiers matchés**
-(`MATCHÉS + CPT_LATE`, dossiers ayant une contrepartie MRM comparable), **hors
-consigne « à supprimer » et hors statut inventaire NON**. Les matchés **sans
-consigne reconnue** (`MRM_ACTION` null/inconnue) sont **inclus**. C'est ce qui
-garantit la cohérence global ↔ par consigne :
+**Décision : un seul univers pour TOUTE chute** = **matchés de l'inventaire
+courant** (hors consigne « à supprimer » et hors statut inventaire NON)
+**+ tous les récupérés N+1** (`CPT_LATE`). La consigne d'un `CPT_LATE` vient
+de l'inventaire **N+1** : elle ne s'applique pas à l'exercice comparé → un
+N+1 « à supprimer » reste dans la base. Les matchés **sans consigne reconnue**
+(`MRM_ACTION` null/inconnue) sont **inclus**. C'est ce qui garantit la
+cohérence global ↔ par consigne :
 
 ```
 taux_chute_global = (Σ_consignes_KAS écarts + Σ_hors_consigne écarts)
@@ -200,9 +203,13 @@ le global est exactement l'agrégat pondéré des consignes KAS plus le bloc
 - **Sans consigne reconnue** (`MRM_ACTION` null/inconnue) : le dossier a matché,
   sa PM est comparable → **inclus dans le global** (tracé à part, pas de
   consigne à laquelle l'imputer).
-- **DELETE** : la PM aurait dû être **supprimée** ; un écart « PM_MRM − PM_CPT »
-  n'a pas le sens d'une chute. → **taux de chute non défini** pour DELETE,
-  **exclu du global**. Suivi séparé : *taux de suppression effective* (§5.3).
+- **DELETE (inventaire courant)** : la PM aurait dû être **supprimée** ; un
+  écart « PM_MRM − PM_CPT » n'a pas le sens d'une chute. → **taux de chute non
+  défini** pour DELETE, **exclu du global**. Suivi séparé : *taux de
+  suppression effective* (§5.3). **Exception N+1** : un `CPT_LATE` dont la
+  conclusion N+1 est « à supprimer » reste dans le global (consigne d'un autre
+  exercice) — tracé dans le bloc hors consigne
+  (`hors_consigne_late_del_nb`).
 - **Statut inventaire NON** : PM MRM = 0, non remonté à la direction
   financière → **exclu du global** (structurellement déjà hors matching ;
   l'exclusion est aussi explicite dans l'univers de chute).
