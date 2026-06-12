@@ -106,10 +106,11 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
   `MATCHÉS + MRM_MISSING + MRM_DELETE`.
 - **Univers compte réconciliable** (vision « le compte est-il justifié ? ») :
   `MATCHÉS + CPT_LATE + CPT_ONLY`. (Obs. tardives IT exclues.)
-- **Univers métriques PM / chute** : **tous les retrouvés** (`MATCHÉS +
-  CPT_LATE`, **hors statut inventaire NON** uniquement) — les seuls dossiers
-  ayant une contrepartie MRM comparable. Identique à la bulle RETROUVÉS :
-  « à supprimer » retrouvées et sans-consigne reconnue incluses.
+- **Univers métriques PM / chute (global)** : `MATCHÉS + CPT_LATE` **hors
+  consigne « à supprimer » et hors statut inventaire NON** — les seuls
+  dossiers ayant une contrepartie MRM comparable (sans-consigne reconnue
+  inclus). Décomposé en deux sous-univers disjoints analysés aussi
+  séparément : **inventaire courant** et **récupérés N+1** (cf. §4.2).
 
 ---
 
@@ -173,15 +174,24 @@ taux_chute(E) = Σ_E (PM_MRM − PM_CPT) / Σ_E PM_MRM × 100
 Formule **agrégée** (somme des écarts / somme des PM), robuste aux valeurs
 extrêmes par dossier (on n'agrège jamais une moyenne de ratios).
 
-### 4.2 Univers commun — règle de cohérence
-**Décision : un seul univers pour TOUTE chute = TOUS les retrouvés**
-(`MATCHÉS` inventaire courant, consignes confondues, + tous les récupérés N+1
-`CPT_LATE`), **hors statut inventaire NON uniquement**. Un dossier retrouvé a
-une PM MRM comparable → les « à supprimer » **retrouvées** (encore au compte
-ou via N+1) et les **sans consigne reconnue** (`MRM_ACTION` null/inconnue)
-sont **incluses**. Les « à supprimer » conformes (absentes du compte) n'ont
-jamais matché → hors base par construction. C'est ce qui garantit la
-cohérence global ↔ par consigne :
+### 4.2 Trois taux, un univers global — règle de cohérence
+**Décision : trois taux de chute, sur des univers emboîtés.**
+
+1. **Taux de chute inventaire courant** (`taux_chute_inventaire`) : matchés
+   du MRM de l'exercice courant, hors « à supprimer » / statut NON.
+2. **Taux de chute N+1** (`taux_chute_n1`, **analyse séparée**) : récupérés
+   `CPT_LATE`, hors « à supprimer » (consigne N+1). Accompagné de son propre
+   **suivi des consignes N+1** (`n1_consignes` : KEEP/ADD/STUDY = conformes,
+   DELETE = encore au compte).
+3. **Taux de chute GLOBAL** (`taux_chute_global`) : la réunion des deux
+   sous-univers disjoints — matchés inventaire + récupérés N+1, **hors
+   consigne « à supprimer » et hors statut inventaire NON** (sans-consigne
+   reconnue inclus). Les composantes s'additionnent exactement :
+   `metrics_pm_* = chute_inv_pm_* + chute_n1_pm_*`.
+
+Les exclus gardent leur **analyse à part** : « à supprimer » retrouvées →
+conformité (« encore au compte ») + taux de suppression effective (§5.3) ;
+repêchés statut NON → analyse dédiée `recup_statut_non` (§1).
 
 ```
 taux_chute_global = (Σ_consignes_KAS écarts + Σ_hors_consigne écarts)
@@ -193,10 +203,11 @@ le global est exactement l'agrégat pondéré des consignes KAS plus le bloc
 « hors consigne » → réconciliable ligne à ligne.
 
 > ✅ **Résolu** : `compute_synthese` (consigne et global) et `chute_par_clause`
-> partagent le même univers (tous les retrouvés, hors statut NON), et un
-> auto-contrôle vérifie à chaque run que global == Σ consignes + hors
-> consigne (`chute_coherente`, warning sinon). Le bloc hors consigne est tracé
-> dans `hors_consigne_nb` / `_pm_mrm` / `_pm_cpt` / `_del_nb`.
+> partagent le même univers global, et un auto-contrôle vérifie à chaque run
+> que global == Σ consignes + hors consigne (`chute_coherente`, warning
+> sinon). Le bloc hors consigne est tracé dans `hors_consigne_nb` /
+> `_pm_mrm` / `_pm_cpt` ; la décomposition par exercice dans `chute_inv_*` /
+> `chute_n1_*` (table `chute_par_exercice`).
 
 ### 4.3 Périmètre des consignes
 - **KEEP / ADD / STUDY** : chute pertinente (la PM doit être justifiée au
@@ -204,32 +215,30 @@ le global est exactement l'agrégat pondéré des consignes KAS plus le bloc
 - **Sans consigne reconnue** (`MRM_ACTION` null/inconnue) : le dossier a matché,
   sa PM est comparable → **inclus dans le global** (tracé à part, pas de
   consigne à laquelle l'imputer).
-- **DELETE retrouvée (encore au compte / N+1)** : **incluse dans le global**
-  (le dossier a matché, sa PM pèse réellement au compte), mais **pas de taux
-  de chute par consigne** pour DELETE (un écart sur une PM à supprimer ne
-  s'interprète pas comme une chute par consigne) — tracée dans le bloc hors
-  consigne (`hors_consigne_del_nb`). Le suivi d'application de la consigne
-  reste le *taux de suppression effective* (§5.3) ; les DELETE conformes
-  (absentes du compte) n'ont jamais matché et ne pèsent dans aucune PM.
+- **DELETE** : la PM aurait dû être **supprimée** ; un écart « PM_MRM −
+  PM_CPT » n'a pas le sens d'une chute. → **exclue de tous les taux de
+  chute** (inventaire, N+1, global), qu'elle soit retrouvée au compte ou
+  portée par un N+1. Analyse à part : conformité (« encore au compte ») et
+  *taux de suppression effective* (§5.3) ; les DELETE conformes (absentes du
+  compte) n'ont jamais matché et ne pèsent dans aucune PM.
 - **Statut inventaire NON** : PM MRM = 0, non remonté à la direction
   financière → **exclu du global** (structurellement déjà hors matching ;
   l'exclusion est aussi explicite dans l'univers de chute).
 
 ### 4.4 Niveaux de PM
 - **PM MRM**, **PM CPT** et **écart** (`PM_MRM − PM_CPT`) sur **l'univers du
-  taux de chute global** (tous les retrouvés, hors statut NON) : ce sont les
-  **composantes exactes** du taux — `écart / PM_MRM × 100 ==
-  taux_chute_global` partout (synthèse, métriques, graphiques). Aucun %
-  affiché sur ce bloc (le seul ratio de chute restitué est le global + le
-  par-consigne).
-- **Bulle RETROUVÉS = base du taux de chute.** La bulle centrale de la
-  synthèse (`trouves_nb = match_nb + late_nb`, PM `trouves_pm_mrm` /
-  `trouves_pm_cpt`) et la base chute (`metrics_nb`, `metrics_pm_*`) portent
-  **le même univers** : le Δ PM de la bulle est exactement le numérateur du
-  taux de chute global. Les deux jeux de clés sont exposés (synthèse,
-  métriques `NB/PM_*_RETROUVES` et `NB/PM_*_BASE_CHUTE`) et ne divergent que
-  si des retrouvés portent un statut inventaire NON (cas structurellement
-  absent, contrôlé par l'auto-contrôle de cohérence).
+  taux de chute global** : ce sont les **composantes exactes** du taux —
+  `écart / PM_MRM × 100 == taux_chute_global` partout (synthèse, métriques,
+  graphiques), avec la décomposition inventaire / N+1 affichée en regard.
+  Aucun % affiché sur ce bloc (les ratios restitués sont les trois taux du
+  §4.2 + le par-consigne).
+- **Bulle RETROUVÉS ≠ base du taux de chute.** La bulle centrale montre
+  **tous les retrouvés** (`trouves_nb = match_nb + late_nb`, PM
+  `trouves_pm_mrm` / `trouves_pm_cpt`) : c'est la vision « justification du
+  compte ». La **base chute globale** (`metrics_nb`, `metrics_pm_*`) en est
+  le sous-ensemble hors « à supprimer » / statut NON, détaillée dans le bloc
+  NIVEAUX DE PM. Les deux jeux de clés sont exposés (`NB/PM_*_RETROUVES` et
+  `NB/PM_*_BASE_CHUTE`) ; leur différence = les « à supprimer » retrouvées.
 
 ---
 
@@ -250,8 +259,10 @@ le global est exactement l'agrégat pondéré des consignes KAS plus le bloc
     **NON_RETROUVE** = consigne conserver/ajouter/étudier absente du compte ;
     **ENCORE_AU_COMPTE** = « à supprimer » toujours présente. Le KO **reste au
     dénominateur** du taux de conformité.
-- **Univers** : pour KEEP/ADD/STUDY = `MATCHÉS + MRM_MISSING` portant la
-  consigne ; pour DELETE = `MATCHÉS + MRM_DELETE`.
+- **Univers** : pour KEEP/ADD/STUDY = `MATCHÉS + CPT_LATE + MRM_MISSING`
+  portant la consigne (les récupérés N+1 participent : retrouvé = conforme) ;
+  pour DELETE = `MATCHÉS + CPT_LATE + MRM_DELETE` (retrouvé = encore au
+  compte, KO). Les N+1 ont en plus leur suivi séparé (table `suivi_n1`).
 - **Formule** : `pct_conformite = nb(conformes) / nb(univers consigne)`.
 - **Colonnes dédiées** (`consignes`, `NATURE_KO`) : `nb_conformes`, `nb_ko` —
   avec `nb_total = nb_conformes + nb_ko`.
