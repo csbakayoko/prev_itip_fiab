@@ -2,8 +2,10 @@
 Synthèse client — vue compacte type "schéma SODEXO".
 
 Produit à chaque run :
-  1. Une vue d'ensemble en 3 bulles (MRM / MATCHÉS / COMPTE) avec, pour chaque
+  1. Une vue d'ensemble en 3 bulles (MRM / RETROUVÉS / COMPTE) avec, pour chaque
      sous-catégorie, la volumétrie en nombre de dossiers et en PM (€).
+     RETROUVÉS = tous les matchés + tous les N+1 ; la base du taux de chute
+     (hors « à supprimer » / statut NON) est détaillée dans les indicateurs.
   2. Un bloc d'INDICATEURS (taux de couverture, récupération tardive, taux de
      chute global, niveaux de PM).
   3. Un bloc SUIVI DES CONSIGNES (taux de conformité par consigne, avec la

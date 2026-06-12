@@ -162,6 +162,12 @@ def synthese(d: dict) -> pd.DataFrame:
         "TAUX_COUVERTURE_COMPTE_PCT" : d["taux_couverture_compte"],
         "TAUX_RECUP_TARDIVE_PCT" : d["taux_recup_tardive"],
         "TAUX_RECUP_GLOBAL_PCT"  : d["taux_recup_global"],
+        # Retrouvés = tous les matchés + tous les N+1 (bulle de la synthèse).
+        "NB_RETROUVES"           : d["trouves_nb"],
+        "PM_MRM_RETROUVES"       : d["trouves_pm_mrm"],
+        "PM_CPT_RETROUVES"       : d["trouves_pm_cpt"],
+        # Base chute = retrouvés hors « à supprimer » / statut NON.
+        "NB_BASE_CHUTE"          : d["metrics_nb"],
         "PM_MRM_BASE_CHUTE"      : d["metrics_pm_mrm"],
         "PM_CPT_BASE_CHUTE"      : d["metrics_pm_cpt"],
         "ECART_BASE_CHUTE"       : d["metrics_pm_ecart"],
@@ -179,24 +185,28 @@ def synthese(d: dict) -> pd.DataFrame:
 
 
 def taux_chute_global(d: dict) -> pd.DataFrame:
-    """Taux de chute global, PM MRM et PM Compte (base chute + totales) — graphe 7.
+    """Taux de chute global, PM MRM et PM Compte (base chute + retrouvés) — graphe 7.
 
-    Base chute = tous les dossiers retrouvés (inventaire + N+1), hors consigne
-    « à supprimer » et hors statut inventaire NON — l'univers de référence du
-    taux de chute (les matchés sans consigne reconnue sont inclus).
-    PM totales = grands totaux des deux univers d'entrée (MRM, Compte).
+    Base chute = sous-ensemble des retrouvés hors consigne « à supprimer » et
+    hors statut inventaire NON (sans-consigne reconnue inclus) — l'univers de
+    référence du taux de chute. Retrouvés = tous les matchés + tous les N+1
+    (bulle de la synthèse). PM totales = grands totaux des deux univers
+    d'entrée (MRM, Compte).
     """
     return pd.DataFrame([{
         "TAUX_CHUTE_GLOBAL_PCT" : d["taux_chute_global"],
         "PM_MRM_BASE_CHUTE"     : d["metrics_pm_mrm"],
         "PM_CPT_BASE_CHUTE"     : d["metrics_pm_cpt"],
         "ECART_BASE_CHUTE"      : d["metrics_pm_ecart"],
-        "PM_MRM_TOTALE"         : d["mrm_pm"],
-        "PM_CPT_TOTALE"         : d["cpt_pm"],
         "NB_BASE_CHUTE"         : d["metrics_nb"],
         "NB_INVENTAIRE"         : d["metrics_match_nb"],
         "NB_RECUP_N1"           : d["metrics_late_nb"],
         "NB_HORS_CONSIGNE"      : d["hors_consigne_nb"],
+        "NB_RETROUVES"          : d["trouves_nb"],
+        "PM_MRM_RETROUVES"      : d["trouves_pm_mrm"],
+        "PM_CPT_RETROUVES"      : d["trouves_pm_cpt"],
+        "PM_MRM_TOTALE"         : d["mrm_pm"],
+        "PM_CPT_TOTALE"         : d["cpt_pm"],
     }])
 
 
