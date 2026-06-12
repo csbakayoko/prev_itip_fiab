@@ -2,7 +2,7 @@
 Mappings colonnes brutes (Hive / CSV) → noms canoniques.
 
 Les noms canoniques sont ensuite préfixés CPT_* / MRM_* par prefix_columns()
-dans modules/transform.py.
+dans core/transform.py.
 """
 
 # ── CPT (table Hive) ────────────────────────────────────────────────────────

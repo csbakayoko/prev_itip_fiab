@@ -11,7 +11,7 @@ from pyspark.sql.window import Window
 from typing import Dict, List, Optional, Tuple
 
 from config import MAPPING_CPT, MAPPING_MRM, TechnicalConfig, tech_cfg
-from modules._timing import timed_fn
+from core._timing import timed_fn
 
 logger = logging.getLogger(__name__)
 

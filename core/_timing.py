@@ -4,7 +4,7 @@ Utilitaire de mesure de temps avec print [timing].
 Aligné sur le style des prints [matching] / [late] : ▶ entrée, ↳ sortie + durée.
 
 Usage :
-    from modules._timing import timed
+    from core._timing import timed
 
     with timed("load_cpt"):
         df = load_cpt_raw(spark, cfg)

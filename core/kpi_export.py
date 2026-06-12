@@ -45,8 +45,8 @@ from config import (
     OBS_TARDIVE_LABEL,
     RECUP_NON_LABEL,
 )
-from modules.matching import categorize_mrm_conclusion
-from modules._timing import timed_fn
+from core.matching import categorize_mrm_conclusion
+from core._timing import timed_fn
 
 logger = logging.getLogger(__name__)
 

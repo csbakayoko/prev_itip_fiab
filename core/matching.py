@@ -35,7 +35,7 @@ from config import (
     WINDOW_DAYS, IP_GARANTIE_OFFSET, RELAPSE_WINDOW_DAYS, LATE_IT_GARANTIE,
     ORPHAN_FIN_ANNEE_MOIS, ORPHAN_PM_THRESHOLD, OBS_TARDIVE_LABEL, DATE_INVENTAIRE,
 )
-from modules._timing import timed_fn
+from core._timing import timed_fn
 
 
 # ============================================================================

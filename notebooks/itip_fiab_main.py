@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # ITIP-FIAB — Notebook principal
 # MAGIC
-# MAGIC Pipeline de fiabilisation CPT/MRM, puis **couche métriques** (`modules.metrics`).
+# MAGIC Pipeline de fiabilisation CPT/MRM, puis **couche métriques** (`core.metrics`).
 # MAGIC
 # MAGIC Déroulé :
 # MAGIC 1. Setup (Spark + config)
@@ -39,13 +39,13 @@ spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
 from config import (
     db_cfg, tech_cfg, RUN_PARAMS, CLIENT_NAME, RECUP_NON_LABEL, CHECKPOINT_DIR,
 )
-from modules.load_data import load_cpt_raw, load_mrm_raw
-from modules.transform import clean_cpt, clean_mrm
-from modules.matching import (
+from core.load_data import load_cpt_raw, load_mrm_raw
+from core.transform import clean_cpt, clean_mrm
+from core.matching import (
     matching_waterfall, recover_late_declarations,
     flag_late_it_observations, enrich_result_tags,
 )
-from modules.kpi_export import print_synthese
+from core.kpi_export import print_synthese
 from main import _split_mrm_statut
 
 if CHECKPOINT_DIR:
@@ -106,13 +106,13 @@ d = print_synthese(df_result)
 # MAGIC %md
 # MAGIC ## 4. Métriques
 # MAGIC
-# MAGIC Des fonctions simples (`modules.metrics`) : les métriques scalaires
+# MAGIC Des fonctions simples (`core.metrics`) : les métriques scalaires
 # MAGIC prennent `d` et renvoient un DataFrame pandas ; `chute_par_clause` et
 # MAGIC `anomalies_cpt_only` ré-agrègent `df_result` côté Spark.
 
 # COMMAND ----------
 
-from modules import metrics
+from core import metrics
 
 # COMMAND ----------
 
@@ -210,7 +210,7 @@ _ = metrics.export_metriques(df_result, d, formats=("csv", "json", "parquet"))
 
 # COMMAND ----------
 
-# from modules.viz import restituer_graphiques
+# from core.viz import restituer_graphiques
 # figs = restituer_graphiques(df_result, d)
 
 # COMMAND ----------

@@ -4,9 +4,9 @@ Pipeline de fiabilisation ITIP-FIAB — point d'entrée.
 Spine essentiel, multi-périmètre :
     load → clean → waterfall → synthèse (ASCII console) → métriques + graphiques
 
-Le calcul des indicateurs vit dans modules.metrics (des fonctions qui
+Le calcul des indicateurs vit dans core.metrics (des fonctions qui
 reshapent le dict de la synthèse — une passe Spark — en tables pandas),
-leur mise en forme dans modules.viz (9 graphiques-messages).
+leur mise en forme dans core.viz (9 graphiques-messages).
 
 Périmètre piloté par config/profile.py (par défaut : toutes les clauses). Lancement :
     spark-submit main.py        (ou exécution dans un notebook Databricks)
@@ -21,18 +21,18 @@ from config import (
     EXPORT_ANALYSES, EXPORT_FORMATS, EXPORT_DELTA_SCHEMA, EXPORT_GRAPHS,
     RECUP_NON_LABEL, CHECKPOINT_DIR,
 )
-from modules.load_data import load_cpt_raw, load_mrm_raw
-from modules.transform import clean_cpt, clean_mrm
-from modules.matching import (
+from core.load_data import load_cpt_raw, load_mrm_raw
+from core.transform import clean_cpt, clean_mrm
+from core.matching import (
     matching_waterfall,
     recover_late_declarations,
     flag_late_it_observations,
     enrich_result_tags,
 )
-from modules.metrics import export_metriques
-from modules.viz import restituer_graphiques
-from modules.kpi_export import print_synthese
-from modules._timing import timed
+from core.metrics import export_metriques
+from core.viz import restituer_graphiques
+from core.kpi_export import print_synthese
+from core._timing import timed
 import pyspark.sql.functions as F
 
 

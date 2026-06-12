@@ -32,7 +32,7 @@ from config import (
     MRM_TYPE_CLAUSE_COL,
     DEV_MODE,
 )
-from modules._timing import timed_fn
+from core._timing import timed_fn
 
 logger = logging.getLogger(__name__)
 

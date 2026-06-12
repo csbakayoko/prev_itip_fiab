@@ -1,7 +1,7 @@
 """
 Couche métriques — calcul des données de restitution depuis df_result.
 
-Sépare le CALCUL des données (ici) de leur RESTITUTION (modules.viz, Excel,
+Sépare le CALCUL des données (ici) de leur RESTITUTION (core.viz, Excel,
 Power BI). Des fonctions simples, appelées depuis main :
 
     - les métriques scalaires prennent `d`, le dict de compute_synthese
@@ -14,7 +14,7 @@ Power BI). Des fonctions simples, appelées depuis main :
 Les fonctions renvoient des DONNÉES BRUTES (nombres, pas de chaînes formatées) :
 le formatage (M€, %, séparateurs FR) reste au niveau restitution.
 
-Correspondance avec les 9 graphiques (modules.viz) :
+Correspondance avec les 9 graphiques (core.viz) :
     1. compte_justification   → compte_justification(d)
     2. couverture_mrm         → couverture_mrm(d)
     3. chute_par_clause       → chute_par_clause(df_result)  [× exercice]
@@ -26,7 +26,7 @@ Correspondance avec les 9 graphiques (modules.viz) :
     9. pm_par_consigne        → pm_par_consigne(d)
 
 Usage (main / notebook) :
-    from modules import metrics
+    from core import metrics
 
     d = print_synthese(df_result)              # la passe Spark
     metrics.bilan_cas(d)                       # le bilan cas par cas
@@ -45,8 +45,8 @@ import pyspark.sql.functions as F
 from config import (
     CLIENT_NAME, CLIENT_CLAUSES, MATCH_LABELS, TYPE_CLAUSE_CPT_PREFIX,
 )
-from modules.kpi_export import compute_synthese, kas_totaux
-from modules.matching import categorize_mrm_conclusion
+from core.kpi_export import compute_synthese, kas_totaux
+from core.matching import categorize_mrm_conclusion
 
 
 # ============================================================================

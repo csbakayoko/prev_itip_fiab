@@ -50,14 +50,14 @@ from config import (
     db_cfg, tech_cfg, RUN_PARAMS, CLIENT_NAME, RECUP_NON_LABEL, CHECKPOINT_DIR,
     EXPORT_DELTA_SCHEMA,
 )
-from modules.load_data import load_cpt_raw, load_mrm_raw
-from modules.transform import clean_cpt, clean_mrm
-from modules.matching import (
+from core.load_data import load_cpt_raw, load_mrm_raw
+from core.transform import clean_cpt, clean_mrm
+from core.matching import (
     matching_waterfall, recover_late_declarations,
     flag_late_it_observations, enrich_result_tags,
 )
-from modules.kpi_export import print_synthese
-from modules import metrics
+from core.kpi_export import print_synthese
+from core import metrics
 from main import _split_mrm_statut
 
 if CHECKPOINT_DIR:

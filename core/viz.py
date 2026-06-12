@@ -1,7 +1,7 @@
 """
 Restitution graphique des métriques (matplotlib) — titres porteurs de message.
 
-Consomme exclusivement la couche métriques (modules.metrics) : viz ne calcule
+Consomme exclusivement la couche métriques (core.metrics) : viz ne calcule
 rien, elle met en forme. Chaque graphique prend `d` (le dict de
 compute_synthese, une seule passe Spark) ; les graphes 3 et 6 prennent en plus
 la table pandas de leur métrique. Chaque graphique répond à une question de la
@@ -20,7 +20,7 @@ problématique de fiabilisation (direction financière et engagements) :
     9. pm_par_consigne        — PM revue vs PM compte par consigne (Δ en € et en %)
 
 Usage (notebook Databricks) :
-    from modules.viz import restituer_graphiques
+    from core.viz import restituer_graphiques
 
     d = print_synthese(df_result)                          # la passe Spark
     figs = restituer_graphiques(df_result, d)              # affiche + PNG DBFS
@@ -33,8 +33,8 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from pyspark.sql import DataFrame
 
-from modules.kpi_export import compute_synthese, kas_totaux
-from modules.metrics import (
+from core.kpi_export import compute_synthese, kas_totaux
+from core.metrics import (
     chute_par_clause, anomalies_cpt_only, output_dir, _to_local,
     EXERCICE_INV,
 )
