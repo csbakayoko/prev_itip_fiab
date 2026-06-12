@@ -106,11 +106,11 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
   `MATCHÉS + MRM_MISSING + MRM_DELETE`.
 - **Univers compte réconciliable** (vision « le compte est-il justifié ? ») :
   `MATCHÉS + CPT_LATE + CPT_ONLY`. (Obs. tardives IT exclues.)
-- **Univers métriques PM / chute (global)** : `MATCHÉS + CPT_LATE` **hors
-  consigne « à supprimer » et hors statut inventaire NON** — les seuls
-  dossiers ayant une contrepartie MRM comparable (sans-consigne reconnue
-  inclus). Décomposé en deux sous-univers disjoints analysés aussi
-  séparément : **inventaire courant** et **récupérés N+1** (cf. §4.2).
+- **Univers métriques PM / chute (stats globales)** : `MATCHÉS` (inventaire
+  courant) **hors consigne « à supprimer » et hors statut inventaire NON**
+  (sans-consigne reconnue inclus). Les **récupérés N+1** (`CPT_LATE`) sont
+  une **analyse séparée, hors stats globales** : leur propre taux de chute
+  et leur propre suivi de consignes (cf. §4.2).
 
 ---
 
@@ -174,24 +174,24 @@ taux_chute(E) = Σ_E (PM_MRM − PM_CPT) / Σ_E PM_MRM × 100
 Formule **agrégée** (somme des écarts / somme des PM), robuste aux valeurs
 extrêmes par dossier (on n'agrège jamais une moyenne de ratios).
 
-### 4.2 Trois taux, un univers global — règle de cohérence
-**Décision : trois taux de chute, sur des univers emboîtés.**
+### 4.2 Un taux principal, des analyses séparées — règle de cohérence
+**Décision : les stats globales de chute = l'inventaire courant seul.**
 
-1. **Taux de chute inventaire courant** (`taux_chute_inventaire`) : matchés
-   du MRM de l'exercice courant, hors « à supprimer » / statut NON.
-2. **Taux de chute N+1** (`taux_chute_n1`, **analyse séparée**) : récupérés
-   `CPT_LATE`, hors « à supprimer » (consigne N+1). Accompagné de son propre
-   **suivi des consignes N+1** (`n1_consignes` : KEEP/ADD/STUDY = conformes,
-   DELETE = encore au compte).
-3. **Taux de chute GLOBAL** (`taux_chute_global`) : la réunion des deux
-   sous-univers disjoints — matchés inventaire + récupérés N+1, **hors
-   consigne « à supprimer » et hors statut inventaire NON** (sans-consigne
-   reconnue inclus). Les composantes s'additionnent exactement :
-   `metrics_pm_* = chute_inv_pm_* + chute_n1_pm_*`.
+1. **LE taux de chute** (`taux_chute_inventaire`) : matchés du MRM de
+   l'exercice courant, hors « à supprimer » / statut NON. C'est le taux de
+   la revue auditée — **toutes les grandeurs globales (niveaux de PM, écart,
+   graphes 3 et 7) se calculent sur cet univers**.
+2. **Taux de chute N+1** (`taux_chute_n1`, **analyse séparée, HORS stats
+   globales**) : récupérés `CPT_LATE`, hors « à supprimer » (consigne N+1).
+   Accompagné de son propre **suivi des consignes N+1** (`n1_consignes` :
+   KEEP/ADD/STUDY = conformes, DELETE = encore au compte). Ses métriques se
+   lisent dans les blocs dédiés (`chute_n1_*`, tables `chute_par_exercice` /
+   `suivi_n1`, bloc N+1 de `chute_par_clause`).
 
-Les exclus gardent leur **analyse à part** : « à supprimer » retrouvées →
-conformité (« encore au compte ») + taux de suppression effective (§5.3) ;
-repêchés statut NON → analyse dédiée `recup_statut_non` (§1).
+Les autres exclus gardent leur **analyse à part** : « à supprimer »
+retrouvées → conformité (« encore au compte ») + taux de suppression
+effective (§5.3) ; repêchés statut NON → analyse dédiée `recup_statut_non`
+(§1) — comme les N+1, ils ne rentrent pas dans les stats globales.
 
 Le **par-consigne** (table consignes, graphes 4/5/9) porte exclusivement
 l'**exercice courant** : la consigne d'un récupéré N+1 vient de l'inventaire
@@ -202,52 +202,54 @@ pas prises.
 ```
 taux_chute_inventaire = (Σ_consignes_KAS écarts + Σ_sans_consigne écarts)
                         / (Σ_consignes_KAS PM_MRM + Σ_sans_consigne PM_MRM)
-taux_chute_global     = (écart_inventaire + écart_N+1) / (PM_MRM_inv + PM_MRM_N+1)
+taux_chute_n1         = écart_N+1 / PM_MRM_N+1          (analyse séparée)
 ```
 
-> ✅ **Résolu** : double auto-contrôle à chaque run (`chute_coherente`,
-> warning sinon) — (1) chute inventaire == Σ consignes KAS + sans consigne ;
-> (2) global == inventaire ⊕ N+1 (sous-univers disjoints, composantes
-> additives). Le bloc sans consigne est tracé dans `hors_consigne_*`
-> (inventaire) et `n1_sans_consigne` (N+1) ; la décomposition par exercice
-> dans `chute_inv_*` / `chute_n1_*` (table `chute_par_exercice`).
+> ✅ **Résolu** : auto-contrôle à chaque run (`chute_coherente`, warning
+> sinon) — chute == Σ consignes KAS + sans consigne (même univers : matchés
+> inventaire courant hors « à supprimer » / statut NON). Le bloc sans
+> consigne est tracé dans `hors_consigne_*` (inventaire) et
+> `n1_sans_consigne` (N+1) ; les deux exercices dans `metrics_*` /
+> `chute_n1_*` (table `chute_par_exercice`).
 
 La ventilation **par clause** (`chute_par_clause`, graphe 3) porte la même
-décomposition : trois blocs `EXERCICE` (« Inventaire courant » / « Récupérés
-N+1 » / « Global (inv. + N+1) », ce dernier = Σ par clause des deux premiers).
-Dans chaque bloc, Σ clauses (Σ écart / Σ PM MRM) == le taux correspondant du
-§4.2, et les poids PM se lisent dans le bloc.
+séparation : deux blocs `EXERCICE` (« Inventaire courant » = stats globales /
+« Récupérés N+1 » = analyse séparée). Dans chaque bloc, Σ clauses (Σ écart /
+Σ PM MRM) == le taux correspondant du §4.2, et les poids PM se lisent dans
+le bloc. Le graphe 3 ne trace que le bloc inventaire.
 
 ### 4.3 Périmètre des consignes
 - **KEEP / ADD / STUDY** : chute pertinente (la PM doit être justifiée au
-  compte). Entrent dans le taux de chute par consigne **et** dans le global.
+  compte). Entrent dans le taux de chute par consigne **et** dans le taux
+  principal.
 - **Sans consigne reconnue** (`MRM_ACTION` null/inconnue) : le dossier a matché,
-  sa PM est comparable → **inclus dans le global** (tracé à part, pas de
+  sa PM est comparable → **inclus dans la base chute** (tracé à part, pas de
   consigne à laquelle l'imputer).
 - **DELETE** : la PM aurait dû être **supprimée** ; un écart « PM_MRM −
   PM_CPT » n'a pas le sens d'une chute. → **exclue de tous les taux de
-  chute** (inventaire, N+1, global), qu'elle soit retrouvée au compte ou
+  chute** (inventaire comme N+1), qu'elle soit retrouvée au compte ou
   portée par un N+1. Analyse à part : conformité (« encore au compte ») et
   *taux de suppression effective* (§5.3) ; les DELETE conformes (absentes du
   compte) n'ont jamais matché et ne pèsent dans aucune PM.
 - **Statut inventaire NON** : PM MRM = 0, non remonté à la direction
-  financière → **exclu du global** (structurellement déjà hors matching ;
-  l'exclusion est aussi explicite dans l'univers de chute).
+  financière → **exclu de la base chute** (structurellement déjà hors
+  matching ; l'exclusion est aussi explicite dans l'univers de chute).
 
 ### 4.4 Niveaux de PM
 - **PM MRM**, **PM CPT** et **écart** (`PM_MRM − PM_CPT`) sur **l'univers du
-  taux de chute global** : ce sont les **composantes exactes** du taux —
-  `écart / PM_MRM × 100 == taux_chute_global` partout (synthèse, métriques,
-  graphiques), avec la décomposition inventaire / N+1 affichée en regard.
-  Aucun % affiché sur ce bloc (les ratios restitués sont les trois taux du
-  §4.2 + le par-consigne).
+  taux de chute** (matchés inventaire courant) : ce sont les **composantes
+  exactes** du taux — `écart / PM_MRM × 100 == taux_chute_inventaire`
+  partout (synthèse, métriques, graphiques). Aucun % affiché sur ce bloc
+  (les ratios restitués sont les taux du §4.2 + le par-consigne). Les
+  niveaux de PM des récupérés N+1 sont dans leur bloc séparé (`chute_n1_*`).
 - **Bulle RETROUVÉS ≠ base du taux de chute.** La bulle centrale montre
   **tous les retrouvés** (`trouves_nb = match_nb + late_nb`, PM
   `trouves_pm_mrm` / `trouves_pm_cpt`) : c'est la vision « justification du
-  compte ». La **base chute globale** (`metrics_nb`, `metrics_pm_*`) en est
-  le sous-ensemble hors « à supprimer » / statut NON, détaillée dans le bloc
-  NIVEAUX DE PM. Les deux jeux de clés sont exposés (`NB/PM_*_RETROUVES` et
-  `NB/PM_*_BASE_CHUTE`) ; leur différence = les « à supprimer » retrouvées.
+  compte ». La **base chute** (`metrics_nb`, `metrics_pm_*`) = matchés
+  inventaire courant hors « à supprimer » / statut NON, détaillée dans le
+  bloc NIVEAUX DE PM. Les deux jeux de clés sont exposés
+  (`NB/PM_*_RETROUVES` et `NB/PM_*_BASE_CHUTE`) ; leur différence = les
+  « à supprimer » retrouvées + les récupérés N+1.
 
 ---
 
@@ -276,15 +278,16 @@ Dans chaque bloc, Σ clauses (Σ écart / Σ PM MRM) == le taux correspondant du
 - **Formule** : `pct_conformite = nb(conformes) / nb(univers consigne)`.
 - **Colonnes dédiées** (`consignes`, `NATURE_KO`) : `nb_conformes`, `nb_ko` —
   avec `nb_total = nb_conformes + nb_ko`.
-- **Deux univers, réconciliés à l'affichage.** La restitution sépare
-  explicitement les deux périmètres au lieu de les mélanger sur une ligne :
-  - **CONFORMITÉ** (inventaire courant) : `total`, `conformes`, `%conf`, reste.
-  - **PROVISIONNEMENT** (inventaire + récupérés N+1) : `base`, `dont N+1`,
-    `PM MRM`, `PM CPT`, `chute`.
-  Pour KEEP / ADD / STUDY les conformes de l'inventaire sont exactement les
-  matchés inventaire de la base chute, d'où la réconciliation directe :
-  **`base = conformes + dont N+1`** (les récupérés N+1 servent au taux de chute
-  et à la volumétrie PM, pas à la conformité). DELETE : base PM non pertinente.
+- **Deux lectures, même exercice.** La restitution sépare explicitement les
+  deux lectures au lieu de les mélanger sur une ligne — toutes deux sur
+  l'**inventaire courant pur** :
+  - **CONFORMITÉ** : `total`, `conformes`, `%conf`, reste.
+  - **PROVISIONNEMENT** : `base` (matchés de la consigne), `PM MRM`,
+    `PM CPT`, `chute`.
+  Pour KEEP / ADD / STUDY la base PM est exactement les conformes (matchés
+  inventaire courant de la consigne) : **`base = conformes`**. DELETE : base
+  PM non pertinente. Les récupérés N+1 n'apparaissent nulle part ici (suivi
+  et chute séparés, bloc N+1).
 - **Limite** : conformité = présence/absence, indépendante du montant.
 
 ### 5.2 Conformité globale
@@ -300,36 +303,40 @@ Dans chaque bloc, Σ clauses (Σ écart / Σ PM MRM) == le taux correspondant du
 
 ---
 
-## 6. Ventilations détaillées (tables d'analyse, ventilées par CLAUSE × TYPE_CLAUSE)
+## 6. Tables métriques exportées (modules/metrics.py — toutes_metriques)
+
+Les 13 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
+Parquet / Excel / Delta) :
 
 | Table | Problématique | Univers |
 |---|---|---|
-| `ratios_globaux` | les ratios de tête (chute global, conformité globale, couverture, récupération) avec numérateur/dénominateur explicites | univers de chaque ratio (cf. LECTURE) |
-| `suivi_consignes` | conformité + PM + chute par consigne | conformité : matchés + missing ; PM/chute : `MATCHÉS + CPT_LATE` |
-| `suivi_consignes_global` | ratios de suivi des consignes toutes clauses confondues | mêmes univers que `suivi_consignes` |
-| `taux_chute` | chute par consigne (sous/sur/conforme, poids) | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
-| `chute_par_clause` | chute par clause × exercice (3 blocs : inventaire / N+1 / global — Σ clauses d'un bloc = taux du bloc, cf. §4.2) | univers de chute global, décomposé par exercice |
-| `consignes_pm` | chute par consigne × catégorie × tranche PM | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
-| `provisionnement` | sous/sur/conforme par consigne | `MATCHÉS + CPT_LATE`, KEEP/ADD/STUDY |
-| `ecarts_tranches` | distribution des écarts par tranche € | sous/sur-provisionnés |
-| `delete_non_suivies` | DELETE matché (PM non supprimée) | `MRM_DELETE ∩ MATCHÉS` |
-| `ventilation_cpt_only` | concentration PM des orphelins compte | `CPT_ONLY` |
-| `obs_tardives` | sinistres clos avant inventaire N+1 | `CPT_OBS_TARDIVE` |
-| `recup_statut_non` | CPT récupérés via MRM statut NON : conformité par consigne × étape de repêchage | `CPT_RECUP_NON` |
-| `recup_statut_non_detail` | enjeu PM compte des récupérés NON (mois de survenance × garantie × tranche PM) | `CPT_RECUP_NON` |
+| `synthese` | tous les KPI en 1 ligne / run (historisable) | univers de chaque ratio |
+| `taux_chute` | LE taux de chute + composantes PM (base chute, retrouvés, totaux) ; N+1 en regard | base chute (§4.2) |
+| `chute_par_exercice` | 1 ligne / exercice : inventaire courant (stats globales), N+1 (analyse séparée) | univers de chute, par exercice |
+| `suivi_n1` | consignes des récupérés N+1 (analyse séparée) | `CPT_LATE` hors statut NON |
+| `consignes` | conformité + PM + chute par consigne, exercice courant pur | conformité : matchés + missing ; PM/chute : matchés inventaire courant |
+| `compte_justification` | décomposition du compte (retrouvés, N+1, repêchés, clos, anomalies) | compte entier |
+| `couverture_mrm` | part de la revue retrouvée + non retrouvés par consigne | `MATCHÉS + MRM_MISSING` (+ DELETE retrouvées) |
+| `chute_par_clause` | chute par clause × exercice (2 blocs : inventaire courant = stats globales / N+1 = analyse séparée — Σ clauses d'un bloc = taux du bloc, cf. §4.2) | univers de chute, par exercice |
+| `chute_par_consigne` / `pm_par_consigne` | chute et PM par consigne pertinente (vues de `consignes`) | matchés inventaire courant, KEEP/ADD/STUDY |
+| `conformite_consignes` / `conformite_globale` | application des consignes (détail + segments) | exercice courant (§5) |
+| `anomalies_cpt_only` | anomalies par mois de survenance (effet fin d'année) | `CPT_ONLY` |
 
 ---
 
 ## 7. Cohérence d'agrégation (multi-base / multi-inventaire)
 
 - **Intégration N+1** : les `CPT_LATE` sont des dossiers de l'inventaire suivant
-  rapatriés ; ils entrent dans l'univers métriques `MATCHÉS + CPT_LATE`
-  **partout** (chute, niveaux de PM, récupération). Aucun calcul de chute ne
-  doit les omettre (sinon incohérence global ↔ consigne, cf. §4.2).
-- **Additivité par clause** : chaque table est ventilée par
+  rapatriés ; ils comptent dans la **justification du compte** (bulle
+  RETROUVÉS, taux de récupération §3) mais sont **HORS stats globales de
+  chute** : leur chute et leur suivi de consignes sont une analyse séparée
+  (`chute_n1_*`, `n1_consignes`, cf. §4.2). Aucun calcul global ne doit les
+  réintégrer (sinon incohérence chute ↔ consigne).
+- **Additivité par clause** : les tables par clause portent
   `(CLAUSE, TYPE_CLAUSE)` ; les % sont calculés **dans le scope de chaque
-  clause** (fenêtre partitionnée). La somme des numérateurs/dénominateurs par
-  clause = total → on peut agréger plusieurs clauses/bases sans recompter.
+  clause** (et de chaque exercice pour `chute_par_clause`). La somme des
+  numérateurs/dénominateurs par clause = total → on peut agréger plusieurs
+  clauses/bases sans recompter.
 - **Invariant de cohérence** : `compute_synthese` vérifie que toute ligne tombe
   dans exactement une catégorie connue (`classified_rows == total_rows`) ; sinon
   un `TYPE_RECONCILIATION` inattendu est signalé.
@@ -345,15 +352,13 @@ Dans chaque bloc, Σ clauses (Σ écart / Σ PM MRM) == le taux correspondant du
 - **JSON** : une ligne par enregistrement, par table (`export_json`). ✅
 - **Base de données** : table Delta metastore (une par analyse).
 
-### 8.2 Ce qui va en base (proposition à valider)
-- Tables ventilées par clause (`suivi_consignes`, `taux_chute`,
-  `consignes_pm`, `provisionnement`, `delete_non_suivies`,
-  `ventilation_cpt_only`, `obs_tardives`).
-- Une table **`synthese_indicateurs`** ✅ : les scalaires (taux de couverture,
-  récupération, chute global, conformité, niveaux de PM, volumétries), une ligne
-  par run (date d'inventaire + libellé périmètre) → historisation et suivi dans
-  le temps. Construite par `kpi_export.build_synthese_indicateurs`, incluse dans
-  `collect_analyses` (donc restituée + exportée tous formats + Delta).
+### 8.2 Ce qui va en base
+- Les 13 tables du §6, une table Delta par métrique :
+  `<schema>.itip_metric_<nom>_<perim>` (connexion Power BI via SQL Warehouse).
+- La table **`synthese`** ✅ tient lieu d'indicateurs scalaires : taux de
+  couverture, récupération, chute (+ N+1 séparé), conformité, niveaux de PM,
+  volumétries — une ligne par run (date d'inventaire) → historisation et
+  suivi dans le temps.
 
 ### 8.3 Qualité « présentation »
 - Libellés explicites, ordre stable, pourcentages arrondis à 0,1.
@@ -365,10 +370,12 @@ Dans chaque bloc, Σ clauses (Σ écart / Σ PM MRM) == le taux correspondant du
 
 ## 9. Décisions — tranchées
 
-1. **Taux de chute global** = **KEEP + ADD + STUDY** uniquement ; DELETE suivi à
-   part (taux de suppression effective). ✅
-2. **Univers chute unique = `MATCHÉS + CPT_LATE`** des deux côtés (global et par
-   consigne) — incohérence corrigée (`_filter_matched_keep_add_study` et
-   `compute_synthese.consigne` alignés). ✅
+1. **Taux de chute** = **KEEP + ADD + STUDY** (+ sans consigne reconnue) ;
+   DELETE suivi à part (taux de suppression effective). ✅
+2. **Univers chute unique = `MATCHÉS` (inventaire courant) hors « à
+   supprimer » / statut NON** des deux côtés (taux principal et par
+   consigne) ; les récupérés N+1 et les repêchés statut NON sont des
+   analyses séparées, hors stats globales (décision du 12/06/2026,
+   remplace l'ancien global inv ⊕ N+1). ✅
 3. **Synthèse en base** : table `synthese_indicateurs` (1 ligne / run). ✅
 4. **JSON** : format ajouté en sortie. ✅

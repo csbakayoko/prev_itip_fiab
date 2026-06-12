@@ -7,7 +7,7 @@ Produit à chaque run :
      RETROUVÉS = tous les matchés + tous les N+1 ; la base du taux de chute
      (hors « à supprimer » au compte) est détaillée dans les indicateurs.
   2. Un bloc d'INDICATEURS (taux de couverture, récupération tardive, taux de
-     chute global, niveaux de PM).
+     chute, niveaux de PM).
   3. Un bloc SUIVI DES CONSIGNES (taux de conformité par consigne, avec la
      volumétrie des dossiers à PM non nulle).
 
@@ -19,14 +19,12 @@ Décodage des grandeurs (depuis df_result + TYPE_RECONCILIATION) :
     COMPTE   = MATCHÉS + récupérés N+1 (CPT_LATE) + obs tardives IT (anomalie,
                CPT_OBS_TARDIVE) + CPT_ONLY définitifs
 
-    Univers CHUTE GLOBAL = matchés inventaire courant + récupérés N+1, hors
-    consigne « à supprimer » et hors statut inventaire NON — réunion de deux
-    sous-univers disjoints analysés SÉPARÉMENT : l'exercice courant (taux de
-    chute + suivi des consignes, purs — rien du N+1 ne s'y mélange) et les
-    récupérés N+1 (leur propre taux de chute + leur propre suivi de
-    consignes : leur consigne vient de l'inventaire N+1, pas de la revue
-    auditée). Les « à supprimer » retrouvées et les repêchés statut NON sont
-    analysés à part.
+    Univers CHUTE (stats globales) = matchés de l'inventaire courant, hors
+    consigne « à supprimer » et hors statut inventaire NON. Les récupérés N+1
+    (CPT_LATE) sont une ANALYSE SÉPARÉE, HORS stats globales : leur propre
+    taux de chute + leur propre suivi de consignes (la consigne d'un N+1
+    vient de l'inventaire N+1, pas de la revue auditée). Les « à supprimer »
+    retrouvées et les repêchés statut NON sont analysés à part.
     Les obs tardives IT n'ont jamais matché → EXCLUES des métriques et des taux.
 
     PM : côté MRM (MRM_PM) pour les ventilations MRM, côté CPT (CPT_PM) pour les CPT.
@@ -158,19 +156,14 @@ def compute_synthese(df_result: DataFrame) -> dict:
     pm_match_mrm = agg("pm_mrm", lambda r: T(r) in match)
     pm_match_cpt = agg("pm_cpt", lambda r: T(r) in match)
 
-    # Univers MÉTRIQUES PM = matchés légitimes + récupérés N+1 réels (CPT_LATE).
-    # Les obs tardives IT (CPT_OBS_TARDIVE) sont EXCLUES : jamais matchées.
-    in_metrics = lambda r: T(r) in match or T(r) == "CPT_LATE"
-
-    # Univers CHUTE (global) = matchés inventaire courant + récupérés N+1,
-    # hors consigne « à supprimer » et hors statut inventaire NON — réunion de
-    # deux sous-univers DISJOINTS, chacun avec son propre taux (analyse
-    # séparée) : inventaire courant et N+1. Les « à supprimer » retrouvées
-    # (inv. comme N+1) et les repêchés statut NON sont analysés à part ; les
-    # sans-consigne reconnue restent inclus (A(r) null ≠ "MRM_DELETE").
-    in_chute     = lambda r: in_metrics(r) and A(r) != "MRM_DELETE" and not N(r)
-    in_chute_inv = lambda r: in_chute(r) and T(r) in match
-    in_chute_n1  = lambda r: in_chute(r) and T(r) == "CPT_LATE"
+    # Univers CHUTE (stats globales) = matchés de l'inventaire courant, hors
+    # consigne « à supprimer » et hors statut inventaire NON ; les sans-consigne
+    # reconnue restent inclus (A(r) null ≠ "MRM_DELETE"). Les récupérés N+1
+    # sont une ANALYSE SÉPARÉE (leur propre taux + suivi de consignes), HORS
+    # stats globales ; les « à supprimer » retrouvées et les repêchés statut
+    # NON sont analysés à part.
+    in_chute    = lambda r: T(r) in match and A(r) != "MRM_DELETE" and not N(r)
+    in_chute_n1 = lambda r: T(r) == "CPT_LATE" and A(r) != "MRM_DELETE" and not N(r)
 
     # Totaux exhaustifs des deux univers d'entrée.
     #   MRM en entrée   = matchés + à supprimer + non mappés (CPT_LATE exclu : il
@@ -242,29 +235,21 @@ def compute_synthese(df_result: DataFrame) -> dict:
     total_kas = agg("nb", lambda r: A(r) in _KAS and (T(r) in match or T(r) == "MRM_MISSING"))
     conf_kas  = agg("nb", lambda r: A(r) in _KAS and T(r) in match)
 
-    # ── Taux de chute (tous matchés hors « à supprimer » / statut NON) ────────
-    # UNIVERS DE RÉFÉRENCE UNIQUE pour toute grandeur "globale" de chute :
-    # taux, niveaux de PM et écart partagent ces mêmes composantes partout
+    # ── Taux de chute (matchés inventaire courant hors « à supprimer » / NON) ─
+    # UNIVERS DE RÉFÉRENCE UNIQUE pour toute grandeur globale de chute : taux,
+    # niveaux de PM et écart partagent ces mêmes composantes partout
     # (synthèse, métriques, graphiques).
     pm_mrm_chute = agg("pm_mrm", in_chute)
     pm_cpt_chute = agg("pm_cpt", in_chute)
     nb_chute     = agg("nb",     in_chute)
-    # Décomposition de la base chute : matchés inventaire courant vs récupérés
-    # N+1, pour expliciter que "matchés (base chute) = matchés inv. + N+1".
-    nb_chute_late = agg("nb", lambda r: in_chute(r) and T(r) == "CPT_LATE")
-    nb_chute_inv  = nb_chute - nb_chute_late
-    global_delta = pm_mrm_chute - pm_cpt_chute
-    taux_chute_global = _pct(global_delta, pm_mrm_chute)
+    chute_delta  = pm_mrm_chute - pm_cpt_chute
+    taux_chute_inv = _pct(chute_delta, pm_mrm_chute)
 
-    # Décomposition par exercice : chute inventaire courant et chute N+1
-    # (analyses séparées). Sous-univers disjoints → leurs composantes
-    # s'additionnent exactement dans le global.
-    pm_mrm_inv = agg("pm_mrm", in_chute_inv)
-    pm_cpt_inv = agg("pm_cpt", in_chute_inv)
-    pm_mrm_n1  = agg("pm_mrm", in_chute_n1)
-    pm_cpt_n1  = agg("pm_cpt", in_chute_n1)
-    taux_chute_inv = _pct(pm_mrm_inv - pm_cpt_inv, pm_mrm_inv)
-    taux_chute_n1  = _pct(pm_mrm_n1 - pm_cpt_n1, pm_mrm_n1)
+    # Récupérés N+1 : analyse séparée, HORS stats globales — leur propre taux.
+    nb_n1     = agg("nb",     in_chute_n1)
+    pm_mrm_n1 = agg("pm_mrm", in_chute_n1)
+    pm_cpt_n1 = agg("pm_cpt", in_chute_n1)
+    taux_chute_n1 = _pct(pm_mrm_n1 - pm_cpt_n1, pm_mrm_n1)
 
     # Suivi des consignes des récupérés N+1 (analyse séparée) : ventilation
     # des CPT_LATE par consigne N+1. KEEP/ADD/STUDY = conformes (retrouvés) ;
@@ -280,20 +265,21 @@ def compute_synthese(df_result: DataFrame) -> dict:
     n1_sans_consigne = agg("nb", lambda r: T(r) == "CPT_LATE" and not N(r)
                            and A(r) not in _KAS and A(r) != "MRM_DELETE")
 
-    # Base chute INVENTAIRE hors consignes KEEP/ADD/STUDY : matchés courants
-    # sans consigne reconnue (MRM_ACTION null/inconnue — DELETE exclu de la
-    # base). Tracés à part pour la réconciliation taux_chute_inventaire =
+    # Base chute hors consignes KEEP/ADD/STUDY : matchés courants sans
+    # consigne reconnue (MRM_ACTION null/inconnue — DELETE exclu de la base).
+    # Tracés à part pour la réconciliation taux_chute_inventaire =
     # Σ consignes + hors consigne ; l'équivalent N+1 est n1_sans_consigne.
-    hors_consigne = lambda r: in_chute_inv(r) and A(r) not in _KAS
+    hors_consigne = lambda r: in_chute(r) and A(r) not in _KAS
     nb_hc     = agg("nb",     hors_consigne)
     pm_mrm_hc = agg("pm_mrm", hors_consigne)
     pm_cpt_hc = agg("pm_cpt", hors_consigne)
 
-    # ── AUTO-CONTRÔLE : chute globale == Σ consignes KAS + hors consigne ──────
-    # Global et par-consigne partagent le MÊME univers (matchés + CPT_LATE,
-    # hors DELETE / statut NON) → le global doit être l'agrégat exact des
-    # consignes KAS plus le bloc hors consigne. Tout écart > tolérance signale
-    # une divergence d'univers (régression) : logué et remonté dans la synthèse.
+    # ── AUTO-CONTRÔLE : chute == Σ consignes KAS + hors consigne ─────────────
+    # Le taux de chute et le par-consigne partagent le MÊME univers (matchés
+    # inventaire courant, hors DELETE / statut NON) → le taux doit être
+    # l'agrégat exact des consignes KAS plus le bloc hors consigne. Tout écart
+    # > tolérance signale une divergence d'univers (régression) : logué et
+    # remonté dans la synthèse.
     _kas_consignes = (keep, study, add)               # DELETE exclu de la chute
     sum_pm_mrm = sum(c["pm_mrm"] for c in _kas_consignes) + pm_mrm_hc
     sum_pm_cpt = sum(c["pm_cpt"] for c in _kas_consignes) + pm_cpt_hc
@@ -301,20 +287,14 @@ def compute_synthese(df_result: DataFrame) -> dict:
     taux_chute_consignes = _pct(sum_delta, sum_pm_mrm)
     _eps = 0.01                                        # tolérance € (arrondis flottants)
     chute_coherente = (
-        # Σ consignes (exercice courant) + sans consigne == chute inventaire…
-        abs(sum_pm_mrm - pm_mrm_inv) <= _eps
-        and abs(sum_pm_cpt - pm_cpt_inv) <= _eps
-        # …et inventaire ⊕ N+1 == global (sous-univers disjoints, additifs).
-        and abs((pm_mrm_inv + pm_mrm_n1) - pm_mrm_chute) <= _eps
-        and abs((pm_cpt_inv + pm_cpt_n1) - pm_cpt_chute) <= _eps
+        abs(sum_pm_mrm - pm_mrm_chute) <= _eps
+        and abs(sum_pm_cpt - pm_cpt_chute) <= _eps
     )
     if not chute_coherente:
         logger.warning(
-            "INCOHÉRENCE taux de chute : inventaire %.2f/%.2f ≠ Σ consignes "
-            "%.2f/%.2f, ou global %.2f/%.2f ≠ inv+N+1 %.2f/%.2f (PM MRM/CPT)",
-            pm_mrm_inv, pm_cpt_inv, sum_pm_mrm, sum_pm_cpt,
-            pm_mrm_chute, pm_cpt_chute,
-            pm_mrm_inv + pm_mrm_n1, pm_cpt_inv + pm_cpt_n1,
+            "INCOHÉRENCE taux de chute : base %.2f/%.2f ≠ Σ consignes + hors "
+            "consigne %.2f/%.2f (PM MRM/CPT)",
+            pm_mrm_chute, pm_cpt_chute, sum_pm_mrm, sum_pm_cpt,
         )
 
     # RETROUVÉS = tous les matchés (inventaire courant, consignes confondues)
@@ -384,34 +364,30 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "taux_couverture_compte"  : _pct(nb_match, nb_match + nb_late + nb_def),
         "taux_recup_tardive"      : _pct(nb_late, nb_late + nb_def),
         "taux_recup_global"       : _pct(nb_match + nb_late, nb_match + nb_late + nb_def),
-        "taux_chute_global"       : taux_chute_global,
+        "taux_chute_inventaire"   : taux_chute_inv,
         "taux_chute_consignes"    : taux_chute_consignes,   # Σ chutes par consigne (contrôle)
-        "chute_coherente"         : chute_coherente,        # global == Σ consignes ?
+        "chute_coherente"         : chute_coherente,        # chute == Σ consignes ?
         "conformite_globale"      : _pct(conf_kas, total_kas),
-        # ── Niveaux de PM — UNIVERS DU TAUX DE CHUTE GLOBAL ──
-        # Mêmes composantes que taux_chute_global (tous matchés + N+1, hors
-        # « à supprimer » / statut NON) : Écart / PM MRM × 100 ==
-        # taux_chute_global, partout. Pas de pourcentage affiché ici (le seul
-        # ratio de chute restitué est le taux de chute global + le par-consigne).
+        # ── Niveaux de PM — UNIVERS DU TAUX DE CHUTE (stats globales) ──
+        # Mêmes composantes que taux_chute_inventaire (matchés inventaire
+        # courant, hors « à supprimer » / statut NON) : Écart / PM MRM × 100 ==
+        # taux_chute_inventaire, partout. Pas de pourcentage affiché ici (les
+        # ratios de chute restitués sont le taux + le par-consigne).
         "metrics_pm_mrm"   : pm_mrm_chute,
         "metrics_pm_cpt"   : pm_cpt_chute,
-        "metrics_pm_ecart" : global_delta,
+        "metrics_pm_ecart" : chute_delta,
         "metrics_nb"       : nb_chute,
-        "metrics_match_nb" : nb_chute_inv,    # matchés inventaire courant (base chute)
-        "metrics_late_nb"  : nb_chute_late,   # récupérés N+1 inclus dans la base chute
         # Base chute hors consignes KAS : sans consigne reconnue
-        # (réconciliation : global = Σ consignes + hors consigne).
+        # (réconciliation : chute = Σ consignes + hors consigne).
         "hors_consigne_nb"     : nb_hc,
         "hors_consigne_pm_mrm" : pm_mrm_hc,
         "hors_consigne_pm_cpt" : pm_cpt_hc,
-        # Décomposition par exercice (sous-univers disjoints, Σ = global) :
-        "chute_inv_pm_mrm"      : pm_mrm_inv,
-        "chute_inv_pm_cpt"      : pm_cpt_inv,
-        "taux_chute_inventaire" : taux_chute_inv,
+        # Récupérés N+1 : analyse séparée, HORS stats globales (taux + suivi
+        # de consignes propres).
+        "chute_n1_nb"           : nb_n1,
         "chute_n1_pm_mrm"       : pm_mrm_n1,
         "chute_n1_pm_cpt"       : pm_cpt_n1,
         "taux_chute_n1"         : taux_chute_n1,
-        # Suivi des consignes des récupérés N+1 (analyse séparée).
         "n1_consignes"          : n1_consignes,
         "n1_sans_consigne"      : n1_sans_consigne,
         # ── Suivi des consignes (détail) ──
@@ -435,9 +411,9 @@ def kas_totaux(d: dict) -> dict:
     """Totaux KEEP+ADD+STUDY depuis les scalaires de compute_synthese.
 
     Sert à la conformité globale (nb, conformes). Les champs PM sont les
-    Σ des consignes KAS : pour la chute GLOBALE, utiliser d["metrics_pm_*"]
-    (univers = tous matchés hors « à supprimer » / statut NON, qui inclut
-    aussi les dossiers sans consigne reconnue — d["hors_consigne_*"])."""
+    Σ des consignes KAS : pour la chute, utiliser d["metrics_pm_*"]
+    (univers = matchés inventaire courant hors « à supprimer » / statut NON,
+    qui inclut aussi les sans consigne reconnue — d["hors_consigne_*"])."""
     kas = [d["consignes"][k] for k in ("À conserver", "À étudier", "À ajouter")]
     return {
         "nb"     : sum(c["nb"]     for c in kas),
@@ -576,28 +552,27 @@ def _render_indicateurs(d: dict) -> str:
         f"    Taux de récupération tardive (retrouvés N+1 / restes) : {d['taux_recup_tardive']:>5} %",
         f"    Taux de récupération global (retrouvés + N+1 / compte): {d['taux_recup_global']:>5} %",
         "  PROVISIONNEMENT",
-        f"    Taux de chute inventaire courant                       : {d['taux_chute_inventaire']:>5} %",
-        f"    Taux de chute récupérés N+1 (analyse séparée)          : {d['taux_chute_n1']:>5} %",
-        f"    Taux de chute GLOBAL (inv. + N+1, hors suppr. / NON)   : {d['taux_chute_global']:>5} %",
-        f"      ↳ contrôle Σ consignes (exercice courant) : {d['taux_chute_consignes']:>5} %  "
+        f"    Taux de chute (inventaire courant, hors suppr. / NON)  : {d['taux_chute_inventaire']:>5} %",
+        f"      ↳ contrôle Σ consignes : {d['taux_chute_consignes']:>5} %  "
         + ("✔ cohérent" if d["chute_coherente"] else "✘ INCOHÉRENT (voir logs)"),
+        f"    Taux de chute récupérés N+1 (analyse séparée)          : {d['taux_chute_n1']:>5} %",
         f"    Conformité globale des consignes                       : {d['conformite_globale']:>5} %",
         "  (dénominateurs compte hors sinistres clos avant inventaire suivant)",
         "",
-        f"NIVEAUX DE PM — base du taux de chute GLOBAL ({_n(d['metrics_nb'])} dossiers = "
-        f"{_n(d['metrics_match_nb'])} inv. + {_n(d['metrics_late_nb'])} N+1 :",
-        "  retrouvés hors « à supprimer » et hors statut inventaire NON)",
-        f"  PM MRM   : {_n(d['metrics_pm_mrm']):>15} €   (inv. {_n(d['chute_inv_pm_mrm'])} € + N+1 {_n(d['chute_n1_pm_mrm'])} €)",
-        f"  PM CPT   : {_n(d['metrics_pm_cpt']):>15} €   (inv. {_n(d['chute_inv_pm_cpt'])} € + N+1 {_n(d['chute_n1_pm_cpt'])} €)",
+        f"NIVEAUX DE PM — base du taux de chute ({_n(d['metrics_nb'])} dossiers :",
+        "  matchés de l'inventaire courant, hors « à supprimer » et hors statut NON —",
+        "  récupérés N+1 et repêchés statut NON analysés à part)",
+        f"  PM MRM   : {_n(d['metrics_pm_mrm']):>15} €",
+        f"  PM CPT   : {_n(d['metrics_pm_cpt']):>15} €",
         f"  Écart    : {_n(d['metrics_pm_ecart']):>15} €",
         f"  (dont {_n(d['hors_consigne_nb'])} dossiers sans consigne reconnue — "
         f"PM MRM {_n(d['hors_consigne_pm_mrm'])} €, inclus dans la base)",
         "",
         f"RÉCUPÉRATION TARDIVE N+1 ({_n(d['late_nb'])} dossiers — analyse séparée, "
-        f"INCLUSE dans le global)",
+        f"HORS stats globales)",
         f"  Dossiers CPT orphelins retrouvés dans l'inventaire N+1  "
         f"(PM MRM {_n(d['late_pm_mrm'])} € | PM CPT {_n(d['late_pm_cpt'])} €)",
-        f"  Taux de chute N+1 : {d['taux_chute_n1']} %  (base {_n(d['metrics_late_nb'])} "
+        f"  Taux de chute N+1 : {d['taux_chute_n1']} %  (base {_n(d['chute_n1_nb'])} "
         f"hors « à supprimer », PM MRM {_n(d['chute_n1_pm_mrm'])} € | "
         f"PM CPT {_n(d['chute_n1_pm_cpt'])} €)",
         f"  Consignes N+1 : conserver {_n(d['n1_consignes']['À conserver'])} · "

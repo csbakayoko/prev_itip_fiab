@@ -15,13 +15,13 @@
 # MAGIC | Table | Contenu |
 # MAGIC |---|---|
 # MAGIC | `synthese` | 1 ligne / run — tous les KPI (chute, conformité, couvertures, retrouvés vs base chute) — **historisable** |
-# MAGIC | `taux_chute_global` | les 3 taux (inventaire / N+1 / global) + composantes PM (base chute, retrouvés, totaux) |
-# MAGIC | `chute_par_exercice` | 1 ligne / exercice (inventaire, N+1, global) — nb, PM, écart, taux |
+# MAGIC | `taux_chute` | LE taux (matchés inventaire courant) + composantes PM (base chute, retrouvés, totaux) ; N+1 en regard |
+# MAGIC | `chute_par_exercice` | 1 ligne / exercice (inventaire courant, N+1 séparé) — nb, PM, écart, taux |
 # MAGIC | `suivi_n1` | consignes des récupérés N+1 (analyse séparée), 1 ligne / consigne N+1 |
 # MAGIC | `consignes` | conformité + PM + chute (exercice courant pur), 1 ligne / consigne |
 # MAGIC | `compte_justification` | décomposition du compte (retrouvés, N+1, repêchés, clos, anomalies) |
 # MAGIC | `couverture_mrm` | part de la revue retrouvée au compte + non retrouvés par consigne |
-# MAGIC | `chute_par_clause` | taux de chute par CLAUSE × TYPE_CLAUSE × EXERCICE (inventaire / N+1 / global) |
+# MAGIC | `chute_par_clause` | taux de chute par CLAUSE × TYPE_CLAUSE × EXERCICE (inventaire courant / N+1 séparé) |
 # MAGIC | `chute_par_consigne` / `pm_par_consigne` | chute et PM par consigne pertinente |
 # MAGIC | `conformite_consignes` / `conformite_globale` | application des consignes (détail + segments) |
 # MAGIC | `anomalies_cpt_only` | anomalies par mois de survenance (effet fin d'année) |
@@ -124,7 +124,7 @@ assert d["coherent"], (
     f"Lignes non classées : {d['labels_inconnus']} — export interrompu."
 )
 assert d["chute_coherente"], (
-    "Taux de chute global ≠ Σ consignes + hors consigne — export interrompu (voir logs)."
+    "Taux de chute ≠ Σ consignes + hors consigne — export interrompu (voir logs)."
 )
 
 # COMMAND ----------

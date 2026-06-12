@@ -117,7 +117,7 @@ from modules import metrics
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Synthèse (1 ligne) + taux de chute global (PM MRM / PM Compte)
+# MAGIC ### Synthèse (1 ligne) + taux de chute (PM MRM / PM Compte)
 
 # COMMAND ----------
 
@@ -125,12 +125,12 @@ display(metrics.synthese(d))
 
 # COMMAND ----------
 
-display(metrics.taux_chute_global(d))
+display(metrics.taux_chute(d))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Chute par exercice (inventaire / N+1 / global) + suivi des consignes N+1
+# MAGIC ### Chute par exercice (inventaire courant / N+1 séparé) + suivi des consignes N+1
 
 # COMMAND ----------
 

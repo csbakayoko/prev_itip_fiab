@@ -21,7 +21,7 @@ Correspondance avec les 9 graphiques (modules.viz) :
     4. chute_par_consigne     → chute_par_consigne(d)
     5. conformite_consignes   → conformite_consignes(d)
     6. anomalies_cpt_only     → anomalies_cpt_only(df_result)
-    7. kpi_chute_globale      → taux_chute_global(d)
+    7. kpi_chute              → taux_chute(d)
     8. kpi_conformite_globale → conformite_globale(d)
     9. pm_par_consigne        → pm_par_consigne(d)
 
@@ -120,11 +120,13 @@ def _with_mrm_action(df: DataFrame) -> DataFrame:
 
 
 def _filter_chute_universe(df: DataFrame) -> DataFrame:
-    """Univers du taux de chute GLOBAL : matchés inventaire courant +
-    récupérés N+1, hors consigne « à supprimer » et hors statut inventaire
-    NON (même règle que kpi_export.compute_synthese). Les sans-consigne
-    reconnue (MRM_ACTION null) restent inclus. CPT_OBS_TARDIVE /
-    CPT_RECUP_NON exclus (jamais matchés / PM MRM = 0)."""
+    """Univers des taux de chute, les deux exercices réunis : matchés
+    inventaire courant (stats globales) + récupérés N+1 (analyse séparée),
+    hors consigne « à supprimer » et hors statut inventaire NON (même règle
+    que kpi_export.compute_synthese) — la séparation se fait ensuite par la
+    colonne EXERCICE. Les sans-consigne reconnue (MRM_ACTION null) restent
+    inclus. CPT_OBS_TARDIVE / CPT_RECUP_NON exclus (jamais matchés / PM MRM
+    = 0)."""
     cond = (
         F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS) + ["CPT_LATE"])
         # null-safe : une MRM_ACTION absente/inconnue reste dans l'univers.
@@ -146,6 +148,13 @@ def _mois_label_expr(date_col: str) -> F.Column:
     return expr
 
 
+# Libellés des deux EXERCICES de chute (chute_par_exercice, chute_par_clause) :
+# inventaire courant = les stats globales ; N+1 = analyse séparée.
+EXERCICE_INV    = "Inventaire courant"
+EXERCICE_N1     = "Récupérés N+1"
+_EXERCICE_ORDRE = {EXERCICE_INV: 0, EXERCICE_N1: 1}
+
+
 # ============================================================================
 # MÉTRIQUES SCALAIRES (reshape du dict de compute_synthese)
 # ============================================================================
@@ -155,8 +164,7 @@ def synthese(d: dict) -> pd.DataFrame:
     cons = d["consignes"]
     return pd.DataFrame([{
         "DATE_INVENTAIRE"        : d["date_inventaire"],
-        "TAUX_CHUTE_GLOBAL_PCT"  : d["taux_chute_global"],
-        "TAUX_CHUTE_INVENTAIRE_PCT" : d["taux_chute_inventaire"],
+        "TAUX_CHUTE_PCT"         : d["taux_chute_inventaire"],
         "TAUX_CHUTE_N1_PCT"      : d["taux_chute_n1"],
         "CONFORMITE_GLOBALE_PCT" : d["conformite_globale"],
         "TAUX_COUVERTURE_MRM_PCT"    : d["taux_couverture_mrm"],
@@ -164,7 +172,8 @@ def synthese(d: dict) -> pd.DataFrame:
         "TAUX_RECUP_TARDIVE_PCT" : d["taux_recup_tardive"],
         "TAUX_RECUP_GLOBAL_PCT"  : d["taux_recup_global"],
         # Retrouvés = tous les matchés + tous les N+1 (bulle de la synthèse) ;
-        # base chute = retrouvés hors « à supprimer » au compte.
+        # base chute = matchés inventaire courant hors « à supprimer » / NON
+        # (N+1 et repêchés statut NON : analyses séparées, hors stats globales).
         "NB_RETROUVES"           : d["trouves_nb"],
         "PM_MRM_RETROUVES"       : d["trouves_pm_mrm"],
         "PM_CPT_RETROUVES"       : d["trouves_pm_cpt"],
@@ -185,25 +194,23 @@ def synthese(d: dict) -> pd.DataFrame:
     }])
 
 
-def taux_chute_global(d: dict) -> pd.DataFrame:
-    """Taux de chute global, PM MRM et PM Compte (base chute + retrouvés) — graphe 7.
+def taux_chute(d: dict) -> pd.DataFrame:
+    """LE taux de chute, PM MRM et PM Compte (base chute + retrouvés) — graphe 7.
 
-    Base chute GLOBALE = matchés inventaire courant + récupérés N+1, hors
-    « à supprimer » et hors statut inventaire NON (sans-consigne inclus) —
-    réunion des deux sous-univers détaillés dans chute_par_exercice().
+    Base chute = matchés de l'inventaire courant, hors « à supprimer » et
+    hors statut inventaire NON (sans-consigne inclus). Les récupérés N+1
+    (TAUX_CHUTE_N1_PCT) sont une analyse séparée, hors stats globales.
     Retrouvés = tous les matchés + tous les N+1 (bulle de la synthèse).
     PM totales = grands totaux des deux univers d'entrée (MRM, Compte).
     """
     return pd.DataFrame([{
-        "TAUX_CHUTE_GLOBAL_PCT" : d["taux_chute_global"],
-        "TAUX_CHUTE_INVENTAIRE_PCT" : d["taux_chute_inventaire"],
+        "TAUX_CHUTE_PCT"        : d["taux_chute_inventaire"],
         "TAUX_CHUTE_N1_PCT"     : d["taux_chute_n1"],
         "PM_MRM_BASE_CHUTE"     : d["metrics_pm_mrm"],
         "PM_CPT_BASE_CHUTE"     : d["metrics_pm_cpt"],
         "ECART_BASE_CHUTE"      : d["metrics_pm_ecart"],
         "NB_BASE_CHUTE"         : d["metrics_nb"],
-        "NB_INVENTAIRE"         : d["metrics_match_nb"],
-        "NB_RECUP_N1"           : d["metrics_late_nb"],
+        "NB_RECUP_N1"           : d["chute_n1_nb"],
         "NB_HORS_CONSIGNE"      : d["hors_consigne_nb"],
         "NB_RETROUVES"          : d["trouves_nb"],
         "PM_MRM_RETROUVES"      : d["trouves_pm_mrm"],
@@ -214,18 +221,16 @@ def taux_chute_global(d: dict) -> pd.DataFrame:
 
 
 def chute_par_exercice(d: dict) -> pd.DataFrame:
-    """Taux de chute par exercice de matching : inventaire courant, récupérés
-    N+1 (analyse séparée) et global (réunion des deux sous-univers disjoints).
+    """Taux de chute par exercice de matching : inventaire courant (les stats
+    globales) et récupérés N+1 (analyse séparée, hors stats globales).
 
-    Une ligne par exercice — Σ des composantes inventaire + N+1 = global.
+    Une ligne par exercice — univers disjoints, chacun son taux.
     """
     rows = [
-        ("Inventaire courant", d["metrics_match_nb"],
-         d["chute_inv_pm_mrm"], d["chute_inv_pm_cpt"], d["taux_chute_inventaire"]),
-        ("Récupérés N+1",      d["metrics_late_nb"],
-         d["chute_n1_pm_mrm"],  d["chute_n1_pm_cpt"],  d["taux_chute_n1"]),
-        ("Global (inv. + N+1)", d["metrics_nb"],
-         d["metrics_pm_mrm"],   d["metrics_pm_cpt"],   d["taux_chute_global"]),
+        (EXERCICE_INV, d["metrics_nb"],
+         d["metrics_pm_mrm"],  d["metrics_pm_cpt"],  d["taux_chute_inventaire"]),
+        (EXERCICE_N1,  d["chute_n1_nb"],
+         d["chute_n1_pm_mrm"], d["chute_n1_pm_cpt"], d["taux_chute_n1"]),
     ]
     return pd.DataFrame([{
         "EXERCICE"       : lbl,
@@ -387,24 +392,16 @@ def conformite_consignes(d: dict) -> pd.DataFrame:
 # MÉTRIQUES PAR AXE (ré-agrégation Spark de df_result)
 # ============================================================================
 
-# Libellés des trois blocs EXERCICE de chute_par_clause — alignés sur
-# chute_par_exercice (mêmes sous-univers disjoints, cf. METRIQUES.md §4.2).
-EXERCICE_INV    = "Inventaire courant"
-EXERCICE_N1     = "Récupérés N+1"
-EXERCICE_GLOBAL = "Global (inv. + N+1)"
-_EXERCICE_ORDRE = {EXERCICE_INV: 0, EXERCICE_N1: 1, EXERCICE_GLOBAL: 2}
-
-
 def chute_par_clause(df_result: DataFrame, top: Optional[int] = None) -> pd.DataFrame:
     """Taux de chute par clause × exercice, trié par PM MRM — graphe 3.
 
-    Trois blocs EXERCICE : « Inventaire courant », « Récupérés N+1 » et
-    « Global (inv. + N+1) » (Σ des deux sous-univers disjoints). Même univers
-    et même formule agrégée que les trois taux de chute : dans chaque bloc,
-    Σ des lignes (Σ écart / Σ PM MRM) redonne le taux correspondant
-    (taux_chute_inventaire / taux_chute_n1 / taux_chute_global), et les poids
-    PM se lisent dans le bloc. top=N → ne garde que les N clauses de plus
-    forte PM MRM de chaque bloc.
+    Deux blocs EXERCICE : « Inventaire courant » (les stats globales) et
+    « Récupérés N+1 » (analyse séparée, hors stats globales). Même univers et
+    même formule agrégée que les taux de chute : dans chaque bloc, Σ des
+    lignes (Σ écart / Σ PM MRM) redonne le taux correspondant
+    (taux_chute_inventaire / taux_chute_n1), et les poids PM se lisent dans
+    le bloc. top=N → ne garde que les N clauses de plus forte PM MRM de
+    chaque bloc.
     """
     df = (
         _filter_chute_universe(_with_mrm_action(derive_clause_column(df_result)))
@@ -431,14 +428,9 @@ def chute_par_clause(df_result: DataFrame, top: Optional[int] = None) -> pd.Data
 
 
 def _finalise_chute_par_clause(pdf: pd.DataFrame, top: Optional[int] = None) -> pd.DataFrame:
-    """Ajoute le bloc global (Σ par clause des deux exercices, sous-univers
-    disjoints) puis taux et poids PM calculés DANS chaque bloc — pure pandas
+    """Taux et poids PM calculés DANS chaque bloc EXERCICE — pure pandas
     (vérifiable sans Spark)."""
-    mesures = ["nb_dossiers", "nb_sous", "nb_sur", "nb_conforme",
-               "pm_mrm", "pm_cpt", "ecart_signe"]
-    glob = pdf.groupby(["CLAUSE", "TYPE_CLAUSE"], as_index=False)[mesures].sum()
-    glob.insert(0, "EXERCICE", EXERCICE_GLOBAL)
-    pdf = pd.concat([pdf, glob], ignore_index=True)
+    pdf = pdf.copy()
     pdf[["pm_mrm", "pm_cpt", "ecart_signe"]] = pdf[["pm_mrm", "pm_cpt", "ecart_signe"]].round(2)
     pdf["taux_chute_pct"] = (
         (pdf["ecart_signe"] / pdf["pm_mrm"] * 100).where(pdf["pm_mrm"] != 0, 0.0).round(2)
@@ -500,7 +492,7 @@ def toutes_metriques(df_result: DataFrame, d: Optional[dict] = None) -> Dict[str
     d = d if d is not None else compute_synthese(df_result)
     return {
         "synthese"             : synthese(d),
-        "taux_chute_global"    : taux_chute_global(d),
+        "taux_chute"           : taux_chute(d),
         "chute_par_exercice"   : chute_par_exercice(d),
         "suivi_n1"             : suivi_n1(d),
         "consignes"            : consignes(d),
