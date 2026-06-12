@@ -106,7 +106,8 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
 - **Univers compte réconciliable** (vision « le compte est-il justifié ? ») :
   `MATCHÉS + CPT_LATE + CPT_ONLY`. (Obs. tardives IT exclues.)
 - **Univers métriques PM / chute** : `MATCHÉS + CPT_LATE` — les seuls dossiers
-  ayant une contrepartie MRM comparable.
+  ayant une contrepartie MRM comparable — **hors consigne « à supprimer » et
+  hors statut inventaire NON** (les sans-consigne reconnue sont inclus).
 
 ---
 
@@ -171,45 +172,51 @@ Formule **agrégée** (somme des écarts / somme des PM), robuste aux valeurs
 extrêmes par dossier (on n'agrège jamais une moyenne de ratios).
 
 ### 4.2 Univers commun — règle de cohérence
-**Décision : un seul univers pour TOUTE chute** = `MATCHÉS + CPT_LATE`
-(dossiers ayant une contrepartie MRM comparable). C'est ce qui garantit la
-cohérence global ↔ par consigne :
+**Décision : un seul univers pour TOUTE chute** = **tous les dossiers matchés**
+(`MATCHÉS + CPT_LATE`, dossiers ayant une contrepartie MRM comparable), **hors
+consigne « à supprimer » et hors statut inventaire NON**. Les matchés **sans
+consigne reconnue** (`MRM_ACTION` null/inconnue) sont **inclus**. C'est ce qui
+garantit la cohérence global ↔ par consigne :
 
 ```
-taux_chute_global = Σ_consignes (PM_MRM − PM_CPT) / Σ_consignes PM_MRM
-                  = taux_chute calculé sur l'union des consignes du même univers
+taux_chute_global = (Σ_consignes_KAS écarts + Σ_hors_consigne écarts)
+                    / (Σ_consignes_KAS PM_MRM + Σ_hors_consigne PM_MRM)
 ```
 
 Comme global et par-consigne partagent **le même univers et la même formule**,
-le global est exactement l'agrégat pondéré des consignes → réconciliable ligne à
-ligne (Σ écarts consignes = écart global ; Σ PM consignes = PM global).
+le global est exactement l'agrégat pondéré des consignes KAS plus le bloc
+« hors consigne » → réconciliable ligne à ligne.
 
-> ✅ **Résolu** : `compute_synthese` (consigne et global) et les tables d'analyse
-> partagent le même univers `MATCHÉS + CPT_LATE` (`_matched_universe()`), et un
-> auto-contrôle vérifie à chaque run que global == Σ consignes
-> (`chute_coherente`, warning sinon).
+> ✅ **Résolu** : `compute_synthese` (consigne et global) et `chute_par_clause`
+> partagent le même univers (matchés + CPT_LATE, hors DELETE / statut NON), et
+> un auto-contrôle vérifie à chaque run que global == Σ consignes + hors
+> consigne (`chute_coherente`, warning sinon). Le bloc hors consigne est tracé
+> dans `hors_consigne_nb` / `hors_consigne_pm_mrm` / `hors_consigne_pm_cpt`.
 
 ### 4.3 Périmètre des consignes
 - **KEEP / ADD / STUDY** : chute pertinente (la PM doit être justifiée au
   compte). Entrent dans le taux de chute par consigne **et** dans le global.
+- **Sans consigne reconnue** (`MRM_ACTION` null/inconnue) : le dossier a matché,
+  sa PM est comparable → **inclus dans le global** (tracé à part, pas de
+  consigne à laquelle l'imputer).
 - **DELETE** : la PM aurait dû être **supprimée** ; un écart « PM_MRM − PM_CPT »
-  n'a pas le sens d'une chute. → **taux de chute non défini** pour DELETE.
-  Suivi séparé : *taux de suppression effective* (voir §5.3).
-- **Décision retenue** : `taux_chute_global` = univers `MATCHÉS + CPT_LATE`
-  restreint à **KEEP + ADD + STUDY**. DELETE suivi à part, pas mélangé à la
-  chute (sinon le « global » mêle deux grandeurs de natures différentes).
+  n'a pas le sens d'une chute. → **taux de chute non défini** pour DELETE,
+  **exclu du global**. Suivi séparé : *taux de suppression effective* (§5.3).
+- **Statut inventaire NON** : PM MRM = 0, non remonté à la direction
+  financière → **exclu du global** (structurellement déjà hors matching ;
+  l'exclusion est aussi explicite dans l'univers de chute).
 
 ### 4.4 Niveaux de PM
 - **PM MRM**, **PM CPT** et **écart** (`PM_MRM − PM_CPT`) sur **l'univers du
-  taux de chute global** (`MATCHÉS + CPT_LATE`, consignes KEEP/ADD/STUDY) :
+  taux de chute global** (matchés + CPT_LATE, hors DELETE / statut NON) :
   ce sont les **composantes exactes** du taux — `écart / PM_MRM × 100 ==
-  taux_chute_global` partout (synthèse, `synthese_indicateurs`,
-  `ratios_globaux`, graphiques). Aucun % affiché sur ce bloc (le seul ratio
-  de chute restitué est le global + le par-consigne).
+  taux_chute_global` partout (synthèse, métriques, graphiques). Aucun %
+  affiché sur ce bloc (le seul ratio de chute restitué est le global + le
+  par-consigne).
 - **« Matchés » = base du taux de chute.** Partout où des « matchés » sont
-  présentés à côté de la PM / du taux de chute (bulle MATCHÉS de la synthèse,
+  présentés à côté de la PM / du taux de chute (bulle de la synthèse,
   graphiques), le décompte affiché est celui de **l'univers chute** :
-  `metrics_nb = matchés inventaire (KEEP/ADD/STUDY) + récupérés N+1`
+  `metrics_nb = matchés inventaire (hors DELETE / statut NON) + récupérés N+1`
   (`metrics_match_nb + metrics_late_nb`). Le `Δ PM` de la bulle est donc
   exactement `metrics_pm_ecart`, le numérateur du taux de chute. Le décompte
   « tous matchés » (toutes consignes, DELETE compris, inventaire courant) reste

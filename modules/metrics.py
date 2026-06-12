@@ -120,14 +120,20 @@ def _with_mrm_action(df: DataFrame) -> DataFrame:
 
 
 def _filter_chute_universe(df: DataFrame) -> DataFrame:
-    """Univers UNIQUE du taux de chute : matchés inventaire courant + récupérés
-    N+1 (CPT_LATE), consignes KEEP / ADD / STUDY. Garantit la cohérence du taux
-    par clause ↔ par consigne ↔ global (cf. docs/METRIQUES.md §4). DELETE exclu
-    (la chute n'y a pas de sens) ; CPT_OBS_TARDIVE exclu (jamais matché)."""
-    return df.filter(
-        F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS) + ["CPT_LATE"]) &
-        F.col("MRM_ACTION").isin("MRM_KEEP", "MRM_ADD", "MRM_STUDY")
+    """Univers UNIQUE du taux de chute : TOUS les dossiers matchés (inventaire
+    courant + récupérés N+1), hors consigne « à supprimer » et hors statut
+    inventaire NON. Les matchés sans consigne reconnue (MRM_ACTION null) sont
+    INCLUS. Garantit la cohérence du taux par clause ↔ par consigne ↔ global
+    (cf. docs/METRIQUES.md §4). CPT_OBS_TARDIVE / CPT_RECUP_NON exclus
+    (jamais matchés / PM MRM = 0)."""
+    cond = (
+        F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS) + ["CPT_LATE"])
+        # null-safe : une MRM_ACTION absente/inconnue reste dans l'univers.
+        & F.coalesce(F.col("MRM_ACTION") != "MRM_DELETE", F.lit(True))
     )
+    if "MRM_STATUT_INV" in df.columns:
+        cond &= F.coalesce(F.upper(F.trim(F.col("MRM_STATUT_INV"))) != "NON", F.lit(True))
+    return df.filter(cond)
 
 
 def _mois_label_expr(date_col: str) -> F.Column:
@@ -147,7 +153,6 @@ def _mois_label_expr(date_col: str) -> F.Column:
 
 def synthese(d: dict) -> pd.DataFrame:
     """Tous les indicateurs de tête en une ligne (historisable par run)."""
-    k = kas_totaux(d)
     cons = d["consignes"]
     return pd.DataFrame([{
         "DATE_INVENTAIRE"        : d["date_inventaire"],
@@ -157,9 +162,9 @@ def synthese(d: dict) -> pd.DataFrame:
         "TAUX_COUVERTURE_COMPTE_PCT" : d["taux_couverture_compte"],
         "TAUX_RECUP_TARDIVE_PCT" : d["taux_recup_tardive"],
         "TAUX_RECUP_GLOBAL_PCT"  : d["taux_recup_global"],
-        "PM_MRM_BASE_CHUTE"      : k["pm_mrm"],
-        "PM_CPT_BASE_CHUTE"      : k["pm_cpt"],
-        "ECART_BASE_CHUTE"       : k["delta"],
+        "PM_MRM_BASE_CHUTE"      : d["metrics_pm_mrm"],
+        "PM_CPT_BASE_CHUTE"      : d["metrics_pm_cpt"],
+        "ECART_BASE_CHUTE"       : d["metrics_pm_ecart"],
         "PM_MRM_TOTALE"          : d["mrm_pm"],
         "PM_CPT_TOTALE"          : d["cpt_pm"],
         "NB_MATCHES"             : d["match_nb"],
@@ -175,21 +180,22 @@ def synthese(d: dict) -> pd.DataFrame:
 def taux_chute_global(d: dict) -> pd.DataFrame:
     """Taux de chute global, PM MRM et PM Compte (base chute + totales) — graphe 7.
 
-    Base chute = dossiers retrouvés (inventaire + N+1), consignes
-    conserver/étudier/ajouter — l'univers de référence du taux de chute.
+    Base chute = tous les dossiers retrouvés (inventaire + N+1), hors consigne
+    « à supprimer » et hors statut inventaire NON — l'univers de référence du
+    taux de chute (les matchés sans consigne reconnue sont inclus).
     PM totales = grands totaux des deux univers d'entrée (MRM, Compte).
     """
-    k = kas_totaux(d)
     return pd.DataFrame([{
         "TAUX_CHUTE_GLOBAL_PCT" : d["taux_chute_global"],
-        "PM_MRM_BASE_CHUTE"     : k["pm_mrm"],
-        "PM_CPT_BASE_CHUTE"     : k["pm_cpt"],
-        "ECART_BASE_CHUTE"      : k["delta"],
+        "PM_MRM_BASE_CHUTE"     : d["metrics_pm_mrm"],
+        "PM_CPT_BASE_CHUTE"     : d["metrics_pm_cpt"],
+        "ECART_BASE_CHUTE"      : d["metrics_pm_ecart"],
         "PM_MRM_TOTALE"         : d["mrm_pm"],
         "PM_CPT_TOTALE"         : d["cpt_pm"],
         "NB_BASE_CHUTE"         : d["metrics_nb"],
         "NB_INVENTAIRE"         : d["metrics_match_nb"],
         "NB_RECUP_N1"           : d["metrics_late_nb"],
+        "NB_HORS_CONSIGNE"      : d["hors_consigne_nb"],
     }])
 
 

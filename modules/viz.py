@@ -182,7 +182,6 @@ def graph_chute_par_clause(pdf_clauses, d: dict):
     """Quelles clauses portent l'écart de provisionnement ?
 
     pdf_clauses = metrics.chute_par_clause(df_result, top=N)."""
-    k = kas_totaux(d)
     pdf = pdf_clauses[::-1]
     labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_CLAUSE"])]
     colors = [C_SIENNE if v > 0 else C_OCEAN for v in pdf["taux_chute_pct"]]
@@ -205,9 +204,9 @@ def graph_chute_par_clause(pdf_clauses, d: dict):
     _title(
         fig,
         f"Provisionnement par clause : taux de chute global {_pct(d['taux_chute_global'])} "
-        f"(écart {_meur(k['delta'])})",
-        f"Top {len(pdf)} clauses par PM MRM — dossiers retrouvés au compte (inventaire + N+1), "
-        f"consignes conserver / étudier / ajouter",
+        f"(écart {_meur(d['metrics_pm_ecart'])})",
+        f"Top {len(pdf)} clauses par PM MRM — tous les dossiers retrouvés au compte "
+        f"(inventaire + N+1), hors « à supprimer » et statut inventaire NON",
     )
     fig.subplots_adjust(top=max(0.80, 1 - 1.3 / h), bottom=1.1 / h, left=0.18, right=0.97)
     return fig
@@ -242,7 +241,7 @@ def graph_chute_par_consigne(d: dict):
         fig,
         "Le taux de chute global est la moyenne pondérée (par la PM MRM) des consignes",
         "Positif = sous-provisionné (risque) — dossiers retrouvés au compte (inventaire + N+1), "
-        "« à supprimer » suivie à part",
+        "« à supprimer » suivie à part, sans-consigne inclus dans le global",
     )
     fig.subplots_adjust(top=0.78, bottom=0.10, left=0.10, right=0.96)
     return fig
@@ -333,7 +332,8 @@ def graph_anomalies_cpt_only(pdf, d: dict):
 
 def graph_kpi_chute_globale(d: dict):
     """Le ratio de chute global en un visuel : gros chiffre + PM en regard."""
-    k = kas_totaux(d)
+    pm_mrm, pm_cpt = d["metrics_pm_mrm"], d["metrics_pm_cpt"]
+    delta = d["metrics_pm_ecart"]
     val = d["taux_chute_global"]
     sous_prov = val > 0
     couleur = C_ROUGE if sous_prov else C_BLEU
@@ -346,24 +346,24 @@ def graph_kpi_chute_globale(d: dict):
              ha="center", fontsize=F_AXE, color="#555555")
     ax0.axis("off")
 
-    bars = [("PM revue MRM", k["pm_mrm"], C_BLEU), ("PM compte client", k["pm_cpt"], C_OCEAN)]
+    bars = [("PM revue MRM", pm_mrm, C_BLEU), ("PM compte client", pm_cpt, C_OCEAN)]
     ax1.barh([b[0] for b in bars][::-1], [b[1] / 1e6 for b in bars][::-1],
              color=[b[2] for b in bars][::-1], height=0.45)
     for i, b in enumerate(bars[::-1]):
-        ax1.text(b[1] / 1e6 + max(k["pm_mrm"], k["pm_cpt"]) / 1e6 * 0.02, i,
+        ax1.text(b[1] / 1e6 + max(pm_mrm, pm_cpt) / 1e6 * 0.02, i,
                  _meur(b[1]), va="center", fontsize=F_TXT + 1, fontweight="bold")
-    ax1.set_xlim(0, max(k["pm_mrm"], k["pm_cpt"]) / 1e6 * 1.28)
+    ax1.set_xlim(0, max(pm_mrm, pm_cpt) / 1e6 * 1.28)
     ax1.set_xticks([])
-    fig.text(0.52, 0.07, f"Écart (PM MRM − PM compte) : {_meur(k['delta'])}",
+    fig.text(0.52, 0.07, f"Écart (PM MRM − PM compte) : {_meur(delta)}",
              fontsize=F_TXT + 1, fontweight="bold", color=couleur)
     _style(ax1)
     ax1.grid(False)
     _title(
         fig,
         f"Taux de chute global : {_pct(val)} — le compte porte "
-        f"{_meur(abs(k['delta']))} de {'moins' if sous_prov else 'plus'} que la revue",
-        "Σ(PM MRM − PM CPT) / Σ PM MRM — dossiers retrouvés au compte (inventaire + N+1), "
-        "consignes conserver / étudier / ajouter",
+        f"{_meur(abs(delta))} de {'moins' if sous_prov else 'plus'} que la revue",
+        "Σ(PM MRM − PM CPT) / Σ PM MRM — tous les dossiers retrouvés au compte "
+        "(inventaire + N+1), hors « à supprimer » et statut inventaire NON",
     )
     fig.subplots_adjust(top=0.76, bottom=0.18, left=0.03, right=0.96, wspace=0.30)
     return fig
@@ -433,7 +433,6 @@ def graph_kpi_conformite_globale(d: dict):
 
 def graph_pm_par_consigne(d: dict):
     """Pour chaque consigne : PM MRM et PM CPT côte à côte, le delta au-dessus."""
-    k = kas_totaux(d)
     consignes = [(c, v) for c, v in d["consignes"].items() if v["pertinent"]]
     x = list(range(len(consignes)))
     w = 0.34
@@ -461,10 +460,10 @@ def graph_pm_par_consigne(d: dict):
     _style(ax, ylabel="PM (M€)")
     _title(
         fig,
-        f"PM revue vs PM compte par consigne : Δ global {_meur(k['delta'])} "
+        f"PM revue vs PM compte par consigne : Δ global {_meur(d['metrics_pm_ecart'])} "
         f"({_pct(d['taux_chute_global'])})",
-        "Δ = PM MRM − PM compte (positif = sous-provisionné) — "
-        "dossiers retrouvés au compte (inventaire + N+1)",
+        "Δ = PM MRM − PM compte (positif = sous-provisionné) — dossiers retrouvés "
+        "au compte (inventaire + N+1) ; le global inclut les sans-consigne",
     )
     fig.subplots_adjust(top=0.78, bottom=0.10, left=0.08, right=0.96)
     return fig
