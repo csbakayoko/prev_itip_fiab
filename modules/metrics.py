@@ -120,16 +120,13 @@ def _with_mrm_action(df: DataFrame) -> DataFrame:
 
 
 def _filter_chute_universe(df: DataFrame) -> DataFrame:
-    """Univers UNIQUE du taux de chute : matchés de l'inventaire courant HORS
-    « à supprimer » (les DELETE retrouvées au compte sont analysées à part) +
-    TOUS les récupérés N+1, hors statut inventaire NON. Les sans-consigne
-    reconnue (MRM_ACTION null) restent inclus. Garantit la cohérence du taux
-    par clause ↔ par consigne ↔ global (cf. docs/METRIQUES.md §4).
-    CPT_OBS_TARDIVE / CPT_RECUP_NON exclus (jamais matchés / PM MRM = 0)."""
+    """Univers du taux de chute GLOBAL : matchés inventaire courant +
+    récupérés N+1, hors consigne « à supprimer » et hors statut inventaire
+    NON (même règle que kpi_export.compute_synthese). Les sans-consigne
+    reconnue (MRM_ACTION null) restent inclus. CPT_OBS_TARDIVE /
+    CPT_RECUP_NON exclus (jamais matchés / PM MRM = 0)."""
     cond = (
-        F.col("TYPE_RECONCILIATION") == "CPT_LATE"
-    ) | (
-        F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS))
+        F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS) + ["CPT_LATE"])
         # null-safe : une MRM_ACTION absente/inconnue reste dans l'univers.
         & F.coalesce(F.col("MRM_ACTION") != "MRM_DELETE", F.lit(True))
     )
@@ -256,7 +253,8 @@ def suivi_n1(d: dict) -> pd.DataFrame:
 
 
 def consignes(d: dict) -> pd.DataFrame:
-    """Analyse complète par consigne : conformité, PM et taux de chute.
+    """Analyse complète par consigne : conformité, PM et taux de chute —
+    EXERCICE COURANT pur (les récupérés N+1 ont leur suivi séparé, suivi_n1).
 
     Une ligne par consigne (conserver / étudier / ajouter / supprimer).
     Couvre à elle seule les graphiques 4 (chute), 5 (conformité) et
@@ -271,9 +269,7 @@ def consignes(d: dict) -> pd.DataFrame:
             "PCT_CONFORMITE"  : c["pct"],
             "NB_KO"           : c["ko"],
             "NATURE_KO"       : c["ko_label"],     # non retrouvé | encore au compte
-            "NB_BASE_CHUTE"   : c["nb_match"],
-            "NB_INVENTAIRE"   : c["nb_inv"],
-            "NB_RECUP_N1"     : c["nb_late"],
+            "NB_BASE_CHUTE"   : c["nb_match"],     # matchés inventaire courant
             "PM_MRM"          : c["pm_mrm"],
             "PM_CPT"          : c["pm_cpt"],
             "ECART"           : c["delta"],
@@ -332,8 +328,9 @@ def couverture_mrm(d: dict) -> pd.DataFrame:
 
 
 def conformite_globale(d: dict) -> pd.DataFrame:
-    """Suivi des consignes au global — graphe 8 : segments conforme /
-    non retrouvé (consignes conserver/étudier/ajouter) + suppression effective.
+    """Suivi des consignes au global (exercice courant) — graphe 8 : segments
+    conforme / non retrouvé (conserver/étudier/ajouter) + suppression
+    effective. Les récupérés N+1 ont leur suivi séparé (suivi_n1).
 
     Une ligne par segment, deux groupes (KAS = conserver/étudier/ajouter,
     DELETE = à supprimer), avec le taux du groupe.

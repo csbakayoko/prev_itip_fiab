@@ -193,21 +193,24 @@ Les exclus gardent leur **analyse à part** : « à supprimer » retrouvées →
 conformité (« encore au compte ») + taux de suppression effective (§5.3) ;
 repêchés statut NON → analyse dédiée `recup_statut_non` (§1).
 
+Le **par-consigne** (table consignes, graphes 4/5/9) porte exclusivement
+l'**exercice courant** : la consigne d'un récupéré N+1 vient de l'inventaire
+N+1, pas de la revue auditée — lui attribuer une conformité ou une chute dans
+la table principale prêterait à la revue courante des décisions qu'elle n'a
+pas prises.
+
 ```
-taux_chute_global = (Σ_consignes_KAS écarts + Σ_hors_consigne écarts)
-                    / (Σ_consignes_KAS PM_MRM + Σ_hors_consigne PM_MRM)
+taux_chute_inventaire = (Σ_consignes_KAS écarts + Σ_sans_consigne écarts)
+                        / (Σ_consignes_KAS PM_MRM + Σ_sans_consigne PM_MRM)
+taux_chute_global     = (écart_inventaire + écart_N+1) / (PM_MRM_inv + PM_MRM_N+1)
 ```
 
-Comme global et par-consigne partagent **le même univers et la même formule**,
-le global est exactement l'agrégat pondéré des consignes KAS plus le bloc
-« hors consigne » → réconciliable ligne à ligne.
-
-> ✅ **Résolu** : `compute_synthese` (consigne et global) et `chute_par_clause`
-> partagent le même univers global, et un auto-contrôle vérifie à chaque run
-> que global == Σ consignes + hors consigne (`chute_coherente`, warning
-> sinon). Le bloc hors consigne est tracé dans `hors_consigne_nb` /
-> `_pm_mrm` / `_pm_cpt` ; la décomposition par exercice dans `chute_inv_*` /
-> `chute_n1_*` (table `chute_par_exercice`).
+> ✅ **Résolu** : double auto-contrôle à chaque run (`chute_coherente`,
+> warning sinon) — (1) chute inventaire == Σ consignes KAS + sans consigne ;
+> (2) global == inventaire ⊕ N+1 (sous-univers disjoints, composantes
+> additives). Le bloc sans consigne est tracé dans `hors_consigne_*`
+> (inventaire) et `n1_sans_consigne` (N+1) ; la décomposition par exercice
+> dans `chute_inv_*` / `chute_n1_*` (table `chute_par_exercice`).
 
 ### 4.3 Périmètre des consignes
 - **KEEP / ADD / STUDY** : chute pertinente (la PM doit être justifiée au
@@ -259,10 +262,11 @@ le global est exactement l'agrégat pondéré des consignes KAS plus le bloc
     **NON_RETROUVE** = consigne conserver/ajouter/étudier absente du compte ;
     **ENCORE_AU_COMPTE** = « à supprimer » toujours présente. Le KO **reste au
     dénominateur** du taux de conformité.
-- **Univers** : pour KEEP/ADD/STUDY = `MATCHÉS + CPT_LATE + MRM_MISSING`
-  portant la consigne (les récupérés N+1 participent : retrouvé = conforme) ;
-  pour DELETE = `MATCHÉS + CPT_LATE + MRM_DELETE` (retrouvé = encore au
-  compte, KO). Les N+1 ont en plus leur suivi séparé (table `suivi_n1`).
+- **Univers** : EXERCICE COURANT pur — pour KEEP/ADD/STUDY = `MATCHÉS +
+  MRM_MISSING` portant la consigne ; pour DELETE = `MATCHÉS + MRM_DELETE`.
+  Les récupérés N+1 n'y participent pas (consigne d'un autre exercice) :
+  leur suivi est SÉPARÉ (`n1_consignes`, table `suivi_n1` — KEEP/ADD/STUDY
+  conformes, DELETE encore au compte).
 - **Formule** : `pct_conformite = nb(conformes) / nb(univers consigne)`.
 - **Colonnes dédiées** (`consignes`, `NATURE_KO`) : `nb_conformes`, `nb_ko` —
   avec `nb_total = nb_conformes + nb_ko`.

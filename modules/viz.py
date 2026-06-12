@@ -232,16 +232,18 @@ def graph_chute_par_consigne(d: dict):
                 f"{_pct(v['taux_chute'])} — PM MRM {_meur(v['pm_mrm'])}",
                 ha="center", va="bottom" if au_dessus else "top", fontsize=F_TXT)
     ax.axhline(0, color="#333333", linewidth=0.8, zorder=0.5)
-    ax.axhline(d["taux_chute_global"], color=C_GRIS, linewidth=1.4, linestyle="--",
-               zorder=0.5, label=f"taux de chute global : {_pct(d['taux_chute_global'])}")
+    ax.axhline(d["taux_chute_inventaire"], color=C_GRIS, linewidth=1.4, linestyle="--",
+               zorder=0.5,
+               label=f"taux de chute inventaire : {_pct(d['taux_chute_inventaire'])}")
     ax.margins(y=0.26)
     ax.legend(loc="lower left", fontsize=F_LEG, frameon=False)
     _style(ax, ylabel="Taux de chute (%)")
     _title(
         fig,
-        "Le taux de chute global est la moyenne pondérée (par la PM MRM) des consignes",
-        "Positif = sous-provisionné (risque) — base chute : retrouvés (inventaire + N+1) "
-        "hors « à supprimer » et statut NON, suivies à part",
+        "Le taux de chute de l'exercice courant est la moyenne pondérée (par la PM MRM) "
+        "des consignes",
+        "Positif = sous-provisionné (risque) — matchés de l'inventaire courant, hors "
+        "« à supprimer » / statut NON ; récupérés N+1 analysés à part",
     )
     fig.subplots_adjust(top=0.78, bottom=0.10, left=0.10, right=0.96)
     return fig
@@ -289,8 +291,8 @@ def graph_conformite_consignes(d: dict):
         fig,
         f"Application des consignes de la revue : {_pct(d['conformite_globale'])} de "
         f"conformité globale (hors « à supprimer »)",
-        "Conserver / ajouter / étudier : conforme = retrouvé au compte — "
-        "à supprimer : conforme = absent du compte",
+        "Exercice courant (N+1 suivis à part) — conserver / ajouter / étudier : conforme = "
+        "retrouvé au compte ; à supprimer : conforme = absent",
     )
     fig.subplots_adjust(top=0.78, bottom=0.26, left=0.15, right=0.97)
     return fig
@@ -418,8 +420,8 @@ def graph_kpi_conformite_globale(d: dict):
         fig,
         f"Suivi des consignes : {_pct(d['conformite_globale'])} appliquées au compte — "
         f"suppression effective : {_pct(c_del['pct'])}",
-        "Gauche : conserver / étudier / ajouter (conforme = retrouvé au compte) — "
-        "droite : à supprimer (conforme = absent du compte)",
+        "Exercice courant (N+1 suivis à part) — gauche : conserver / étudier / ajouter "
+        "(conforme = retrouvé) ; droite : à supprimer (conforme = absent)",
     )
     fig.subplots_adjust(top=0.80, bottom=0.16, left=0.04, right=0.96, wspace=0.25)
     return fig
@@ -458,10 +460,11 @@ def graph_pm_par_consigne(d: dict):
     _style(ax, ylabel="PM (M€)")
     _title(
         fig,
-        f"PM revue vs PM compte par consigne : Δ global {_meur(d['metrics_pm_ecart'])} "
-        f"({_pct(d['taux_chute_global'])})",
-        "Δ = PM MRM − PM compte (positif = sous-provisionné) — base chute : retrouvés "
-        "(inventaire + N+1) hors « à supprimer » et statut NON",
+        f"PM revue vs PM compte par consigne : Δ inventaire "
+        f"{_meur(d['chute_inv_pm_mrm'] - d['chute_inv_pm_cpt'])} "
+        f"({_pct(d['taux_chute_inventaire'])})",
+        "Δ = PM MRM − PM compte (positif = sous-provisionné) — matchés de l'inventaire "
+        "courant, hors « à supprimer » / statut NON ; N+1 analysés à part",
     )
     fig.subplots_adjust(top=0.78, bottom=0.10, left=0.08, right=0.96)
     return fig
