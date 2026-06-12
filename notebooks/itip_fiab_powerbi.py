@@ -8,13 +8,14 @@
 # MAGIC 1. **Setup** — session Spark + config (fichiers source et périmètre pilotés par `config/profile.py`)
 # MAGIC 2. **Pipeline** — chargement → nettoyage → matching → récupérations (N+1, statut NON) → tags
 # MAGIC 3. **Synthèse** — contrôles de cohérence console (`chute_coherente`, lignes classées)
-# MAGIC 4. **Export Power BI** — les 13 tables métriques écrites en Delta (+ fichiers DBFS)
+# MAGIC 4. **Export Power BI** — les 14 tables métriques écrites en Delta (+ fichiers DBFS)
 # MAGIC
 # MAGIC Tables produites (tidy, une table par question métier) :
 # MAGIC
 # MAGIC | Table | Contenu |
 # MAGIC |---|---|
 # MAGIC | `synthese` | 1 ligne / run — tous les KPI (chute, conformité, couvertures, retrouvés vs base chute) — **historisable** |
+# MAGIC | `bilan_cas` | LE bilan cas par cas : matchés, retrouvés par tentatives (N+1, statut NON), non retrouvés de part et d'autre — nb, PM, taux, **explication** |
 # MAGIC | `taux_chute` | LE taux (matchés inventaire courant) + composantes PM (base chute, retrouvés, totaux) ; N+1 en regard |
 # MAGIC | `chute_par_exercice` | 1 ligne / exercice (inventaire courant, N+1 séparé) — nb, PM, écart, taux |
 # MAGIC | `suivi_n1` | consignes des récupérés N+1 (analyse séparée), 1 ligne / consigne N+1 |
@@ -132,7 +133,7 @@ assert d["chute_coherente"], (
 # MAGIC %md
 # MAGIC ## 4. Export Power BI
 # MAGIC
-# MAGIC Une passe : les 13 tables métriques écrites en Delta + parquet/csv sur DBFS.
+# MAGIC Une passe : les 14 tables métriques écrites en Delta + parquet/csv sur DBFS.
 
 # COMMAND ----------
 

@@ -125,6 +125,10 @@ display(metrics.synthese(d))
 
 # COMMAND ----------
 
+display(metrics.bilan_cas(d))   # LE bilan cas par cas (avec explications)
+
+# COMMAND ----------
+
 display(metrics.taux_chute(d))
 
 # COMMAND ----------

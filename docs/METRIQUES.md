@@ -305,12 +305,13 @@ le bloc. Le graphe 3 ne trace que le bloc inventaire.
 
 ## 6. Tables métriques exportées (modules/metrics.py — toutes_metriques)
 
-Les 13 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
+Les 14 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
 Parquet / Excel / Delta) :
 
 | Table | Problématique | Univers |
 |---|---|---|
 | `synthese` | tous les KPI en 1 ligne / run (historisable) | univers de chaque ratio |
+| `bilan_cas` | LE bilan cas par cas : matchés (par clé, total, base chute), retrouvés par tentatives (N+1, statut NON), non retrouvés de part et d'autre, « à supprimer » encore au compte — nb, PM, taux quand il a un sens, EXPLICATION | tout df_result, un cas = une ligne |
 | `taux_chute` | LE taux de chute + composantes PM (base chute, retrouvés, totaux) ; N+1 en regard | base chute (§4.2) |
 | `chute_par_exercice` | 1 ligne / exercice : inventaire courant (stats globales), N+1 (analyse séparée) | univers de chute, par exercice |
 | `suivi_n1` | consignes des récupérés N+1 (analyse séparée) | `CPT_LATE` hors statut NON |
@@ -353,7 +354,7 @@ Parquet / Excel / Delta) :
 - **Base de données** : table Delta metastore (une par analyse).
 
 ### 8.2 Ce qui va en base
-- Les 13 tables du §6, une table Delta par métrique :
+- Les 14 tables du §6, une table Delta par métrique :
   `<schema>.itip_metric_<nom>_<perim>` (connexion Power BI via SQL Warehouse).
 - La table **`synthese`** ✅ tient lieu d'indicateurs scalaires : taux de
   couverture, récupération, chute (+ N+1 séparé), conformité, niveaux de PM,

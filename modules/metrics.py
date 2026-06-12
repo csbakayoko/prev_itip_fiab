@@ -29,6 +29,7 @@ Usage (main / notebook) :
     from modules import metrics
 
     d = print_synthese(df_result)              # la passe Spark
+    metrics.bilan_cas(d)                       # le bilan cas par cas
     metrics.consignes(d)                       # DataFrame pandas
     metrics.chute_par_clause(df_result)        # ré-agrégation Spark → pandas
     metrics.export_metriques(df_result, d)     # tout sur DBFS
@@ -192,6 +193,83 @@ def synthese(d: dict) -> pd.DataFrame:
         "NB_ENCORE_AU_COMPTE"    : cons["À supprimer"]["ko"],
         "COHERENT"               : d["coherent"],
     }])
+
+
+def bilan_cas(d: dict) -> pd.DataFrame:
+    """LE bilan de la réconciliation, cas par cas — la table de présentation.
+
+    Une ligne par cas : matchés de l'inventaire courant (par clé, puis total
+    et base du taux de chute), retrouvés par tentatives (N+1, statut NON —
+    analyses séparées), non retrouvés de part et d'autre (revue / compte) et
+    consigne de suppression non suivie. Chaque cas porte sa volumétrie, ses
+    PM, son taux de chute quand il a un sens, et son EXPLICATION (vocabulaire
+    client : retrouvé / non retrouvé / encore au compte).
+    """
+    c_del  = d["consignes"]["À supprimer"]
+    del_ko = c_del["nb"] - c_del["conf"]
+    rows = [
+        # volet, cas, nb, pm_mrm, pm_cpt, taux_chute, explication
+        ("Retrouvés — inventaire courant", "Clé principale (nom complet + dates)",
+         d["principale_nb"], d["principale_pm"], None, None,
+         "contrepartie au compte sur la clé nominale complète (exacte ou fenêtre)"),
+        ("Retrouvés — inventaire courant", "Clé affinée (nom tronqué 20 car.)",
+         d["affinee_nb"], d["affinee_pm_mrm"], None, None,
+         "retrouvé après troncature du nom côté compte"),
+        ("Retrouvés — inventaire courant", "Récupération (IT→IP, rechutes)",
+         d["recup_nb"], d["recup_pm_mrm"], None, None,
+         "retrouvé par bascule de garantie ou rapprochement de rechute"),
+        ("Retrouvés — inventaire courant", "TOTAL matchés",
+         d["match_nb"], d["match_pm_mrm"], d["match_pm_cpt"], None,
+         "tous les dossiers de la revue auditée retrouvés au compte"),
+        ("Retrouvés — inventaire courant", "└ base du taux de chute",
+         d["metrics_nb"], d["metrics_pm_mrm"], d["metrics_pm_cpt"],
+         d["taux_chute_inventaire"],
+         "matchés hors « à supprimer » / statut NON — les stats globales (§4.2)"),
+        ("Retrouvés par tentatives", "Récupérés dans le MRM N+1",
+         d["late_nb"], d["late_pm_mrm"], d["late_pm_cpt"], None,
+         "orphelin compte retrouvé dans l'inventaire suivant — analyse séparée, "
+         "hors stats globales"),
+        ("Retrouvés par tentatives", "└ base chute N+1",
+         d["chute_n1_nb"], d["chute_n1_pm_mrm"], d["chute_n1_pm_cpt"],
+         d["taux_chute_n1"],
+         "hors « à supprimer » N+1 — taux de chute et consignes propres (suivi_n1)"),
+        ("Retrouvés par tentatives", "Repêchés via statut inventaire NON",
+         d["recup_non_nb"], d["recup_non_pm_mrm"], d["recup_non_pm"], None,
+         "anomalie résolue sur un MRM statut NON (PM MRM = 0, non remontée) — "
+         "hors métriques"),
+        ("Non retrouvés — revue MRM", "À conserver non retrouvé",
+         d["keep_nb"], d["keep_pm"], None, None,
+         "PM attendue au compte mais absente — à instruire"),
+        ("Non retrouvés — revue MRM", "À étudier non retrouvé",
+         d["study_nb"], d["study_pm"], None, None,
+         "absent du compte — informatif (consigne à étudier)"),
+        ("Non retrouvés — revue MRM", "À ajouter non retrouvé",
+         d["add_nb"], d["add_pm"], None, None,
+         "absent du compte — informatif (consigne à ajouter)"),
+        ("Non retrouvés — revue MRM", "À supprimer absents (conformes)",
+         d["a_supprimer_nb"], d["a_supprimer_pm"], None, None,
+         "suppression suivie : le dossier n'est plus au compte"),
+        ("Non retrouvés — compte", "Clos avant inventaire N+1",
+         d["obs_nb"], None, d["obs_pm"], None,
+         "sinistre clos avant l'inventaire suivant — explicable, pas une anomalie"),
+        ("Non retrouvés — compte", "Sans contrepartie (anomalies)",
+         d["def_nb"], None, d["def_pm"], None,
+         "ni matché, ni récupéré, ni explicable — anomalie à instruire"),
+        ("Consigne non suivie", "À supprimer encore au compte",
+         del_ko, c_del["pm_mrm"], c_del["pm_cpt"], None,
+         "devait disparaître mais retrouvée au compte — hors taux de chute, "
+         "suivie via le taux de suppression effective"),
+    ]
+    return pd.DataFrame([{
+        "VOLET"          : volet,
+        "CAS"            : cas,
+        "NB_DOSSIERS"    : nb,
+        "PM_MRM"         : pm_mrm,
+        "PM_CPT"         : pm_cpt,
+        "ECART"          : (pm_mrm - pm_cpt) if (pm_mrm is not None and pm_cpt is not None) else None,
+        "TAUX_CHUTE_PCT" : taux,
+        "EXPLICATION"    : expl,
+    } for volet, cas, nb, pm_mrm, pm_cpt, taux, expl in rows])
 
 
 def taux_chute(d: dict) -> pd.DataFrame:
@@ -492,6 +570,7 @@ def toutes_metriques(df_result: DataFrame, d: Optional[dict] = None) -> Dict[str
     d = d if d is not None else compute_synthese(df_result)
     return {
         "synthese"             : synthese(d),
+        "bilan_cas"            : bilan_cas(d),
         "taux_chute"           : taux_chute(d),
         "chute_par_exercice"   : chute_par_exercice(d),
         "suivi_n1"             : suivi_n1(d),
