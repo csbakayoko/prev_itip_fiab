@@ -8,7 +8,8 @@
 # MAGIC 1. **Setup** — session Spark + config (fichiers source et périmètre pilotés par `config/profile.py`)
 # MAGIC 2. **Pipeline** — chargement → nettoyage → matching → récupérations (N+1, statut NON) → tags
 # MAGIC 3. **Synthèse** — contrôles de cohérence console (`chute_coherente`, lignes classées)
-# MAGIC 4. **Export Power BI** — les 14 tables métriques écrites en Delta (+ fichiers DBFS)
+# MAGIC 4. **Export Power BI** — les 15 tables métriques écrites en Delta (+ fichiers DBFS),
+# MAGIC    puis contrôles inter-tables BLOQUANTS (les onglets doivent se recouper)
 # MAGIC
 # MAGIC Tables produites (tidy, une table par question métier) :
 # MAGIC
@@ -26,6 +27,7 @@
 # MAGIC | `chute_par_consigne` / `pm_par_consigne` | chute et PM par consigne pertinente |
 # MAGIC | `conformite_consignes` / `conformite_globale` | application des consignes (détail + segments) |
 # MAGIC | `anomalies_cpt_only` | anomalies par mois de survenance (effet fin d'année) |
+# MAGIC | `controles_coherence` | recoupements inter-tables (attendu / obtenu / OK) — onglet « fiabilité » |
 
 # COMMAND ----------
 
@@ -133,7 +135,7 @@ assert d["chute_coherente"], (
 # MAGIC %md
 # MAGIC ## 4. Export Power BI
 # MAGIC
-# MAGIC Une passe : les 14 tables métriques écrites en Delta + parquet/csv sur DBFS.
+# MAGIC Une passe : les 15 tables métriques écrites en Delta + parquet/csv sur DBFS.
 
 # COMMAND ----------
 
@@ -141,6 +143,16 @@ tables = metrics.export_metriques(
     df_result, d,
     formats      = FORMATS,
     delta_schema = DELTA_SCHEMA,
+)
+
+# Les onglets Power BI doivent se recouper : tout contrôle inter-tables KO
+# invalide l'étude → run en échec (la table controles_coherence est exportée,
+# à afficher en onglet « fiabilité » dans Power BI).
+ctrl = tables["controles_coherence"]
+display(ctrl)
+assert ctrl["OK"].all(), (
+    f"{int((~ctrl['OK']).sum())} contrôle(s) inter-tables KO — onglets Power BI "
+    "incohérents (voir la table controles_coherence ci-dessus)."
 )
 
 # COMMAND ----------

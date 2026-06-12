@@ -305,7 +305,7 @@ le bloc. Le graphe 3 ne trace que le bloc inventaire.
 
 ## 6. Tables métriques exportées (modules/metrics.py — toutes_metriques)
 
-Les 14 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
+Les 15 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
 Parquet / Excel / Delta) :
 
 | Table | Problématique | Univers |
@@ -322,6 +322,7 @@ Parquet / Excel / Delta) :
 | `chute_par_consigne` / `pm_par_consigne` | chute et PM par consigne pertinente (vues de `consignes`) | matchés inventaire courant, KEEP/ADD/STUDY |
 | `conformite_consignes` / `conformite_globale` | application des consignes (détail + segments) | exercice courant (§5) |
 | `anomalies_cpt_only` | anomalies par mois de survenance (effet fin d'année) | `CPT_ONLY` |
+| `controles_coherence` | recoupements inter-tables (attendu / obtenu / OK) : une même grandeur a la même valeur dans tous les onglets Power BI ; bloquant dans le run de production | toutes les tables |
 
 ---
 
@@ -341,6 +342,13 @@ Parquet / Excel / Delta) :
 - **Invariant de cohérence** : `compute_synthese` vérifie que toute ligne tombe
   dans exactement une catégorie connue (`classified_rows == total_rows`) ; sinon
   un `TYPE_RECONCILIATION` inattendu est signalé.
+- **Recoupements inter-tables** : `metrics.controles_coherence` vérifie à
+  chaque export que les grandeurs partagées se recoupent d'une table à
+  l'autre (Σ blocs de `chute_par_clause` == base chute / bloc N+1, Σ
+  `anomalies_cpt_only` == CPT_ONLY, Σ consignes + hors consigne == base
+  chute, totaux de `bilan_cas`, etc.) — condition pour que les onglets
+  Power BI de l'étude racontent une seule histoire. Table exportée,
+  **assert bloquant** dans `notebooks/itip_fiab_powerbi.py`.
 
 ---
 
@@ -354,7 +362,7 @@ Parquet / Excel / Delta) :
 - **Base de données** : table Delta metastore (une par analyse).
 
 ### 8.2 Ce qui va en base
-- Les 14 tables du §6, une table Delta par métrique :
+- Les 15 tables du §6, une table Delta par métrique :
   `<schema>.itip_metric_<nom>_<perim>` (connexion Power BI via SQL Warehouse).
 - La table **`synthese`** ✅ tient lieu d'indicateurs scalaires : taux de
   couverture, récupération, chute (+ N+1 séparé), conformité, niveaux de PM,
