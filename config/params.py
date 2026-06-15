@@ -19,13 +19,19 @@ WINDOW_DAYS = 14                             # tolérance ±jours pour les étap
 #   principale   = clé nominale complète (date jour ou ±WINDOW_DAYS)
 #   affinée      = clé nominale tronquée CPT 20 chars
 #   récupération = matchs métier fiables (passage IP, rechute)
+#   clause       = clé de secours (n° de clause à la place du RPP) — rattrape les
+#                  dossiers dont le RPP compte est nul / mal renseigné, qui
+#                  finissaient en CPT_ONLY définitif faute de clé exploitable.
 MATCH_PRINCIPALE   = ("MATCH_EXACT", "MATCH_WINDOW")
 MATCH_AFFINEE      = ("MATCH_TRONC", "MATCH_TRONC_WINDOW")
 MATCH_RECUPERATION = ("MATCH_IP", "MATCH_RECHUTE", "MATCH_RECHUTE_TRONC")
+MATCH_CLAUSE       = ("MATCH_CLAUSE", "MATCH_CLAUSE_WINDOW",
+                      "MATCH_CLAUSE_TRONC", "MATCH_CLAUSE_TRONC_WINDOW")
 
 # Matchs LÉGITIMES posés par le waterfall. Sert de référence "matché" partout
-# (synthèse, audit consignes, taux de chute).
-MATCH_LABELS = MATCH_PRINCIPALE + MATCH_AFFINEE + MATCH_RECUPERATION
+# (synthèse, audit consignes, taux de chute). Les matchs sur clé clause ont une
+# vraie contrepartie MRM → ils entrent dans l'univers de chute comme les autres.
+MATCH_LABELS = MATCH_PRINCIPALE + MATCH_AFFINEE + MATCH_RECUPERATION + MATCH_CLAUSE
 
 
 # ============================================================================

@@ -73,23 +73,30 @@ def run(spark: SparkSession) -> DataFrame:
         # CPT_LATE). Cascade RECOVERY_KEYS : le waterfall principal rejoué dans
         # l'ordre (strict → flexible), mêmes règles et mêmes fenêtres.
         # L'étape gagnante est tracée dans LATE_KEY.
+        mrm_n1_non = None
         if RUN_PARAMS.get("fichier_mrm_n1"):
             mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
-            # Même règle de statut que l'exercice N : seuls les OUI (+ statut
-            # absent) du N+1 produisent des CPT_LATE — un NON du N+1 a une PM
-            # MRM = 0, le prendre comme contrepartie fausserait l'univers de
-            # chute (CPT_LATE est INCLUS dans les métriques). Les NON du N+1
-            # sont écartés ; le repêchage statut NON porte sur l'exercice N.
-            mrm_n1_oui, _ = _split_mrm_statut(mrm_n1)
+            # Règle CPT_LATE (inchangée) : seuls les OUI (+ statut absent) du N+1
+            # produisent des CPT_LATE — un NON du N+1 a une PM MRM = 0, le prendre
+            # comme contrepartie fausserait l'univers de chute (CPT_LATE est
+            # INCLUS dans les métriques). On scinde le N+1 : les OUI alimentent le
+            # repêchage CPT_LATE ci-dessous, les NON rejoignent la passe statut
+            # NON (repêchage hors métriques, comme le NON de l'exercice N).
+            mrm_n1_oui, mrm_n1_non = _split_mrm_statut(mrm_n1)
             df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1_oui)])
 
         # Repêchage via statut NON : les CPT_ONLY restants retrouvés dans les MRM
-        # NON sont tagués CPT_RECUP_NON (LATE_SOURCE=STATUT_NON). Label distinct →
-        # EXCLU de toutes les métriques, présenté dans une analyse dédiée. Les MRM
-        # NON non repêchés ne sont jamais unionnés (ils disparaissent, zéro
-        # empreinte dans la volumétrie). Même cascade RECOVERY_KEYS que le N+1.
+        # NON sont tagués CPT_RECUP_NON. Label distinct → EXCLU de toutes les
+        # métriques, présenté dans une analyse dédiée. Le statut NON est repêché
+        # sur les DEUX exercices, avec un LATE_SOURCE distinct (STATUT_NON pour N,
+        # STATUT_NON_N1 pour N+1) → la part de chaque exercice est ventilée dans
+        # la restitution. Les MRM NON non repêchés ne sont jamais unionnés (ils
+        # disparaissent, zéro empreinte). Même cascade RECOVERY_KEYS que le N+1.
+        non_inventories = [("STATUT_NON", mrm_non)]
+        if mrm_n1_non is not None:
+            non_inventories.append(("STATUT_NON_N1", mrm_n1_non))
         df_result = recover_late_declarations(
-            df_result, [("STATUT_NON", mrm_non)], label=RECUP_NON_LABEL,
+            df_result, non_inventories, label=RECUP_NON_LABEL,
         )
 
         # Observations tardives IT : CPT_ONLY garantie 60 survenus en fin d'année,

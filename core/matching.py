@@ -7,6 +7,7 @@ Flux :
         ├─ Pre-filter   : MATCH_EXACT / WINDOW / TRONC / TRONC_WINDOW
         ├─ Filtrage MRM : MRM_DELETE → écarté
         ├─ Post-filter  : MATCH_IP / RECHUTE / RECHUTE_TRONC
+        ├─ Clé clause   : MATCH_CLAUSE[_WINDOW/_TRONC/_TRONC_WINDOW] (secours RPP nul)
         └─ Orphelins    : CPT_ONLY / MRM_MISSING
                 │
                 └─ Union finale → DataFrame réconcilié
@@ -51,6 +52,11 @@ _MATCHING_KEYS: Tuple[str, ...] = (
     "key_strict_tronc",
     "key_no_date_tronc",
     "key_no_garantie",
+    # Clés de secours « clause » (RPP remplacé par le n° de clause).
+    "key_clause_strict",
+    "key_clause_no_date",
+    "key_clause_strict_tronc",
+    "key_clause_no_date_tronc",
 )
 
 
@@ -118,6 +124,16 @@ RECOVERY_KEYS: Tuple = (
 ) + (
     ("MATCH_RECHUTE",       "key_no_date",       _rechute_cond(RELAPSE_WINDOW_DAYS)),
     ("MATCH_RECHUTE_TRONC", "key_no_date_tronc", _rechute_cond(RELAPSE_WINDOW_DAYS)),
+) + (
+    # Clés de secours « clause » EN DERNIER : ne se déclenchent que sur le résidu
+    # que les clés RPP n'ont pas rattrapé (RPP nul / mal renseigné). Mêmes
+    # variantes que le pré-filtre (strict / fenêtre × nom complet / tronqué).
+    ("MATCH_CLAUSE",              "key_clause_strict",        None),
+    ("MATCH_CLAUSE_WINDOW",       "key_clause_no_date",
+     _windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS)),
+    ("MATCH_CLAUSE_TRONC",        "key_clause_strict_tronc",  None),
+    ("MATCH_CLAUSE_TRONC_WINDOW", "key_clause_no_date_tronc",
+     _windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS)),
 )
 
 
@@ -361,6 +377,35 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     matched, cpt_rem, mrm_rem = execute_matching_step(
         cpt_rem, mrm_rem, "key_no_date_tronc", "MATCH_RECHUTE_TRONC",
         extra_cond=_rechute_cond(RELAPSE_WINDOW_DAYS),
+    )
+    results.append(matched)
+
+    # === Clé de secours « clause » (RPP nul / mal renseigné) ===
+    # En dernier : ne rattrape que le résidu non matché par les clés RPP. La
+    # clause remplace le RPP ; mêmes variantes que le pré-filtre (strict /
+    # fenêtre × nom complet / tronqué). Les clés clause valent NULL côté CPT
+    # quand la clause manque → execute_matching_step les ignore (filter isNotNull).
+    print("[matching] -- phase clé clause (secours RPP) --")
+
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_clause_strict", "MATCH_CLAUSE",
+    )
+    results.append(matched)
+
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_clause_no_date", "MATCH_CLAUSE_WINDOW",
+        extra_cond=_windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS),
+    )
+    results.append(matched)
+
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_clause_strict_tronc", "MATCH_CLAUSE_TRONC",
+    )
+    results.append(matched)
+
+    matched, cpt_rem, mrm_rem = execute_matching_step(
+        cpt_rem, mrm_rem, "key_clause_no_date_tronc", "MATCH_CLAUSE_TRONC_WINDOW",
+        extra_cond=_windowed("CPT_D_SURVENANCE", "MRM_D_SURVENANCE", WINDOW_DAYS),
     )
     results.append(matched)
 

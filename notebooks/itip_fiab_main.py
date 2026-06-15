@@ -72,14 +72,21 @@ mrm_oui, mrm_non = _split_mrm_statut(mrm_clean)
 df_result = matching_waterfall(cpt_clean, mrm_oui)
 
 # Déclarations tardives : CPT_ONLY retrouvés dans l'inventaire MRM N+1 (→ CPT_LATE).
+# Seuls les OUI du N+1 → CPT_LATE (dans les métriques) ; les NON du N+1 → passe
+# statut NON (CPT_RECUP_NON, hors métriques).
+mrm_n1_non = None
 if RUN_PARAMS.get("fichier_mrm_n1"):
     mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
-    mrm_n1_oui, _ = _split_mrm_statut(mrm_n1)
+    mrm_n1_oui, mrm_n1_non = _split_mrm_statut(mrm_n1)
     df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1_oui)])
 
-# Repêchage via statut NON (→ CPT_RECUP_NON, hors métriques).
+# Repêchage via statut NON (→ CPT_RECUP_NON, hors métriques) sur les DEUX
+# exercices, LATE_SOURCE distinct (STATUT_NON / STATUT_NON_N1) pour ventiler la part.
+non_inventories = [("STATUT_NON", mrm_non)]
+if mrm_n1_non is not None:
+    non_inventories.append(("STATUT_NON_N1", mrm_n1_non))
 df_result = recover_late_declarations(
-    df_result, [("STATUT_NON", mrm_non)], label=RECUP_NON_LABEL,
+    df_result, non_inventories, label=RECUP_NON_LABEL,
 )
 
 # Obs tardives IT (anomalies, jamais matchées) + tags persistants.

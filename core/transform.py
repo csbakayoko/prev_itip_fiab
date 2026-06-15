@@ -97,6 +97,7 @@ def add_matching_keys(
     naissance_col : str = "D_NAISSANCE",
     survenance_col: str = "D_SURVENANCE",
     garantie_col  : str = "GARANTIE",
+    clause_col    : str = "CLAUSE",
 ) -> DataFrame:
     """
     Ajoute les clés composites de rapprochement CPT/MRM.
@@ -118,6 +119,19 @@ def add_matching_keys(
     → Les deux côtés (CPT et MRM) appliquent LEFT(20) uppercase + strip espaces avant de constituer la clé.
     Ex : "REICHENAUER CHRISTELLE" (MRM) → LEFT(20) = "REICHENAUER CHRISTEL" → même clé que CPT ✓
 
+    CLÉS DE SECOURS « CLAUSE » (key_clause_*) : le RPP est remplacé par le numéro
+    de clause normalisé. Elles rattrapent les dossiers dont le RPP compte est nul
+    ou mal renseigné — toutes les clés ci-dessus échouent alors et le dossier
+    finit en CPT_ONLY définitif malgré une vraie contrepartie. Placées en fin de
+    waterfall (les clés RPP matchent d'abord), elles déclinent les mêmes variantes
+    nom complet / nom tronqué × date stricte / fenêtre :
+        key_clause_strict / _no_date / _strict_tronc / _no_date_tronc
+    La clause est moins discriminante que le RPP (partagée par tout un contrat) :
+    on ne décline PAS les étapes IP / rechute en clause (plus risquées sur une clé
+    sans RPP, hors périmètre). Garde anti-collision : la clé vaut NULL quand la
+    clause est absente, sinon concat_ws l'ignorerait et la clé matcherait sur
+    dob+nom+date entre clauses différentes.
+
     Args:
         df             : DataFrame à enrichir
         rpp_col        : Colonne RPP
@@ -125,9 +139,10 @@ def add_matching_keys(
         naissance_col  : Colonne date de naissance
         survenance_col : Colonne date de survenance
         garantie_col   : Colonne code garantie
+        clause_col     : Colonne numéro de clause (préfixe type côté CPT toléré)
 
     Returns:
-        DataFrame enrichi avec 4 clés de rapprochement
+        DataFrame enrichi avec les 5 clés RPP + 4 clés de secours clause
     """
     required = [rpp_col, nom_prenom_col, naissance_col, survenance_col, garantie_col]
     missing  = [c for c in required if c not in df.columns]
@@ -143,7 +158,7 @@ def add_matching_keys(
 
     _key = lambda *parts: F.concat_ws("", *parts)
 
-    return (
+    df = (
         df
         .withColumn("key_strict",        _key(rpp, dob, dos_strict, garantie, nom_full))
         .withColumn("key_no_date",       _key(rpp, dob,             garantie, nom_full))
@@ -152,6 +167,25 @@ def add_matching_keys(
         # Clé sans garantie (survenance au jour) — étape passage IT → IP
         .withColumn("key_no_garantie",   _key(rpp, dob, dos_strict, nom_full))
     )
+
+    # Clés de secours « clause » : RPP remplacé par la clause normalisée (préfixe
+    # type CPT retiré, ex. "CPB_121981" → "121981" ; MRM "121981" inchangé). NULL
+    # si la clause est absente (cf. garde anti-collision dans la docstring).
+    if clause_col in df.columns:
+        clause_norm = F.regexp_replace(
+            F.upper(F.trim(F.col(clause_col).cast("string"))), r"^[A-Z]+_", ""
+        )
+        has_clause = clause_norm.isNotNull() & (clause_norm != "")
+        _ckey = lambda *parts: F.when(has_clause, _key(clause_norm, *parts))
+        df = (
+            df
+            .withColumn("key_clause_strict",        _ckey(dob, dos_strict, garantie, nom_full))
+            .withColumn("key_clause_no_date",       _ckey(dob,             garantie, nom_full))
+            .withColumn("key_clause_strict_tronc",  _ckey(dob, dos_strict, garantie, nom_tronc))
+            .withColumn("key_clause_no_date_tronc", _ckey(dob,             garantie, nom_tronc))
+        )
+
+    return df
 
 
 # ============================================================================
@@ -324,7 +358,9 @@ def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     df = add_matching_keys(df, rpp_col="RPP")
     df = prefix_columns(
         df, prefix="CPT_",
-        keep=["key_strict", "key_no_date", "key_strict_tronc", "key_no_date_tronc", "key_no_garantie"],
+        keep=["key_strict", "key_no_date", "key_strict_tronc", "key_no_date_tronc",
+              "key_no_garantie", "key_clause_strict", "key_clause_no_date",
+              "key_clause_strict_tronc", "key_clause_no_date_tronc"],
     )
     return df
 
@@ -359,6 +395,8 @@ def clean_mrm(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     df = dedupe_mrm_by_strict_key(df)
     df = prefix_columns(
         df, prefix="MRM_",
-        keep=["key_strict", "key_no_date", "key_strict_tronc", "key_no_date_tronc", "key_no_garantie"],
+        keep=["key_strict", "key_no_date", "key_strict_tronc", "key_no_date_tronc",
+              "key_no_garantie", "key_clause_strict", "key_clause_no_date",
+              "key_clause_strict_tronc", "key_clause_no_date_tronc"],
     )
     return df

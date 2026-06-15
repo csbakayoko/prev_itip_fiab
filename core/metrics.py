@@ -185,7 +185,14 @@ def synthese(d: dict) -> pd.DataFrame:
         "PM_MRM_TOTALE"          : d["mrm_pm"],
         "PM_CPT_TOTALE"          : d["cpt_pm"],
         "NB_MATCHES"             : d["match_nb"],
+        # Clé de secours « clause » (RPP nul / mal renseigné) — sous-ensemble des
+        # matchés, suivi à part pour audit.
+        "NB_MATCH_CLAUSE"        : d["clause_nb"],
+        "PM_MATCH_CLAUSE"        : d["clause_pm"],
         "NB_RECUP_N1"            : d["late_nb"],
+        # Repêchés statut NON ventilés par exercice (hors métriques, PM MRM = 0).
+        "NB_RECUP_NON_N"         : d["recup_non_n_nb"],
+        "NB_RECUP_NON_N1"        : d["recup_non_n1_nb"],
         "NB_CPT_ONLY"            : d["def_nb"],
         "NB_MRM_MISSING"         : d["non_mappes_nb"],
         "NB_NON_RETROUVE"        : (cons["À conserver"]["ko"] + cons["À ajouter"]["ko"]
@@ -218,6 +225,10 @@ def bilan_cas(d: dict) -> pd.DataFrame:
         ("Retrouvés — inventaire courant", "Récupération (IT→IP, rechutes)",
          d["recup_nb"], d["recup_pm_mrm"], None, None,
          "retrouvé par bascule de garantie ou rapprochement de rechute"),
+        ("Retrouvés — inventaire courant", "Clé clause (RPP absent/non fiable)",
+         d["clause_nb"], d["clause_pm"], None, None,
+         "retrouvé via la clé de secours (n° de clause à la place du RPP) — "
+         "RPP compte nul ou mal renseigné"),
         ("Retrouvés — inventaire courant", "TOTAL matchés",
          d["match_nb"], d["match_pm_mrm"], d["match_pm_cpt"], None,
          "tous les dossiers de la revue auditée retrouvés au compte"),
@@ -233,10 +244,17 @@ def bilan_cas(d: dict) -> pd.DataFrame:
          d["chute_n1_nb"], d["chute_n1_pm_mrm"], d["chute_n1_pm_cpt"],
          d["taux_chute_n1"],
          "hors « à supprimer » N+1 — taux de chute et consignes propres (suivi_n1)"),
-        ("Retrouvés par tentatives", "Repêchés via statut inventaire NON",
+        ("Retrouvés par tentatives", "Repêchés statut NON — exercice N",
+         d["recup_non_n_nb"], None, d["recup_non_n_pm"], None,
+         "anomalie résolue sur un MRM statut NON de l'exercice courant "
+         "(PM MRM = 0, non remontée) — hors métriques"),
+        ("Retrouvés par tentatives", "Repêchés statut NON — exercice N+1",
+         d["recup_non_n1_nb"], None, d["recup_non_n1_pm"], None,
+         "anomalie résolue sur un MRM statut NON de l'inventaire suivant "
+         "(PM MRM = 0, non remontée) — hors métriques"),
+        ("Retrouvés par tentatives", "└ total repêchés statut NON",
          d["recup_non_nb"], d["recup_non_pm_mrm"], d["recup_non_pm"], None,
-         "anomalie résolue sur un MRM statut NON (PM MRM = 0, non remontée) — "
-         "hors métriques"),
+         "total N + N+1 — PM MRM = 0 par construction, hors métriques"),
         ("Non retrouvés — revue MRM", "À conserver non retrouvé",
          d["keep_nb"], d["keep_pm"], None, None,
          "PM attendue au compte mais absente — à instruire"),
@@ -603,14 +621,20 @@ def controles_coherence(tables: Dict[str, pd.DataFrame], d: dict) -> pd.DataFram
 
     # bilan_cas : totaux internes + recoupement avec la synthèse.
     b = tables["bilan_cas"].set_index("CAS")
-    ctrl("bilan_cas : TOTAL matchés = Σ des 3 clés",
+    ctrl("bilan_cas : TOTAL matchés = Σ des 4 clés",
          int(b.loc["TOTAL matchés", "NB_DOSSIERS"]),
          int(b.loc["Clé principale (nom complet + dates)", "NB_DOSSIERS"]
              + b.loc["Clé affinée (nom tronqué 20 car.)", "NB_DOSSIERS"]
-             + b.loc["Récupération (IT→IP, rechutes)", "NB_DOSSIERS"]))
+             + b.loc["Récupération (IT→IP, rechutes)", "NB_DOSSIERS"]
+             + b.loc["Clé clause (RPP absent/non fiable)", "NB_DOSSIERS"]))
     ctrl("bilan_cas : base chute = synthese",
          int(tables["synthese"]["NB_BASE_CHUTE"].iloc[0]),
          int(b.loc["└ base du taux de chute", "NB_DOSSIERS"]))
+    # Repêchés statut NON : le total recoupe la somme des deux exercices N + N+1.
+    ctrl("bilan_cas : repêchés NON = N + N+1",
+         int(b.loc["└ total repêchés statut NON", "NB_DOSSIERS"]),
+         int(b.loc["Repêchés statut NON — exercice N", "NB_DOSSIERS"]
+             + b.loc["Repêchés statut NON — exercice N+1", "NB_DOSSIERS"]))
 
     # suivi_n1 : conformes + sans consigne == base chute N+1 (DELETE exclu).
     sn1 = tables["suivi_n1"]

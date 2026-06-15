@@ -43,6 +43,7 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
 | Matchés **principale** | `MATCH_EXACT`, `MATCH_WINDOW` | clé nominale complète |
 | Matchés **affinée** | `MATCH_TRONC`, `MATCH_TRONC_WINDOW` | nom tronqué 20 car. |
 | Matchés **récupération** | `MATCH_IP`, `MATCH_RECHUTE`, `MATCH_RECHUTE_TRONC` | IT→IP, rechutes |
+| Matchés **clé clause** | `MATCH_CLAUSE`, `MATCH_CLAUSE_WINDOW`, `MATCH_CLAUSE_TRONC`, `MATCH_CLAUSE_TRONC_WINDOW` | clé de secours : n° de clause à la place du RPP (RPP compte nul / mal renseigné) |
 | Récupérés **N+1** | `CPT_LATE` | orphelin CPT retrouvé dans l'inventaire suivant |
 | Orphelins MRM | `MRM_MISSING` | dossier MRM sans contrepartie compte |
 | Consigne à supprimer | `MRM_DELETE` | MRM marqué « à supprimer » |
@@ -50,8 +51,12 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
 | Obs. tardives IT | `CPT_OBS_TARDIVE` | sinistre clos avant l'inventaire N+1 |
 | Récupérés via NON | `CPT_RECUP_NON` | CPT_ONLY repêché sur un MRM statut NON (PM MRM=0) |
 
-**MATCHÉS (inventaire courant)** = principale + affinée + récupération
-(`MATCH_LABELS`).
+**MATCHÉS (inventaire courant)** = principale + affinée + récupération + clé
+clause (`MATCH_LABELS`). Les matchs sur **clé clause** ont une vraie contrepartie
+MRM (RPP compte absent / non fiable, retrouvé via le n° de clause + nom + dates) →
+ils entrent dans l'univers de chute comme les autres ; bucket distinct, suivi à
+part dans `bilan_cas` (ligne « Clé clause ») et `synthese` (`NB_MATCH_CLAUSE`) pour
+auditer cette clé moins stricte.
 
 ### Règles de population (qui entre dans les calculs)
 
@@ -69,12 +74,19 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
      flexible garantit qu'un assuré à plusieurs sinistres est rapproché de la
      **bonne** contrepartie (une clé lâche seule choisirait un dossier
      arbitraire au dédoublonnage). L'étape gagnante est tracée dans `LATE_KEY`.
-   - Un `CPT_ONLY` retrouvé dans les MRM NON est tagué **`CPT_RECUP_NON`**
-     (LATE_SOURCE = `STATUT_NON`) : anomalie résolue, mais **PM MRM = 0** → label
-     distinct ⇒ **EXCLU par construction de TOUTES les métriques** (couverture,
-     chute, conformité, audit consignes, ratios). Présenté uniquement dans
-     l'analyse dédiée `recup_statut_non` (onglet d'export dédié, par clause ×
-     consigne × clé) et en ligne séparée de la bulle COMPTE.
+   - Le repêchage statut NON porte sur **les deux exercices** : le NON de
+     l'exercice N **et** le NON du N+1 (un NON N+1 a aussi une PM MRM = 0, donc
+     hors métriques — mais le dossier est bien au compte, on en donne la trace).
+     LATE_SOURCE distingue l'origine : `STATUT_NON` (exercice N) /
+     `STATUT_NON_N1` (exercice N+1). La part de chaque exercice est ventilée dans
+     `bilan_cas` (deux sous-lignes + total) et `synthese`
+     (`NB_RECUP_NON_N` / `NB_RECUP_NON_N1`).
+   - Un `CPT_ONLY` retrouvé dans les MRM NON est tagué **`CPT_RECUP_NON`** :
+     anomalie résolue, mais **PM MRM = 0** → label distinct ⇒ **EXCLU par
+     construction de TOUTES les métriques** (couverture, chute, conformité, audit
+     consignes, ratios). Présenté uniquement dans l'analyse dédiée
+     `recup_statut_non` (par clause × consigne × clé) et en ligne séparée de la
+     bulle COMPTE.
    - Un MRM NON qui ne repêche rien n'est **jamais unionné** → il disparaît
      naturellement, **zéro empreinte dans la volumétrie** (pas de `MRM_MISSING`
      en statut NON). Aucune fonction de rejet n'est nécessaire.
@@ -93,9 +105,11 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
 3. **Récupérés N+1 (`CPT_LATE`)** — orphelins compte retrouvés dans un
    inventaire ultérieur, **avec** contrepartie MRM. **Inclus** dans l'univers
    métriques (ils ont matché, sur un autre inventaire). Seuls les **OUI** (+
-   statut absent) du N+1 sont éligibles : un NON du N+1 (PM MRM = 0) est
-   écarté — sinon il entrerait dans l'univers de chute avec une PM nulle. Le
-   repêchage statut NON, lui, porte exclusivement sur l'exercice N.
+   statut absent) du N+1 produisent des `CPT_LATE` : un NON du N+1 (PM MRM = 0)
+   n'en est pas un — sinon il entrerait dans l'univers de chute avec une PM
+   nulle. Le NON du N+1 n'est pas perdu pour autant : il rejoint la passe de
+   repêchage statut NON (`CPT_RECUP_NON`, hors métriques, cf. règle 1, ventilé
+   N / N+1).
 
 4. **Anomalies = `CPT_ONLY` définitifs** — sans contrepartie MRM, ni récupérés,
    ni explicables.
@@ -311,7 +325,7 @@ Parquet / Excel / Delta) :
 | Table | Problématique | Univers |
 |---|---|---|
 | `synthese` | tous les KPI en 1 ligne / run (historisable) | univers de chaque ratio |
-| `bilan_cas` | LE bilan cas par cas : matchés (par clé, total, base chute), retrouvés par tentatives (N+1, statut NON), non retrouvés de part et d'autre, « à supprimer » encore au compte — nb, PM, taux quand il a un sens, EXPLICATION | tout df_result, un cas = une ligne |
+| `bilan_cas` | LE bilan cas par cas : matchés (par clé — principale / affinée / récupération / **clé clause** —, total, base chute), retrouvés par tentatives (N+1, statut NON **ventilé exercice N / N+1 + total**), non retrouvés de part et d'autre, « à supprimer » encore au compte — nb, PM, taux quand il a un sens, EXPLICATION | tout df_result, un cas = une ligne |
 | `taux_chute` | LE taux de chute + composantes PM (base chute, retrouvés, totaux) ; N+1 en regard | base chute (§4.2) |
 | `chute_par_exercice` | 1 ligne / exercice : inventaire courant (stats globales), N+1 (analyse séparée) | univers de chute, par exercice |
 | `suivi_n1` | consignes des récupérés N+1 (analyse séparée) | `CPT_LATE` hors statut NON |

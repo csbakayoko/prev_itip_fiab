@@ -42,6 +42,7 @@ from config import (
     MATCH_PRINCIPALE,
     MATCH_AFFINEE,
     MATCH_RECUPERATION,
+    MATCH_CLAUSE,
     OBS_TARDIVE_LABEL,
     RECUP_NON_LABEL,
 )
@@ -101,6 +102,7 @@ def compute_synthese(df_result: DataFrame) -> dict:
     princ    = set(MATCH_PRINCIPALE)
     aff      = set(MATCH_AFFINEE)
     recup    = set(MATCH_RECUPERATION)
+    clause   = set(MATCH_CLAUSE)       # clé de secours (RPP nul / mal renseigné)
     match    = set(MATCH_LABELS)       # matchs LÉGITIMES de l'inventaire courant
     T = lambda r: r["TYPE_RECONCILIATION"]
     A = lambda r: r["MRM_ACTION"]
@@ -119,6 +121,10 @@ def compute_synthese(df_result: DataFrame) -> dict:
     nb_princ, pm_princ      = mrm(lambda r: T(r) in princ)
     nb_aff,   pm_aff_mrm    = mrm(lambda r: T(r) in aff)
     nb_recup, pm_recup_mrm  = mrm(lambda r: T(r) in recup)
+    # Clé de secours « clause » : matchs légitimes (vraie contrepartie MRM) posés
+    # quand le RPP compte est nul / mal renseigné. Bucket distinct → ligne dédiée
+    # dans bilan_cas pour auditer les éventuels faux positifs (clé moins stricte).
+    nb_clause, pm_clause_mrm = mrm(lambda r: T(r) in clause)
     nb_del,   pm_del        = mrm(lambda r: T(r) == "MRM_DELETE")
     nb_miss,  pm_miss       = mrm(lambda r: T(r) == "MRM_MISSING")
     nb_def,   pm_def        = cpt(lambda r: T(r) == "CPT_ONLY")
@@ -135,7 +141,14 @@ def compute_synthese(df_result: DataFrame) -> dict:
     # CPT récupérés via un MRM statut NON : anomalie résolue (contrepartie MRM
     # existe, statut NON → PM MRM=0). EXCLUS de toutes les métriques de valeur ;
     # présentés à part dans le compte (analyse dédiée recup_statut_non).
+    # Ventilation par exercice via LATE_SOURCE : STATUT_NON = exercice N,
+    # STATUT_NON_N1 = exercice N+1 (cf. main.py, passe de repêchage). L'agrégat
+    # nb_recup_non = N + N+1 reste utilisé par la bulle COMPTE / viz.
     nb_recup_non, pm_recup_non_cpt = cpt(lambda r: T(r) == RECUP_NON_LABEL)
+    nb_recup_non_n,  pm_recup_non_n_cpt  = cpt(
+        lambda r: T(r) == RECUP_NON_LABEL and S(r) == "STATUT_NON")
+    nb_recup_non_n1, pm_recup_non_n1_cpt = cpt(
+        lambda r: T(r) == RECUP_NON_LABEL and S(r) == "STATUT_NON_N1")
 
     # AUTO-CONTRÔLE : l'hypothèse métier « statut NON ⇒ PM MRM = 0 » doit tenir
     # sur les repêchés. Si une PM MRM non nulle apparaît, l'exclusion des
@@ -151,8 +164,10 @@ def compute_synthese(df_result: DataFrame) -> dict:
             nb_recup_non_pm_nz, pm_recup_non_mrm,
         )
 
-    # Matchés légitimes de l'inventaire courant.
-    nb_match     = nb_princ + nb_aff + nb_recup
+    # Matchés légitimes de l'inventaire courant (clé clause incluse — c'est un
+    # vrai match, posé via une clé de secours). nb_match DOIT sommer tous les
+    # buckets, sinon l'invariant classified_rows == total_rows casse.
+    nb_match     = nb_princ + nb_aff + nb_recup + nb_clause
     pm_match_mrm = agg("pm_mrm", lambda r: T(r) in match)
     pm_match_cpt = agg("pm_cpt", lambda r: T(r) in match)
 
@@ -325,6 +340,9 @@ def compute_synthese(df_result: DataFrame) -> dict:
         "principale_nb"   : nb_princ,           "principale_pm"   : pm_princ,
         "affinee_nb"      : nb_aff,             "affinee_pm_mrm"  : pm_aff_mrm,
         "recup_nb"        : nb_recup,           "recup_pm_mrm"    : pm_recup_mrm,
+        # Clé de secours « clause » (RPP nul / mal renseigné) — bucket de matchés
+        # à part, audité dans bilan_cas.
+        "clause_nb"       : nb_clause,          "clause_pm"       : pm_clause_mrm,
         "non_mappes_nb"   : nb_miss,            "non_mappes_pm"   : pm_miss,
         "keep_nb"  : keep_miss_nb,   "keep_pm"  : keep_miss_pm,
         "study_nb" : study_miss_nb,  "study_pm" : study_miss_pm,
@@ -348,6 +366,9 @@ def compute_synthese(df_result: DataFrame) -> dict:
         # Récupérés via MRM statut NON (anomalie résolue, hors métriques).
         "recup_non_nb"        : nb_recup_non,
         "recup_non_pm"        : pm_recup_non_cpt,
+        # Ventilation par exercice (info : ils sont au compte, PM MRM = 0).
+        "recup_non_n_nb"      : nb_recup_non_n,   "recup_non_n_pm"  : pm_recup_non_n_cpt,
+        "recup_non_n1_nb"     : nb_recup_non_n1,  "recup_non_n1_pm" : pm_recup_non_n1_cpt,
         "recup_non_pm_mrm"    : pm_recup_non_mrm,     # doit valoir 0 (contrôle)
         "recup_non_pm_mrm_nz" : nb_recup_non_pm_nz,   # nb dossiers PM MRM ≠ 0
         "recup_non_pm_mrm_ok" : recup_non_pm_mrm_ok,  # hypothèse NON ⇒ PM MRM = 0
@@ -502,6 +523,7 @@ def _render_box(d: dict, client: str) -> str:
         _row("Retrouvés clé principale", d["principale_nb"], d["principale_pm"]),
         _row("Retrouvés clé affinée",    d["affinee_nb"],    d["affinee_pm_mrm"]),
         _row("Retrouvés récupération",   d["recup_nb"],      d["recup_pm_mrm"]),
+        _row("Retrouvés clé clause",     d["clause_nb"],     d["clause_pm"]),
         _row("└ dont à supprimer (KO)",  del_ko,             None),
         _row("Non retrouvés au compte",  d["non_mappes_nb"], d["non_mappes_pm"]),
         _row("├ à conserver",         d["keep_nb"],        d["keep_pm"]),
@@ -588,6 +610,8 @@ def _render_indicateurs(d: dict) -> str:
         f"RÉCUPÉRÉS VIA MRM STATUT NON ({_n(d['recup_non_nb'])} dossiers, hors métriques)",
         f"  CPT_ONLY repêchés sur un MRM statut NON (PM MRM = 0, non remonté à la",
         f"  direction financière) : anomalie résolue. PM CPT {_n(d['recup_non_pm'])} €. Voir analyse dédiée.",
+        f"  ↳ part par exercice : N {_n(d['recup_non_n_nb'])} (PM CPT {_n(d['recup_non_n_pm'])} €) · "
+        f"N+1 {_n(d['recup_non_n1_nb'])} (PM CPT {_n(d['recup_non_n1_pm'])} €)",
         f"  ↳ contrôle PM MRM = 0 : "
         + ("✔ vérifié" if d["recup_non_pm_mrm_ok"]
            else f"✘ VIOLÉ — {_n(d['recup_non_pm_mrm_nz'])} dossier(s), "
