@@ -35,15 +35,21 @@ MATCH_LABELS = MATCH_PRINCIPALE + MATCH_AFFINEE + MATCH_RECUPERATION + MATCH_CLA
 
 
 # ============================================================================
-# PASSAGE IT → IP
+# CODES GARANTIE — PASSAGE IT → IP & IMPUTATION
 # ============================================================================
+# Codes garantie métier (terme de garantie) — RÉFÉRENCE UNIQUE : tout le reste
+# (offset IT→IP, garantie des obs tardives, imputation) en dérive. Un seul
+# endroit à changer si le plan de garanties évolue.
+CODE_GARANTIE_IT = 60   # incapacité de travail (IT)
+CODE_GARANTIE_IP = 64   # invalidité permanente (IP)
+
 # Étape de récupération des orphelins : on rejoue le matching sur une clé sans
 # la garantie (rpp + dob + survenance exacte + nom), puis on valide par l'écart
 # de code garantie. Un passage incapacité (IT) → invalidité (IP) se traduit par
 #   garantie_CPT − garantie_MRM == IP_GARANTIE_OFFSET
 # Sinon le rapprochement est cassé (faux positif) → les dossiers restent orphelins.
-# Mettre None pour désactiver complètement l'étape IP.
-IP_GARANTIE_OFFSET   = 4
+# Dérivé des codes ci-dessus ; mettre None à la main pour désactiver l'étape IP.
+IP_GARANTIE_OFFSET   = CODE_GARANTIE_IP - CODE_GARANTIE_IT   # = 4
 RELAPSE_WINDOW_DAYS  = 30    # fenêtre max (jours) pour rattacher une rechute IT
 
 # Déclarations tardives IT : un CPT_ONLY resté orphelin (absent du MRM courant ET
@@ -51,7 +57,7 @@ RELAPSE_WINDOW_DAYS  = 30    # fenêtre max (jours) pour rattacher une rechute I
 # fin d'année (mois ∈ ORPHAN_FIN_ANNEE_MOIS) et dont la garantie vaut LATE_IT_GARANTIE
 # (incapacité de travail) est calé en CPT_LATE : observation tardive d'un IT dont la
 # couverture a vraisemblablement pris fin avant l'inventaire de l'exercice suivant.
-LATE_IT_GARANTIE      = 60
+LATE_IT_GARANTIE      = CODE_GARANTIE_IT
 
 # Label des observations tardives IT. Ces dossiers (garantie 60, survenance fin
 # d'année) n'apparaissent ni dans le MRM courant ni dans le N+1 : le sinistre a
@@ -78,6 +84,14 @@ RECUP_NON_LABEL       = "CPT_RECUP_NON"
 #   - sinon                                                   → à analyser
 ORPHAN_PM_THRESHOLD   = 20_000
 ORPHAN_FIN_ANNEE_MOIS = (11, 12)
+
+
+# IMPUTATION GARANTIE (préparation des données) — transform.impute_garantie_ip :
+# une ligne compte dont la garantie est nulle/vide ALORS QUE la date de passage en
+# invalidité (D_INVALIDITE) est renseignée est de fait un dossier invalidité → on
+# impute GARANTIE = CODE_GARANTIE_IP. Fait EN AMONT des clés de matching (la clé stricte est
+# un concat_ws qui ignore les NULL : une garantie nulle disparaîtrait de la clé →
+# collision IT/IP). Désactivation : passer ip_code=None à la fonction.
 
 
 # ============================================================================

@@ -27,6 +27,7 @@ from config import (
     CLIENT_MRM_STATUT_INV,
     CLIENT_CLAUSES,
     CLIENT_TYPE_CLAUSES,
+    CPT_PARQUET_PATH,
     TYPE_CLAUSE_CPT_PREFIX,
     TYPE_CLAUSE_MRM_VALUE,
     MRM_TYPE_CLAUSE_COL,
@@ -41,10 +42,41 @@ logger = logging.getLogger(__name__)
 # CHARGEMENT CPT
 # ============================================================================
 
+def _read_cpt_source(spark: SparkSession, cfg: DatabaseConfig) -> DataFrame:
+    """
+    Lit la source CPT brute : Parquet PRIORITAIRE, fallback table Hive.
+
+    Si CPT_PARQUET_PATH (config/profile.py) est défini, on lit le Parquet en
+    priorité (export de la même table → mêmes colonnes brutes, donc les filtres
+    aval s'appliquent à l'identique). Tout échec de lecture (chemin absent /
+    illisible / non-Parquet) retombe automatiquement sur la table Hive : la prod
+    n'est jamais bloquée par un parquet manquant. La source effectivement utilisée
+    est TOUJOURS tracée (débogage industrialisation).
+    """
+    if CPT_PARQUET_PATH:
+        try:
+            df = spark.read.parquet(CPT_PARQUET_PATH)
+            logger.info("CPT source = PARQUET [%s]", CPT_PARQUET_PATH)
+            return df
+        except Exception as exc:
+            logger.warning(
+                "CPT parquet illisible [%s] : %s — fallback table Hive [%s].",
+                CPT_PARQUET_PATH, exc, cfg.cpt_table,
+            )
+
+    df = spark.table(cfg.cpt_table)
+    logger.info("CPT source = HIVE [%s]", cfg.cpt_table)
+    return df
+
+
 @timed_fn("load_cpt_raw")
 def load_cpt_raw(spark: SparkSession, cfg: DatabaseConfig) -> DataFrame:
     """
     Charge les données CPT et applique les filtres en une seule passe.
+
+    Source : Parquet PRIORITAIRE si CPT_PARQUET_PATH est défini (cf.
+    _read_cpt_source), sinon table Hive (cfg.cpt_table). Fallback automatique
+    sur Hive en cas de parquet absent/illisible. La source est tracée dans les logs.
 
     Filtres appliqués dans l'ordre :
         1. Vision  — obligatoire (toujours)
@@ -70,7 +102,7 @@ def load_cpt_raw(spark: SparkSession, cfg: DatabaseConfig) -> DataFrame:
     Returns:
         DataFrame CPT filtré, prêt pour le nettoyage
     """
-    df = spark.table(cfg.cpt_table).filter(F.col("vision") == CLIENT_CPT_VISION)
+    df = _read_cpt_source(spark, cfg).filter(F.col("vision") == CLIENT_CPT_VISION)
 
     if CLIENT_CLAUSES:
         # Construire la liste des valeurs CPT complètes = préfixe + numéro

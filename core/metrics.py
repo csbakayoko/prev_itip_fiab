@@ -47,6 +47,7 @@ from config import (
 )
 from core.kpi_export import compute_synthese, kas_totaux
 from core.matching import categorize_mrm_conclusion
+from core.excel_export import export_excel
 
 
 # ============================================================================
@@ -698,15 +699,16 @@ def export_metriques(
     df_result   : DataFrame,
     d           : Optional[dict] = None,
     base_path   : str = DEFAULT_BASE_PATH,
-    formats     : Iterable[str] = ("csv", "json", "parquet"),
+    formats     : Iterable[str] = ("excel", "csv", "parquet"),
     delta_schema: Optional[str] = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     Écrit toutes les métriques sur DBFS, sous <base>/<CLIENT>_<PERIM>/metrics.
 
-    formats ⊆ {csv, json, parquet, excel, delta} — excel produit un seul
-    .xlsx multi-onglets ; delta requiert delta_schema (une table
-    <schema>.itip_metric_<nom>_<perim> par métrique).
+    formats ⊆ {excel, csv, parquet, json, delta} — EXCEL est le format
+    privilégié (classeur multi-onglets propre, onglets nommés par axe d'étude,
+    tables Excel détectées par Power BI — cf. core/excel_export.py) ; delta
+    requiert delta_schema (une table <schema>.itip_metric_<nom>_<perim> par métrique).
     """
     tables  = toutes_metriques(df_result, d)
     formats = {f.lower() for f in formats}
@@ -743,10 +745,8 @@ def export_metriques(
 
     if "excel" in formats:
         path = f"{out}/metrics_{CLIENT_NAME}_{_PERIMETRE}.xlsx"
-        with pd.ExcelWriter(path, engine="openpyxl") as writer:
-            for name, pdf in tables.items():
-                pdf.to_excel(writer, sheet_name=name[:31], index=False)
-        print(f"  ✓ [EXCEL]   {path}")
+        export_excel(tables, path, client=CLIENT_NAME, perimetre=_PERIMETRE)
+        print(f"  ✓ [EXCEL]   {path}  (onglets par axe + Sommaire, prêt Power BI)")
 
     print(f"[METRICS] export terminé → {out}\n")
     return tables

@@ -68,7 +68,9 @@ if CHECKPOINT_DIR:
 # les tables <schema>.itip_metric_<nom>_<perim>. Sans schéma, les fichiers
 # parquet/csv sous DBFS restent disponibles (connecteur fichier / import).
 DELTA_SCHEMA = EXPORT_DELTA_SCHEMA            # ex. "hive_metastore.itip_fiab"
-FORMATS      = ("delta", "parquet", "csv") if DELTA_SCHEMA else ("parquet", "csv")
+# Excel TOUJOURS produit (classeur propre multi-onglets, import fichier Power BI) ;
+# Delta en plus si un schéma est configuré (connexion SQL Warehouse).
+FORMATS      = ("excel", "delta", "parquet", "csv") if DELTA_SCHEMA else ("excel", "parquet", "csv")
 
 print("Périmètre :", CLIENT_NAME)
 print("Formats   :", FORMATS, "| schéma Delta :", DELTA_SCHEMA or "—")
@@ -177,7 +179,7 @@ if DELTA_SCHEMA:
         print(f"  {DELTA_SCHEMA}.itip_metric_{name}_{metrics._PERIMETRE}")
 else:
     print("Pas de schéma Delta configuré (EXPORT_DELTA_SCHEMA dans config/profile.py)")
-    print("→ Power BI : importer les parquet/csv du dossier ci-dessus.")
+    print("→ Power BI : importer le classeur Excel (onglets par axe + Sommaire) ou les parquet/csv du dossier ci-dessus.")
 
 # Aperçu de la ligne de synthèse exportée (KPI du run).
 display(tables["synthese"])

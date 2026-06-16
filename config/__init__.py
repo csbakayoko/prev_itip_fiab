@@ -23,6 +23,7 @@ from .profile import (
     CLIENT_TYPE_CLAUSES,
     FICHIER_MRM,
     FICHIER_MRM_N1,
+    CPT_PARQUET_PATH,
     DEV_MODE,
     CHECKPOINT_DIR,
     EXPORT_ANALYSES,
@@ -55,6 +56,8 @@ from .params import (
     RECUP_NON_LABEL,
     ORPHAN_PM_THRESHOLD,
     ORPHAN_FIN_ANNEE_MOIS,
+    CODE_GARANTIE_IT,
+    CODE_GARANTIE_IP,
 )
 
 logger = logging.getLogger(__name__)

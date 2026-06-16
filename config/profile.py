@@ -30,6 +30,13 @@ CLIENT_TYPE_CLAUSES = ["PB"]       # "PB" / "HPB" ; filtre type (MRM = PB seul)
 FICHIER_MRM    = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_31_12_23_V3.csv"
 FICHIER_MRM_N1 = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_30_06_24.csv"  # MRM N+1 (30/06/2024)
 
+# ── Source CPT parquet (prioritaire sur la table Hive si défini et lisible) ──
+# Export parquet de la table compte (mêmes colonnes brutes que la table Hive).
+# Chargé EN PRIORITÉ par load_cpt_raw pour accélérer / fiabiliser le run ;
+# fallback automatique sur la table Hive (db_cfg.cpt_table) si le chemin est
+# absent ou illisible. None = lire directement la table Hive.
+CPT_PARQUET_PATH = None
+
 # ── Mode d'exécution ────────────────────────────────────────────────────────
 DEV_MODE = True                   # False en prod (Job Databricks remplit RUN_PARAMS)
 
@@ -43,5 +50,5 @@ CHECKPOINT_DIR = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/itip
 # ── Export des analyses (restitution toujours en console ; écriture fichiers) ─
 EXPORT_ANALYSES    = False        # True = écrit les analyses sur disque (DBFS)
 EXPORT_GRAPHS      = True         # True = graphiques de restitution (affichage + PNG DBFS)
-EXPORT_FORMATS     = ("csv", "parquet", "excel", "json")  # ⊆ {csv, parquet, excel, json, delta}
+EXPORT_FORMATS     = ("excel", "csv", "parquet")  # ⊆ {excel, csv, parquet, json, delta} — Excel privilégié (Power BI)
 EXPORT_DELTA_SCHEMA = None        # schéma metastore cible si "delta" ∈ EXPORT_FORMATS

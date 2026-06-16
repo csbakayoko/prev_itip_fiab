@@ -10,8 +10,9 @@ import pyspark.sql.functions as F
 from pyspark.sql.window import Window
 from typing import Dict, List, Optional, Tuple
 
-from config import MAPPING_CPT, MAPPING_MRM, TechnicalConfig, tech_cfg
+from config import MAPPING_CPT, MAPPING_MRM, TechnicalConfig, tech_cfg, CODE_GARANTIE_IP
 from core._timing import timed_fn
+from core.controls import controle_colonnes
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,66 @@ def normalize_name_truncated(col: F.Column, n: int = 20) -> F.Column:
     return F.regexp_replace(
         F.substring(F.upper(F.trim(col)), 1, n),
         r"\s+", "",
+    )
+
+
+# ============================================================================
+# IMPUTATION GARANTIE (préparation des données)
+# ============================================================================
+
+def impute_garantie_ip(
+    df            : DataFrame,
+    garantie_col  : str = "GARANTIE",
+    invalidite_col: str = "D_INVALIDITE",
+    ip_code       : int = CODE_GARANTIE_IP,
+) -> DataFrame:
+    """
+    Impute la garantie IP sur les lignes compte sans garantie mais en invalidité.
+
+    Règle métier : une ligne dont `garantie_col` est nulle/vide ALORS QUE la date
+    de passage en invalidité (`invalidite_col`) est renseignée est de fait un
+    dossier en invalidité → on renseigne GARANTIE = `ip_code` (64 = IP).
+
+    POURQUOI EN AMONT DES CLÉS : la clé stricte est un concat_ws (add_matching_keys)
+    qui IGNORE les NULL — une garantie nulle disparaît silencieusement de la clé
+    (rpp+dob+survenance+__+nom au lieu de +garantie+) et expose à des collisions
+    entre dossiers IT/IP d'un même assuré. Imputer d'abord rend la clé déterministe
+    ET rapproche ces dossiers de leur contrepartie MRM (sinon CPT_ONLY définitifs).
+
+    Désactivation : passer `ip_code=None` → renvoi inchangé (le code par défaut
+    est CODE_GARANTIE_IP, défini dans config/params.py).
+
+    Tracé (log) : nombre de lignes imputées — assumé comme une action Spark, même
+    pattern que dedupe_mrm_by_strict_key, pour la traçabilité d'industrialisation.
+    """
+    if ip_code is None:
+        logger.info("Imputation garantie IP désactivée (ip_code=None).")
+        return df
+
+    missing = [c for c in (garantie_col, invalidite_col) if c not in df.columns]
+    if missing:
+        logger.warning("Imputation garantie IP ignorée : colonne(s) absente(s) %s.", missing)
+        return df
+
+    garantie_vide = (
+        F.col(garantie_col).isNull()
+        | (F.trim(F.col(garantie_col).cast("string")) == F.lit(""))
+    )
+    eligible = garantie_vide & F.col(invalidite_col).isNotNull()
+
+    n_imputed = df.filter(eligible).count()
+    if n_imputed:
+        logger.info(
+            "Imputation garantie IP : %d ligne(s) compte sans garantie + "
+            "%s renseignée → %s=%d (IP).",
+            n_imputed, invalidite_col, garantie_col, ip_code,
+        )
+    else:
+        logger.info("Imputation garantie IP : aucune ligne éligible.")
+
+    return df.withColumn(
+        garantie_col,
+        F.when(eligible, F.lit(ip_code).cast("string")).otherwise(F.col(garantie_col)),
     )
 
 
@@ -279,10 +340,18 @@ def dedupe_mrm_by_strict_key(
 # CONVERSIONS
 # ============================================================================
 
-def cast_mrm_amounts(df: DataFrame, cols: List[str]) -> DataFrame:
-    """Convertit les montants MRM (séparateur virgule → double)."""
+def cast_amounts(df: DataFrame, cols: List[str]) -> DataFrame:
+    """
+    Convertit des colonnes de montant en double, de façon déterministe.
+
+    Tolère le séparateur décimal européen (virgule → point) : robuste pour le
+    CSV MRM ("12,34") comme pour un montant déjà numérique (Hive/Parquet CPT,
+    sans virgule → cast direct). Les colonnes absentes sont ignorées (garde),
+    pour ne pas casser si une source n'expose pas un montant optionnel.
+    """
     for c in cols:
-        df = df.withColumn(c, F.regexp_replace(F.col(c), ",", ".").cast("double"))
+        if c in df.columns:
+            df = df.withColumn(c, F.regexp_replace(F.col(c).cast("string"), ",", ".").cast("double"))
     return df
 
 
@@ -337,9 +406,11 @@ def drop_duplicate_columns(df: DataFrame) -> DataFrame:
 def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     """
     Pipeline complet de nettoyage CPT :
+        0. Contrôle qualité des colonnes brutes (non bloquant, tracé en WARNING)
         1. Sélection / renommage selon MAPPING_CPT
         2. Dédoublonnage technique (garde la ligne la plus récente)
-        3. Ajout des clés de matching
+        3. Imputation garantie IP (garantie nulle + D_INVALIDITE → 64), avant les clés
+        4. Ajout des clés de matching
 
     Args:
         df_raw : DataFrame CPT brut (sorti de loader.py)
@@ -348,6 +419,7 @@ def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     Returns:
         DataFrame CPT nettoyé, préfixé CPT_*, prêt pour le matching
     """
+    controle_colonnes(df_raw, "CPT", expected=MAPPING_CPT.keys())
     df = keep_latest_by_keys(df_raw, list(cfg.cpt_dup_keys), cfg.cpt_order_col)
     df = select_and_rename(df, MAPPING_CPT)
     # CPT : dates Hive en date/timestamp → cast("date") (tolère les timestamps,
@@ -355,6 +427,15 @@ def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     for date_col in ("D_NAISSANCE", "D_SURVENANCE", "D_INVALIDITE"):
         if date_col in df.columns:
             df = df.withColumn(date_col, F.col(date_col).cast("date"))
+    # Montants compte → double explicite. Hive les expose souvent en numérique,
+    # mais le cast rend le type DÉTERMINISTE quelle que soit la source (Hive ou
+    # Parquet) : PM/PSAP sont sommés (kpi_export, metrics) et comparés à un seuil
+    # (enrich_result_tags) — un montant resté en string fausserait ou casserait
+    # ces agrégations. cast_amounts tolère aussi un éventuel format européen.
+    df = cast_amounts(df, cols=["PM", "PSAP"])
+    # Imputation garantie IP : faite ICI, après le cast de D_INVALIDITE et AVANT
+    # les clés (concat_ws ignore les NULL → une garantie nulle casserait la clé).
+    df = impute_garantie_ip(df)
     df = add_matching_keys(df, rpp_col="RPP")
     df = prefix_columns(
         df, prefix="CPT_",
@@ -369,6 +450,7 @@ def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
 def clean_mrm(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     """
     Pipeline complet de nettoyage MRM :
+        0. Contrôle qualité des colonnes brutes (non bloquant, tracé en WARNING)
         1. Sélection / renommage selon MAPPING_MRM
         2. Cast des dates (D_NAISSANCE, D_SURVENANCE) et montants (PM, PSAP)
         3. Ajout des clés de matching
@@ -382,12 +464,15 @@ def clean_mrm(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     Returns:
         DataFrame MRM nettoyé, préfixé MRM_*, prêt pour le matching
     """
+    controle_colonnes(df_raw, "MRM", expected=MAPPING_MRM.keys())
     df = select_and_rename(df_raw, MAPPING_MRM)
     # MRM : dates du CSV au format français → to_date(col, "dd/MM/yyyy").
     for date_col in ("D_NAISSANCE", "D_SURVENANCE", "D_INVENTAIRE", "D_INVALIDITE"):
         if date_col in df.columns:
             df = df.withColumn(date_col, F.to_date(F.col(date_col), "dd/MM/yyyy"))
-    df = cast_mrm_amounts(df, cols=["PM", "PSAP"])
+    # Montants MRM (CSV, format européen "12,34") → double. PM_EXO_INV inclus
+    # (montant porté, casté par sécurité s'il est présent dans le CSV).
+    df = cast_amounts(df, cols=["PM", "PSAP", "PM_EXO_INV"])
     df = add_matching_keys(df, rpp_col="IDCORP")
     # Dédoublonnage MRM sur la clé stricte (déterministe) : retire les doublons,
     # priorité OUI > NON puis plus récent. Évite le double-comptage des doublons
