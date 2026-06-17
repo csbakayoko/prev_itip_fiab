@@ -35,6 +35,7 @@ import pyspark.sql.functions as F
 from config import (
     WINDOW_DAYS, IP_GARANTIE_OFFSET, RELAPSE_WINDOW_DAYS, LATE_IT_GARANTIE,
     ORPHAN_FIN_ANNEE_MOIS, ORPHAN_PM_THRESHOLD, OBS_TARDIVE_LABEL, DATE_INVENTAIRE,
+    LOG_VOLUMETRIE,
 )
 from core._timing import timed_fn
 
@@ -208,8 +209,9 @@ def execute_matching_step(
     df_matched = _materialize(
         df_matched.withColumn("TYPE_RECONCILIATION", F.lit(label))
     )
-    n_matched = df_matched.count()
-    print(f"[matching]   ↳ {label} : {n_matched:,} matchs")
+    # Comptage PUREMENT informatif (df_matched est déjà matérialisé) → gaté.
+    if LOG_VOLUMETRIE:
+        print(f"[matching]   ↳ {label} : {df_matched.count():,} matchs")
 
     # Anti-join sur la clé : on retire des remaining les lignes dont la clé est
     # dans matched. _materialize coupe la lignée (cf. docstring).
@@ -316,8 +318,8 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     # cascade (les étapes suivantes se matérialisent à leur tour).
     df_cpt = _materialize(df_cpt_clean)
     df_mrm = _materialize(df_mrm_clean)
-    n_cpt, n_mrm = df_cpt.count(), df_mrm.count()
-    print(f"[matching] entrée : CPT={n_cpt:,} | MRM={n_mrm:,}")
+    if LOG_VOLUMETRIE:
+        print(f"[matching] entrée : CPT={df_cpt.count():,} | MRM={df_mrm.count():,}")
 
     results: List[DataFrame] = []
     cpt_rem, mrm_rem = df_cpt, df_mrm
@@ -419,8 +421,9 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     df_final = reduce(
         lambda a, b: a.unionByName(b, allowMissingColumns=True), results
     ).cache()
-    n_final = df_final.count()
-    print(f"[matching]   ↳ union : {n_final:,} lignes")
+    # Comptage informatif (la cache se matérialise de toute façon en aval) → gaté.
+    if LOG_VOLUMETRIE:
+        print(f"[matching]   ↳ union : {df_final.count():,} lignes")
     print("[matching] === waterfall terminé ===")
     return df_final
 
@@ -476,8 +479,9 @@ def recover_late_declarations(
         df_result.filter(is_cpt_only)
                  .select(*[c for c in df_result.columns if not c.startswith("MRM_")])
     ).cache()
-    n_init = remaining_cpt.count()
-    print(f"[late] CPT_ONLY initiaux : {n_init:,}")
+    # Informatif (la cache se matérialise au 1er join de la cascade) → gaté.
+    if LOG_VOLUMETRIE:
+        print(f"[late] CPT_ONLY initiaux : {remaining_cpt.count():,}")
 
     recovered: List[DataFrame] = []
     for tag, df_mrm in inventories:
@@ -525,8 +529,8 @@ def recover_late_declarations(
         lambda a, b: a.unionByName(b, allowMissingColumns=True),
         [rest, remaining_cpt, *recovered],
     ).cache()
-    n_final = df_final.count()
-    print(f"[late]   ↳ union : {n_final:,} lignes")
+    if LOG_VOLUMETRIE:
+        print(f"[late]   ↳ union : {df_final.count():,} lignes")
     print("[late] === recovery terminé ===")
     return df_final
 

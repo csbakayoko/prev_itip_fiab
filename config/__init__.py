@@ -25,6 +25,7 @@ from .profile import (
     FICHIER_MRM_N1,
     CPT_PARQUET_PATH,
     DEV_MODE,
+    LOG_VOLUMETRIE,
     CHECKPOINT_DIR,
     EXPORT_ANALYSES,
     EXPORT_FORMATS,

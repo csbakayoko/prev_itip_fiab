@@ -40,6 +40,14 @@ CPT_PARQUET_PATH = None
 # ── Mode d'exécution ────────────────────────────────────────────────────────
 DEV_MODE = True                   # False en prod (Job Databricks remplit RUN_PARAMS)
 
+# Volumétrie dans les logs : les comptages Spark (.count()) PUREMENT informatifs
+# du waterfall (matchs/étape, entrée, union) et de la préparation (imputation,
+# dédoublonnage). Chacun déclenche un job Spark. True = trace les volumétries
+# (diagnostic riche, recommandé en mise au point) ; False = les SKIP (un job de
+# moins par étape) pour les gros périmètres en prod. N'affecte QUE les logs, JAMAIS
+# les résultats (les comptages de contrôle/flux de décision restent toujours actifs).
+LOG_VOLUMETRIE = True
+
 # Répertoire des checkpoints FIABLES (DBFS). Les checkpoints fiables survivent
 # à la perte d'un executor (autoscaling / spot), contrairement à localCheckpoint
 # dont les blocs vivent sur les executors (→ CHECKPOINT_RDD_BLOCK_ID_NOT_FOUND

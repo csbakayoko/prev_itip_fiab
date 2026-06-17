@@ -10,7 +10,9 @@ import pyspark.sql.functions as F
 from pyspark.sql.window import Window
 from typing import Dict, List, Optional
 
-from config import MAPPING_CPT, MAPPING_MRM, TechnicalConfig, tech_cfg, CODE_GARANTIE_IP
+from config import (
+    MAPPING_CPT, MAPPING_MRM, TechnicalConfig, tech_cfg, CODE_GARANTIE_IP, LOG_VOLUMETRIE,
+)
 from core._timing import timed_fn
 from core.prep.controls import controle_colonnes
 
@@ -131,15 +133,18 @@ def impute_garantie_ip(
     )
     eligible = garantie_vide & F.col(invalidite_col).isNotNull()
 
-    n_imputed = df.filter(eligible).count()
-    if n_imputed:
-        logger.info(
-            "Imputation garantie IP : %d ligne(s) compte sans garantie + "
-            "%s renseignée → %s=%d (IP).",
-            n_imputed, invalidite_col, garantie_col, ip_code,
-        )
-    else:
-        logger.info("Imputation garantie IP : aucune ligne éligible.")
+    # Comptage PUREMENT informatif (la volumétrie imputée) → gaté : un job Spark
+    # de moins en prod. L'imputation (withColumn) s'applique de toute façon.
+    if LOG_VOLUMETRIE:
+        n_imputed = df.filter(eligible).count()
+        if n_imputed:
+            logger.info(
+                "Imputation garantie IP : %d ligne(s) compte sans garantie + "
+                "%s renseignée → %s=%d (IP).",
+                n_imputed, invalidite_col, garantie_col, ip_code,
+            )
+        else:
+            logger.info("Imputation garantie IP : aucune ligne éligible.")
 
     return df.withColumn(
         garantie_col,
@@ -312,26 +317,28 @@ def dedupe_mrm_by_strict_key(
     w      = Window.partitionBy(key_col).orderBy(*order)
     ranked = df.withColumn("_rn", F.row_number().over(w))
 
-    # Justification du nettoyage (une seule passe d'agrégation sur les retirés).
-    stats = (
-        ranked.filter(F.col("_rn") > 1)
-        .select(
-            F.count(F.lit(1)).alias("n_removed"),
-            F.sum(F.when(is_non, 1).otherwise(0)).alias("n_removed_non"),
+    # Justification du nettoyage (une passe d'agrégation sur les retirés) — PUREMENT
+    # informative → gatée : un job Spark de moins. Le dédoublonnage s'applique de
+    # toute façon (filtre _rn==1 ci-dessous).
+    if LOG_VOLUMETRIE:
+        stats = (
+            ranked.filter(F.col("_rn") > 1)
+            .select(
+                F.count(F.lit(1)).alias("n_removed"),
+                F.sum(F.when(is_non, 1).otherwise(0)).alias("n_removed_non"),
+            )
+            .first()
         )
-        .first()
-    )
-    n_removed     = (stats["n_removed"] or 0) if stats else 0
-    n_removed_non = (stats["n_removed_non"] or 0) if stats else 0
-
-    if n_removed:
-        logger.info(
-            "Dédoublonnage MRM clé stricte : %d doublon(s) retiré(s) "
-            "(dont %d statut NON, %d autres départagés par date d'inventaire).",
-            n_removed, n_removed_non, n_removed - n_removed_non,
-        )
-    else:
-        logger.info("Dédoublonnage MRM clé stricte : aucun doublon détecté.")
+        n_removed     = (stats["n_removed"] or 0) if stats else 0
+        n_removed_non = (stats["n_removed_non"] or 0) if stats else 0
+        if n_removed:
+            logger.info(
+                "Dédoublonnage MRM clé stricte : %d doublon(s) retiré(s) "
+                "(dont %d statut NON, %d autres départagés par date d'inventaire).",
+                n_removed, n_removed_non, n_removed - n_removed_non,
+            )
+        else:
+            logger.info("Dédoublonnage MRM clé stricte : aucun doublon détecté.")
 
     return ranked.filter(F.col("_rn") == 1).drop("_rn")
 
