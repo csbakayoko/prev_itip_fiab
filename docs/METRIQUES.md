@@ -5,6 +5,9 @@
 > univers de calcul (périmètre / limites) et sa lecture pratique. Il sert de
 > contrat pour les fonctions de calcul et les sorties (Excel / JSON / CSV /
 > Parquet / base).
+>
+> 📘 **Pour une lecture pédagogique avec exemples chiffrés** (interprétation
+> orale, intérêt, limites de chaque KPI) → [`GUIDE_KPI.md`](GUIDE_KPI.md).
 
 ---
 
