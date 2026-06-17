@@ -21,7 +21,7 @@ Cf. notebook notebooks/itip_fiab_key_audit.py.
 """
 
 from functools import reduce
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Tuple
 
 import pandas as pd
 from pyspark.sql import Column, DataFrame

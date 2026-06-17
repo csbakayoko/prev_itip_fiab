@@ -604,21 +604,21 @@ def _render_indicateurs(d: dict) -> str:
         + (f" · sans consigne {_n(d['n1_sans_consigne'])}" if d["n1_sans_consigne"] else ""),
         "",
         f"SINISTRES CLOS AVANT INVENTAIRE SUIVANT ({_n(d['obs_nb'])} dossiers, hors métriques)",
-        f"  Obs. tardives IT (garantie 60, fin d'année) : sinistre clos avant l'inventaire",
+        "  Obs. tardives IT (garantie 60, fin d'année) : sinistre clos avant l'inventaire",
         f"  MRM N+1 → non retrouvé (explicable, pas une anomalie). PM CPT {_n(d['obs_pm'])} €.",
         "",
         f"RÉCUPÉRÉS VIA MRM STATUT NON ({_n(d['recup_non_nb'])} dossiers, hors métriques)",
-        f"  CPT_ONLY repêchés sur un MRM statut NON (PM MRM = 0, non remonté à la",
+        "  CPT_ONLY repêchés sur un MRM statut NON (PM MRM = 0, non remonté à la",
         f"  direction financière) : anomalie résolue. PM CPT {_n(d['recup_non_pm'])} €. Voir analyse dédiée.",
         f"  ↳ part par exercice : N {_n(d['recup_non_n_nb'])} (PM CPT {_n(d['recup_non_n_pm'])} €) · "
         f"N+1 {_n(d['recup_non_n1_nb'])} (PM CPT {_n(d['recup_non_n1_pm'])} €)",
-        f"  ↳ contrôle PM MRM = 0 : "
+        "  ↳ contrôle PM MRM = 0 : "
         + ("✔ vérifié" if d["recup_non_pm_mrm_ok"]
            else f"✘ VIOLÉ — {_n(d['recup_non_pm_mrm_nz'])} dossier(s), "
                 f"PM MRM {_n(d['recup_non_pm_mrm'])} € (voir logs)"),
         "",
         f"ANOMALIES — CPT_ONLY définitifs ({_n(d['def_nb'])} dossiers, PM CPT {_n(d['def_pm'])} €)",
-        f"  Dossiers compte sans contrepartie MRM, ni récupérés, ni explicables.",
+        "  Dossiers compte sans contrepartie MRM, ni récupérés, ni explicables.",
         "",
         f"CONTRÔLE DE COHÉRENCE : {coh} — {detail_coh}",
     ]

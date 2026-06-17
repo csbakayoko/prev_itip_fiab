@@ -8,7 +8,7 @@ import logging
 from pyspark.sql import DataFrame
 import pyspark.sql.functions as F
 from pyspark.sql.window import Window
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from config import MAPPING_CPT, MAPPING_MRM, TechnicalConfig, tech_cfg, CODE_GARANTIE_IP
 from core._timing import timed_fn

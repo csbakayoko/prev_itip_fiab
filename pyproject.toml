@@ -14,3 +14,35 @@ dependencies = []
 [tool.setuptools]
 packages = ["config", "core"]
 py-modules = ["main"]
+
+# Dépendances de DÉVELOPPEMENT uniquement (tests / lint). Le runtime prod reste
+# le Databricks Runtime (dependencies = [] ci-dessus). Installer en local / CI :
+#   pip install -e ".[dev]"
+[project.optional-dependencies]
+dev = [
+    "pyspark>=3.4",
+    "pandas>=1.5",
+    "openpyxl>=3.1",
+    "pytest>=7.4",
+    "ruff>=0.4",
+]
+
+[tool.pytest.ini_options]
+testpaths   = ["tests"]
+pythonpath  = ["."]            # rend config/ et core/ importables depuis tests/
+python_files = ["test_*.py"]
+addopts     = "-q"
+
+# Lint : on cible les VRAIS défauts (pyflakes F, warnings W) sans imposer de
+# reformatage (E501 lignes longues tolérées — docstrings/commentaires riches).
+[tool.ruff]
+line-length    = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["F", "W"]
+ignore = ["W605"]              # séquences d'échappement dans les regex de docstrings
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]            # ré-exports volontaires (API publique de config)
+"notebooks/*"    = ["F401", "F821"]    # globals Databricks (display/dbutils/spark) + imports de confort interactif

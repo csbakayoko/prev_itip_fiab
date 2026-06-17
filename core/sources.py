@@ -29,9 +29,7 @@ Prérequis (à faire une fois côté Azure/IT) :
         dbutils.secrets.get("itip", "sp_client_secret").
 """
 
-import io
 import logging
-from typing import Optional
 
 from pyspark.sql import DataFrame, SparkSession
 

@@ -16,7 +16,7 @@ mais le reste compte (parquet pour la volumétrie, table Delta pour Power BI).
 
 import logging
 import os
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable
 
 from pyspark.sql import DataFrame
 

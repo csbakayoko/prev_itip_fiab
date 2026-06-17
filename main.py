@@ -12,7 +12,6 @@ Périmètre piloté par config/profile.py (par défaut : toutes les clauses). La
     spark-submit main.py        (ou exécution dans un notebook Databricks)
 """
 
-import logging
 
 from pyspark.sql import DataFrame, SparkSession
 
