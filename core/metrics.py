@@ -48,6 +48,7 @@ from config import (
 from core.kpi_export import compute_synthese, kas_totaux
 from core.matching import categorize_mrm_conclusion
 from core.excel_export import export_excel
+from core.synthese_contract import SyntheseScalars
 
 
 # ============================================================================
@@ -161,7 +162,7 @@ _EXERCICE_ORDRE = {EXERCICE_INV: 0, EXERCICE_N1: 1}
 # MÉTRIQUES SCALAIRES (reshape du dict de compute_synthese)
 # ============================================================================
 
-def synthese(d: dict) -> pd.DataFrame:
+def synthese(d: SyntheseScalars) -> pd.DataFrame:
     """Tous les indicateurs de tête en une ligne (historisable par run)."""
     cons = d["consignes"]
     return pd.DataFrame([{
@@ -203,7 +204,7 @@ def synthese(d: dict) -> pd.DataFrame:
     }])
 
 
-def bilan_cas(d: dict) -> pd.DataFrame:
+def bilan_cas(d: SyntheseScalars) -> pd.DataFrame:
     """LE bilan de la réconciliation, cas par cas — la table de présentation.
 
     Une ligne par cas : matchés de l'inventaire courant (par clé, puis total
@@ -291,7 +292,7 @@ def bilan_cas(d: dict) -> pd.DataFrame:
     } for volet, cas, nb, pm_mrm, pm_cpt, taux, expl in rows])
 
 
-def taux_chute(d: dict) -> pd.DataFrame:
+def taux_chute(d: SyntheseScalars) -> pd.DataFrame:
     """LE taux de chute, PM MRM et PM Compte (base chute + retrouvés) — graphe 7.
 
     Base chute = matchés de l'inventaire courant, hors « à supprimer » et
@@ -317,7 +318,7 @@ def taux_chute(d: dict) -> pd.DataFrame:
     }])
 
 
-def chute_par_exercice(d: dict) -> pd.DataFrame:
+def chute_par_exercice(d: SyntheseScalars) -> pd.DataFrame:
     """Taux de chute par exercice de matching : inventaire courant (les stats
     globales) et récupérés N+1 (analyse séparée, hors stats globales).
 
@@ -339,7 +340,7 @@ def chute_par_exercice(d: dict) -> pd.DataFrame:
     } for lbl, nb, pm_mrm, pm_cpt, taux in rows])
 
 
-def suivi_n1(d: dict) -> pd.DataFrame:
+def suivi_n1(d: SyntheseScalars) -> pd.DataFrame:
     """Suivi des consignes des récupérés N+1 (analyse séparée) — une ligne par
     consigne N+1. KEEP/ADD/STUDY = conformes (le dossier est retrouvé) ;
     DELETE = encore au compte ; consigne non reconnue à part."""
@@ -354,7 +355,7 @@ def suivi_n1(d: dict) -> pd.DataFrame:
     } for consigne, nb, statut in rows])
 
 
-def consignes(d: dict) -> pd.DataFrame:
+def consignes(d: SyntheseScalars) -> pd.DataFrame:
     """Analyse complète par consigne : conformité, PM et taux de chute —
     EXERCICE COURANT pur (les récupérés N+1 ont leur suivi séparé, suivi_n1).
 
@@ -381,7 +382,7 @@ def consignes(d: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def compte_justification(d: dict) -> pd.DataFrame:
+def compte_justification(d: SyntheseScalars) -> pd.DataFrame:
     """Décomposition du compte : retrouvés, récupérés N+1, anomalies — graphe 1.
 
     Une ligne par catégorie (nb + PM compte), avec son poids dans le compte.
@@ -404,7 +405,7 @@ def compte_justification(d: dict) -> pd.DataFrame:
     } for lbl, nb, pm in cats])
 
 
-def couverture_mrm(d: dict) -> pd.DataFrame:
+def couverture_mrm(d: SyntheseScalars) -> pd.DataFrame:
     """Part de la revue MRM retrouvée au compte, non retrouvés par consigne — graphe 2.
 
     Inclut les « à supprimer » retrouvées au compte (consigne non suivie).
@@ -429,7 +430,7 @@ def couverture_mrm(d: dict) -> pd.DataFrame:
     } for lbl, nb, pct, pm in rows])
 
 
-def conformite_globale(d: dict) -> pd.DataFrame:
+def conformite_globale(d: SyntheseScalars) -> pd.DataFrame:
     """Suivi des consignes au global (exercice courant) — graphe 8 : segments
     conforme / non retrouvé (conserver/étudier/ajouter) + suppression
     effective. Les récupérés N+1 ont leur suivi séparé (suivi_n1).
@@ -460,7 +461,7 @@ def conformite_globale(d: dict) -> pd.DataFrame:
 
 # ── Vues filtrées de consignes() — graphes 4, 5 et 9 ─────────────────────────
 
-def chute_par_consigne(d: dict) -> pd.DataFrame:
+def chute_par_consigne(d: SyntheseScalars) -> pd.DataFrame:
     """Taux de chute par consigne pertinente (= graphe 4)."""
     df = consignes(d)
     return df[df["PM_PERTINENTE"]][
@@ -468,7 +469,7 @@ def chute_par_consigne(d: dict) -> pd.DataFrame:
     ].reset_index(drop=True)
 
 
-def pm_par_consigne(d: dict) -> pd.DataFrame:
+def pm_par_consigne(d: SyntheseScalars) -> pd.DataFrame:
     """PM revue MRM vs PM compte par consigne pertinente (= graphe 9)."""
     df = consignes(d)
     return df[df["PM_PERTINENTE"]][
@@ -476,7 +477,7 @@ def pm_par_consigne(d: dict) -> pd.DataFrame:
     ].reset_index(drop=True)
 
 
-def conformite_consignes(d: dict) -> pd.DataFrame:
+def conformite_consignes(d: SyntheseScalars) -> pd.DataFrame:
     """Conformité par consigne, toutes consignes (= graphe 5)."""
     out = consignes(d)[
         ["CONSIGNE", "NB_TOTAL", "NB_CONFORMES", "PCT_CONFORMITE", "NB_KO", "NATURE_KO"]
@@ -580,7 +581,7 @@ def anomalies_cpt_only(
 # CONTRÔLES DE COHÉRENCE INTER-TABLES
 # ============================================================================
 
-def controles_coherence(tables: Dict[str, pd.DataFrame], d: dict) -> pd.DataFrame:
+def controles_coherence(tables: Dict[str, pd.DataFrame], d: SyntheseScalars) -> pd.DataFrame:
     """Recoupements INTER-TABLES : une même grandeur doit avoir la même valeur
     dans tous les onglets Power BI — l'étude raconte UNE histoire.
 
@@ -666,7 +667,7 @@ def controles_coherence(tables: Dict[str, pd.DataFrame], d: dict) -> pd.DataFram
 # ORCHESTRATION
 # ============================================================================
 
-def toutes_metriques(df_result: DataFrame, d: Optional[dict] = None) -> Dict[str, pd.DataFrame]:
+def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) -> Dict[str, pd.DataFrame]:
     """Toutes les métriques en un dict {nom: DataFrame pandas}.
 
     `d` = dict de compute_synthese si déjà calculé (ex. retour de
@@ -697,7 +698,7 @@ def toutes_metriques(df_result: DataFrame, d: Optional[dict] = None) -> Dict[str
 
 def export_metriques(
     df_result   : DataFrame,
-    d           : Optional[dict] = None,
+    d           : Optional[SyntheseScalars] = None,
     base_path   : str = DEFAULT_BASE_PATH,
     formats     : Iterable[str] = ("excel", "csv", "parquet"),
     delta_schema: Optional[str] = None,

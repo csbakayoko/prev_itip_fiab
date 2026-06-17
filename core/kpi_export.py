@@ -47,6 +47,7 @@ from config import (
     RECUP_NON_LABEL,
 )
 from core.matching import categorize_mrm_conclusion
+from core.synthese_contract import SyntheseScalars
 from core._timing import timed_fn
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ def _pct(num, den) -> float:
 # CALCUL DES SCALAIRES (une seule passe Spark)
 # ============================================================================
 
-def compute_synthese(df_result: DataFrame) -> dict:
+def compute_synthese(df_result: DataFrame) -> SyntheseScalars:
     """
     Agrège df_result en une passe (nb + PM MRM + PM CPT + volumétrie PM≠0 par
     catégorie) et retourne les scalaires de la synthèse.
