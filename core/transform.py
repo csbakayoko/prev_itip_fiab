@@ -419,7 +419,7 @@ def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     Returns:
         DataFrame CPT nettoyé, préfixé CPT_*, prêt pour le matching
     """
-    controle_colonnes(df_raw, "CPT", expected=MAPPING_CPT.keys())
+    controle_colonnes(df_raw, "CPT", MAPPING_CPT.keys())
     df = keep_latest_by_keys(df_raw, list(cfg.cpt_dup_keys), cfg.cpt_order_col)
     df = select_and_rename(df, MAPPING_CPT)
     # CPT : dates Hive en date/timestamp → cast("date") (tolère les timestamps,
@@ -464,7 +464,7 @@ def clean_mrm(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     Returns:
         DataFrame MRM nettoyé, préfixé MRM_*, prêt pour le matching
     """
-    controle_colonnes(df_raw, "MRM", expected=MAPPING_MRM.keys())
+    controle_colonnes(df_raw, "MRM", MAPPING_MRM.keys())
     df = select_and_rename(df_raw, MAPPING_MRM)
     # MRM : dates du CSV au format français → to_date(col, "dd/MM/yyyy").
     for date_col in ("D_NAISSANCE", "D_SURVENANCE", "D_INVENTAIRE", "D_INVALIDITE"):

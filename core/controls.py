@@ -6,17 +6,23 @@ n'est JAMAIS interrompu (choix « WARN + continue »). Quand le pipeline sera
 automatisé (Job Databricks), ces logs permettent de déboguer a posteriori sans
 casser la production. Le DataFrame est toujours renvoyé inchangé.
 
-Anomalies détectées (sur les colonnes brutes, avant select_and_rename) :
-    1. Noms de colonnes invalides : nul / vide / blanc, ou auto-généré par Spark
-       sur un header CSV manquant (`_c0`, `_c1`…). Symptôme typique des colonnes
-       « PM… » au nom perdu à la source.
-    2. Colonnes attendues absentes (clés du mapping non présentes).
-    3. Colonnes entièrement nulles (taux de null = 100 %).
+PÉRIMÈTRE DU CONTRÔLE : uniquement les colonnes RÉELLEMENT UTILISÉES par le
+pipeline — c.-à-d. les clés source des mappings (MAPPING_CPT / MAPPING_MRM,
+cf. config/mappings.py). Les tables brutes CPT/MRM portent des dizaines de
+colonnes non consommées (dont des colonnes « PM… » au nom perdu) : les contrôler
+ne ferait que du bruit dans les logs et coûterait une agrégation inutile sur
+tout le schéma. On se concentre donc sur ce que le pipeline lit vraiment :
+    1. Colonnes attendues (du mapping) absentes de la source.
+    2. Colonnes attendues présentes mais entièrement nulles (100 % de null).
+
+`colonnes_nom_invalide` reste disponible comme diagnostic AD HOC du schéma brut
+complet (noms nuls/vides/`_cN`), à appeler manuellement — il n'est pas branché au
+pipeline pour ne pas polluer les logs avec des colonnes non utilisées.
 """
 
 import logging
 import re
-from typing import Iterable, List, Optional
+from typing import Iterable, List
 
 from pyspark.sql import DataFrame
 import pyspark.sql.functions as F
@@ -28,7 +34,12 @@ _AUTO_NAME = re.compile(r"^_c\d+$")
 
 
 def colonnes_nom_invalide(columns: Iterable[str]) -> List[str]:
-    """Colonnes dont le NOM est nul, vide/blanc, ou auto-généré (`_c\\d+`)."""
+    """Colonnes dont le NOM est nul, vide/blanc, ou auto-généré (`_c\\d+`).
+
+    Diagnostic AD HOC du schéma brut complet (non branché au pipeline) : sert à
+    inspecter manuellement une source suspecte (header manquant → colonnes « PM… »
+    au nom perdu). Le contrôle du pipeline, lui, ne regarde que les colonnes du
+    mapping (cf. controle_colonnes)."""
     invalides = []
     for c in columns:
         if c is None or str(c).strip() == "" or _AUTO_NAME.match(str(c)):
@@ -39,58 +50,52 @@ def colonnes_nom_invalide(columns: Iterable[str]) -> List[str]:
 def controle_colonnes(
     df             : DataFrame,
     source_label   : str,
-    expected       : Optional[Iterable[str]] = None,
+    used_cols      : Iterable[str],
     check_full_null: bool = True,
 ) -> DataFrame:
     """
-    Contrôle qualité non bloquant des colonnes d'un DataFrame brut.
+    Contrôle qualité non bloquant, LIMITÉ aux colonnes utilisées par le pipeline.
 
     Args:
-        df              : DataFrame brut à contrôler (colonnes source).
+        df              : DataFrame brut à contrôler.
         source_label    : préfixe des logs pour la traçabilité ("CPT" / "MRM").
-        expected        : noms de colonnes attendus (ex. MAPPING_*.keys()) ; les
-                          absents sont loggés. None = pas de contrôle d'attendu.
-        check_full_null : si True, détecte les colonnes entièrement nulles —
-                          coût = UNE action Spark (agrégation), désactivable.
+        used_cols       : colonnes réellement consommées = clés source du mapping
+                          (MAPPING_CPT.keys() / MAPPING_MRM.keys()). SEULES ces
+                          colonnes sont contrôlées (pas tout le schéma brut).
+        check_full_null : si True, détecte les colonnes (utilisées) entièrement
+                          nulles — coût = UNE action Spark, désormais limitée aux
+                          colonnes du mapping (≈ 15-20, pas tout le schéma).
 
     Returns:
         Le DataFrame inchangé (le run continue toujours).
     """
-    cols = list(df.columns)
-    logger.info("[%s] contrôle colonnes : %d colonne(s) au total.", source_label, len(cols))
+    used    = list(used_cols)
+    present = [c for c in used if c in df.columns]
+    absent  = [c for c in used if c not in df.columns]
+    logger.info(
+        "[%s] contrôle colonnes utilisées (mapping) : %d/%d présentes.",
+        source_label, len(present), len(used),
+    )
 
-    # 1. Noms invalides (nul / vide / blanc / auto-généré `_cN`).
-    invalides = colonnes_nom_invalide(cols)
-    if invalides:
-        positions = [cols.index(c) for c in invalides]
+    # 1. Colonnes du mapping absentes (complète le warning de select_and_rename).
+    if absent:
         logger.warning(
-            "[%s] %d colonne(s) au nom invalide (nul/vide/`_cN`) : %s — positions %s. "
-            "Header source probablement manquant (cf. colonnes « PM… »).",
-            source_label, len(invalides), invalides, positions,
+            "[%s] %d colonne(s) du mapping absente(s) de la source : %s.",
+            source_label, len(absent), absent,
         )
 
-    # 2. Colonnes attendues absentes (complète le warning de select_and_rename).
-    if expected is not None:
-        manquantes = [c for c in expected if c not in cols]
-        if manquantes:
+    # 2. Colonnes du mapping entièrement nulles — une seule passe d'agrégation,
+    #    restreinte aux colonnes utilisées (plus de scan de tout le schéma brut).
+    if check_full_null and present:
+        # count(col) compte les NON-NULL → 0 = colonne entièrement nulle.
+        agg = df.select([F.count(F.col(f"`{c}`")).alias(c) for c in present]).first()
+        full_null = [c for c in present if (agg[c] or 0) == 0]
+        if full_null:
             logger.warning(
-                "[%s] %d colonne(s) attendue(s) absente(s) : %s.",
-                source_label, len(manquantes), manquantes,
+                "[%s] %d colonne(s) utilisée(s) entièrement nulle(s) : %s.",
+                source_label, len(full_null), full_null,
             )
-
-    # 3. Colonnes entièrement nulles — une seule passe d'agrégation.
-    if check_full_null:
-        valides = [c for c in cols if c and str(c).strip()]
-        if valides:
-            # count(col) compte les NON-NULL → 0 = colonne entièrement nulle.
-            agg = df.select([F.count(F.col(f"`{c}`")).alias(c) for c in valides]).first()
-            full_null = [c for c in valides if (agg[c] or 0) == 0]
-            if full_null:
-                logger.warning(
-                    "[%s] %d colonne(s) entièrement nulle(s) : %s.",
-                    source_label, len(full_null), full_null,
-                )
-            else:
-                logger.info("[%s] aucune colonne entièrement nulle.", source_label)
+        else:
+            logger.info("[%s] aucune colonne utilisée entièrement nulle.", source_label)
 
     return df
