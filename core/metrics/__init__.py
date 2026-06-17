@@ -1,7 +1,7 @@
 """
 Couche métriques — calcul des données de restitution depuis df_result.
 
-Sépare le CALCUL des données (ici) de leur RESTITUTION (core.viz, Excel,
+Sépare le CALCUL des données (ici) de leur RESTITUTION (core.metrics.viz, Excel,
 Power BI). Des fonctions simples, appelées depuis main :
 
     - les métriques scalaires prennent `d`, le dict de compute_synthese
@@ -14,7 +14,7 @@ Power BI). Des fonctions simples, appelées depuis main :
 Les fonctions renvoient des DONNÉES BRUTES (nombres, pas de chaînes formatées) :
 le formatage (M€, %, séparateurs FR) reste au niveau restitution.
 
-Correspondance avec les 9 graphiques (core.viz) :
+Correspondance avec les 9 graphiques (core.metrics.viz) :
     1. compte_justification   → compte_justification(d)
     2. couverture_mrm         → couverture_mrm(d)
     3. chute_par_clause       → chute_par_clause(df_result)  [× exercice]
@@ -45,10 +45,10 @@ import pyspark.sql.functions as F
 from config import (
     CLIENT_NAME, CLIENT_CLAUSES, MATCH_LABELS, TYPE_CLAUSE_CPT_PREFIX,
 )
-from core.kpi_export import compute_synthese, kas_totaux
-from core.matching import categorize_mrm_conclusion
-from core.excel_export import export_excel
-from core.synthese_contract import SyntheseScalars
+from core.synthese.kpi_export import compute_synthese, kas_totaux
+from core.match.matching import categorize_mrm_conclusion
+from core.io.excel_export import export_excel
+from core.synthese.synthese_contract import SyntheseScalars
 
 
 # ============================================================================
@@ -708,7 +708,7 @@ def export_metriques(
 
     formats ⊆ {excel, csv, parquet, json, delta} — EXCEL est le format
     privilégié (classeur multi-onglets propre, onglets nommés par axe d'étude,
-    tables Excel détectées par Power BI — cf. core/excel_export.py) ; delta
+    tables Excel détectées par Power BI — cf. core/io/excel_export.py) ; delta
     requiert delta_schema (une table <schema>.itip_metric_<nom>_<perim> par métrique).
     """
     tables  = toutes_metriques(df_result, d)

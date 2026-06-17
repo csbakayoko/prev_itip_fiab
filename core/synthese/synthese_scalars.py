@@ -19,7 +19,7 @@ from config import (
     OBS_TARDIVE_LABEL,
     RECUP_NON_LABEL,
 )
-from core.synthese_contract import SyntheseScalars
+from core.synthese.synthese_contract import SyntheseScalars
 
 logger = logging.getLogger(__name__)
 

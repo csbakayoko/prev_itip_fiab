@@ -5,7 +5,7 @@ import pytest
 pd = pytest.importorskip("pandas")
 pytest.importorskip("openpyxl")
 
-from core.excel_export import _safe_sheet_name, _number_format
+from core.io.excel_export import _safe_sheet_name, _number_format
 
 
 def test_safe_sheet_name_garde_les_noms_valides():

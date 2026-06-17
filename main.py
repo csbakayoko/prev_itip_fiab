@@ -6,7 +6,7 @@ Spine essentiel, multi-périmètre :
 
 Le calcul des indicateurs vit dans core.metrics (des fonctions qui
 reshapent le dict de la synthèse — une passe Spark — en tables pandas),
-leur mise en forme dans core.viz (9 graphiques-messages).
+leur mise en forme dans core.metrics.viz (9 graphiques-messages).
 
 Périmètre piloté par config/profile.py (par défaut : toutes les clauses). Lancement :
     spark-submit main.py        (ou exécution dans un notebook Databricks)
@@ -20,17 +20,17 @@ from config import (
     EXPORT_ANALYSES, EXPORT_FORMATS, EXPORT_DELTA_SCHEMA, EXPORT_GRAPHS,
     RECUP_NON_LABEL, CHECKPOINT_DIR,
 )
-from core.load_data import load_cpt_raw, load_mrm_raw
-from core.transform import clean_cpt, clean_mrm
-from core.matching import (
+from core.io.load_data import load_cpt_raw, load_mrm_raw
+from core.prep.transform import clean_cpt, clean_mrm
+from core.match.matching import (
     matching_waterfall,
     recover_late_declarations,
     flag_late_it_observations,
     enrich_result_tags,
 )
 from core.metrics import export_metriques
-from core.viz import restituer_graphiques
-from core.kpi_export import print_synthese
+from core.metrics.viz import restituer_graphiques
+from core.synthese.kpi_export import print_synthese
 from core._timing import timed
 import pyspark.sql.functions as F
 

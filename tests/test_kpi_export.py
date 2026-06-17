@@ -2,9 +2,10 @@
 
 import pytest
 
-pytest.importorskip("pyspark")          # core.kpi_export importe pyspark au chargement
+pytest.importorskip("pyspark")          # core.synthese.kpi_export importe pyspark au chargement
 
-from core.kpi_export import _pct, kas_totaux
+from core.synthese.synthese_scalars import _pct   # _pct vit avec la dérivation pure (#1)
+from core.synthese.kpi_export import kas_totaux
 
 
 def test_pct_nominal_et_denominateur_nul():

@@ -5,7 +5,7 @@ en local avec de simples dicts (les lignes agrégées), sans cluster. On couvre
 matchés / non retrouvés / anomalies / récupérés N+1 / obs tardives / repêchés NON.
 """
 
-from core.synthese_scalars import _scalars_from_rows
+from core.synthese.synthese_scalars import _scalars_from_rows
 
 
 def _row(type_rec, action=None, source=None, non=False,

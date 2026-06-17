@@ -28,7 +28,7 @@ from pyspark.sql import Column, DataFrame
 import pyspark.sql.functions as F
 
 from config import CODE_GARANTIE_IT, CODE_GARANTIE_IP
-from core.transform import normalize_name_full
+from core.prep.transform import normalize_name_full
 
 # Composantes de la clé stricte (suffixes canoniques, à préfixer CPT_ / MRM_).
 _STRICT_COMPONENTS: Tuple[str, ...] = (

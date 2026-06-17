@@ -6,9 +6,10 @@ TypedDict (ou l'inverse), ce test échoue."""
 import ast
 import pathlib
 
-from core.synthese_contract import SyntheseScalars
+from core.synthese.synthese_contract import SyntheseScalars
 
-SCALARS = pathlib.Path(__file__).resolve().parents[1] / "core" / "synthese_scalars.py"
+SCALARS = (pathlib.Path(__file__).resolve().parents[1]
+           / "core" / "synthese" / "synthese_scalars.py")
 
 
 def _return_keys_of_scalars_from_rows():

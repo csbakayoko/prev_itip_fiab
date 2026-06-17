@@ -50,13 +50,13 @@ from config import (
     db_cfg, tech_cfg, RUN_PARAMS, CLIENT_NAME, RECUP_NON_LABEL, CHECKPOINT_DIR,
     EXPORT_DELTA_SCHEMA,
 )
-from core.load_data import load_cpt_raw, load_mrm_raw
-from core.transform import clean_cpt, clean_mrm
-from core.matching import (
+from core.io.load_data import load_cpt_raw, load_mrm_raw
+from core.prep.transform import clean_cpt, clean_mrm
+from core.match.matching import (
     matching_waterfall, recover_late_declarations,
     flag_late_it_observations, enrich_result_tags,
 )
-from core.kpi_export import print_synthese
+from core.synthese.kpi_export import print_synthese
 from core import metrics
 from main import _split_mrm_statut
 

@@ -36,10 +36,10 @@ from pyspark.sql import DataFrame
 import pyspark.sql.functions as F
 
 from config import DATE_INVENTAIRE
-from core.matching import categorize_mrm_conclusion
-from core.synthese_contract import SyntheseScalars
-from core.synthese_scalars import _scalars_from_rows
-from core.synthese_render import render_synthese
+from core.match.matching import categorize_mrm_conclusion
+from core.synthese.synthese_contract import SyntheseScalars
+from core.synthese.synthese_scalars import _scalars_from_rows
+from core.synthese.synthese_render import render_synthese
 from core._timing import timed_fn
 
 logger = logging.getLogger(__name__)

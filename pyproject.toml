@@ -12,7 +12,10 @@ requires-python = ">=3.9"
 dependencies = []
 
 [tool.setuptools]
-packages = ["config", "core"]
+packages = [
+    "config", "core",
+    "core.io", "core.prep", "core.match", "core.synthese", "core.metrics",
+]
 py-modules = ["main"]
 
 # Dépendances de DÉVELOPPEMENT uniquement (tests / lint). Le runtime prod reste

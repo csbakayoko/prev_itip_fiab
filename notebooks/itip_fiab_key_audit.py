@@ -5,7 +5,7 @@
 # MAGIC But : jauger `key_strict` AVANT de s'y fier — résistance aux collisions,
 # MAGIC combinatoire (« combien de clés constructibles »), et expérience de
 # MAGIC substitution de garantie (60/64) sur les lignes compte sans garantie.
-# MAGIC **Aucune écriture** : pur diagnostic. Lance les fonctions de `core.key_audit`
+# MAGIC **Aucune écriture** : pur diagnostic. Lance les fonctions de `core.match.key_audit`
 # MAGIC sur les DataFrames nettoyés (mêmes loaders / clean que le pipeline prod).
 # MAGIC
 # MAGIC ⚠ Avant de lancer : git pull du Repo + `dbutils.library.restartPython()`.
@@ -20,9 +20,9 @@ spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
 spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
 
 from config import db_cfg, tech_cfg
-from core.load_data import load_cpt_raw, load_mrm_raw
-from core.transform import clean_cpt, clean_mrm
-from core import key_audit
+from core.io.load_data import load_cpt_raw, load_mrm_raw
+from core.prep.transform import clean_cpt, clean_mrm
+from core.match import key_audit
 
 # COMMAND ----------
 

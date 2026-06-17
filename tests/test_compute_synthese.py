@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("pyspark")
 
-from core.kpi_export import compute_synthese
+from core.synthese.kpi_export import compute_synthese
 
 
 def _df_result(spark):

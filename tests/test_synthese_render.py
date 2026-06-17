@@ -2,8 +2,8 @@
 alimente le rendu pur : on vérifie en local que render_synthese produit bien une
 synthèse lisible (bulles, indicateurs, consignes, entête)."""
 
-from core.synthese_scalars import _scalars_from_rows
-from core.synthese_render import render_synthese
+from core.synthese.synthese_scalars import _scalars_from_rows
+from core.synthese.synthese_render import render_synthese
 
 
 def _minimal_d():

@@ -320,7 +320,7 @@ le bloc. Le graphe 3 ne trace que le bloc inventaire.
 
 ---
 
-## 6. Tables métriques exportées (core/metrics.py — toutes_metriques)
+## 6. Tables métriques exportées (core/metrics/__init__.py — toutes_metriques)
 
 Les 15 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
 Parquet / Excel / Delta) :

@@ -2,9 +2,9 @@
 
 import pytest
 
-pytest.importorskip("pyspark")          # core.controls importe pyspark au chargement
+pytest.importorskip("pyspark")          # core.prep.controls importe pyspark au chargement
 
-from core.controls import colonnes_nom_invalide
+from core.prep.controls import colonnes_nom_invalide
 
 
 def test_detecte_noms_nuls_vides_et_auto_generes():

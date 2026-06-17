@@ -20,7 +20,7 @@ problématique de fiabilisation (direction financière et engagements) :
     9. pm_par_consigne        — PM revue vs PM compte par consigne (Δ en € et en %)
 
 Usage (notebook Databricks) :
-    from core.viz import restituer_graphiques
+    from core.metrics.viz import restituer_graphiques
 
     d = print_synthese(df_result)                          # la passe Spark
     figs = restituer_graphiques(df_result, d)              # affiche + PNG DBFS
@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 from pyspark.sql import DataFrame
 
-from core.kpi_export import compute_synthese, kas_totaux
+from core.synthese.kpi_export import compute_synthese, kas_totaux
 from core.metrics import (
     chute_par_clause, anomalies_cpt_only, output_dir, _to_local,
     EXERCICE_INV,

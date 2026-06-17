@@ -21,7 +21,7 @@ spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
 
 from main import run
 from core import metrics
-from core.viz import restituer_graphiques
+from core.metrics.viz import restituer_graphiques
 
 # COMMAND ----------
 
@@ -42,7 +42,7 @@ df_result = run(spark)
 
 # COMMAND ----------
 
-from core.kpi_export import compute_synthese
+from core.synthese.kpi_export import compute_synthese
 
 d = compute_synthese(df_result)
 assert d["coherent"], f"Lignes non classées : {d['labels_inconnus']}"

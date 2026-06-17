@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("pyspark")
 
-from core.transform import impute_garantie_ip, cast_amounts, add_matching_keys
+from core.prep.transform import impute_garantie_ip, cast_amounts, add_matching_keys
 from config import CODE_GARANTIE_IP
 
 

@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 from config import MAPPING_CPT, MAPPING_MRM, TechnicalConfig, tech_cfg, CODE_GARANTIE_IP
 from core._timing import timed_fn
-from core.controls import controle_colonnes
+from core.prep.controls import controle_colonnes
 
 logger = logging.getLogger(__name__)
 
