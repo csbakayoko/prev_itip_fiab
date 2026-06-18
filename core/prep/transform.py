@@ -347,7 +347,7 @@ def dedupe_mrm_by_strict_key(
 # CONVERSIONS
 # ============================================================================
 
-def cast_amounts(df: DataFrame, cols: List[str]) -> DataFrame:
+def cast_amounts(df: DataFrame, cols: List[str], fill_zero: bool = False) -> DataFrame:
     """
     Convertit des colonnes de montant en double, de façon déterministe.
 
@@ -355,10 +355,20 @@ def cast_amounts(df: DataFrame, cols: List[str]) -> DataFrame:
     CSV MRM ("12,34") comme pour un montant déjà numérique (Hive/Parquet CPT,
     sans virgule → cast direct). Les colonnes absentes sont ignorées (garde),
     pour ne pas casser si une source n'expose pas un montant optionnel.
+
+    fill_zero=True : remplace les montants NULL par 0.0 (prétraitement PM/PSAP des
+    deux bases). Neutre pour les métriques — les sommes coalescent déjà NULL→0 et
+    les compteurs « PM non nulle » excluent NULL comme 0 — mais uniformise la
+    donnée (exports Power BI sans NULL, seuils et écarts sans cas NULL à gérer).
+    La distinction « PM non renseignée » vs « PM = 0 » est perdue à ce niveau ;
+    les colonnes entièrement nulles restent tracées par controle_colonnes.
     """
     for c in cols:
         if c in df.columns:
-            df = df.withColumn(c, F.regexp_replace(F.col(c).cast("string"), ",", ".").cast("double"))
+            casted = F.regexp_replace(F.col(c).cast("string"), ",", ".").cast("double")
+            if fill_zero:
+                casted = F.coalesce(casted, F.lit(0.0))
+            df = df.withColumn(c, casted)
     return df
 
 
@@ -434,12 +444,11 @@ def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     for date_col in ("D_NAISSANCE", "D_SURVENANCE", "D_INVALIDITE"):
         if date_col in df.columns:
             df = df.withColumn(date_col, F.col(date_col).cast("date"))
-    # Montants compte → double explicite. Hive les expose souvent en numérique,
-    # mais le cast rend le type DÉTERMINISTE quelle que soit la source (Hive ou
-    # Parquet) : PM/PSAP sont sommés (kpi_export, metrics) et comparés à un seuil
-    # (enrich_result_tags) — un montant resté en string fausserait ou casserait
-    # ces agrégations. cast_amounts tolère aussi un éventuel format européen.
-    df = cast_amounts(df, cols=["PM", "PSAP"])
+    # Montants compte → double explicite + NULL remplacés par 0 (fill_zero).
+    # Le cast rend le type DÉTERMINISTE quelle que soit la source (Hive/Parquet) :
+    # PM/PSAP sont sommés (kpi_export, metrics) et comparés à un seuil
+    # (enrich_result_tags) ; le fill 0 uniformise (pas de NULL en aval / exports).
+    df = cast_amounts(df, cols=["PM", "PSAP"], fill_zero=True)
     # Imputation garantie IP : faite ICI, après le cast de D_INVALIDITE et AVANT
     # les clés (concat_ws ignore les NULL → une garantie nulle casserait la clé).
     df = impute_garantie_ip(df)
@@ -477,9 +486,9 @@ def clean_mrm(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     for date_col in ("D_NAISSANCE", "D_SURVENANCE", "D_INVENTAIRE", "D_INVALIDITE"):
         if date_col in df.columns:
             df = df.withColumn(date_col, F.to_date(F.col(date_col), "dd/MM/yyyy"))
-    # Montants MRM (CSV, format européen "12,34") → double. PM_EXO_INV inclus
-    # (montant porté, casté par sécurité s'il est présent dans le CSV).
-    df = cast_amounts(df, cols=["PM", "PSAP", "PM_EXO_INV"])
+    # Montants MRM (CSV, format européen "12,34") → double + NULL remplacés par 0
+    # (fill_zero). PM_EXO_INV inclus (montant porté, casté s'il est présent).
+    df = cast_amounts(df, cols=["PM", "PSAP", "PM_EXO_INV"], fill_zero=True)
     df = add_matching_keys(df, rpp_col="IDCORP")
     # Dédoublonnage MRM sur la clé stricte (déterministe) : retire les doublons,
     # priorité OUI > NON puis plus récent. Évite le double-comptage des doublons

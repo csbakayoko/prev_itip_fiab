@@ -34,6 +34,16 @@ def test_cast_amounts_virgule_europeenne_et_colonne_absente(spark):
     assert abs(out["PSAP"] - 100.5) < 1e-9
 
 
+def test_cast_amounts_fill_zero_remplace_les_null(spark):
+    df = spark.createDataFrame([(None, "12,5"), ("7", None)], ["PM", "PSAP"])
+    vals = {(r["PM"], r["PSAP"]) for r in cast_amounts(df, ["PM", "PSAP"], fill_zero=True).collect()}
+    assert (0.0, 12.5) in vals       # PM NULL → 0, PSAP "12,5" → 12.5
+    assert (7.0, 0.0) in vals        # PSAP NULL → 0, PM "7" → 7.0
+    # sans fill_zero, le NULL reste NULL (comportement par défaut inchangé)
+    out = cast_amounts(df, ["PM"]).collect()
+    assert any(r["PM"] is None for r in out)
+
+
 def test_add_matching_keys_inclut_la_garantie(spark):
     df = spark.createDataFrame(
         [("R1", "DUPONT JEAN", dt.date(1980, 5, 1), dt.date(2020, 1, 1), "64", "CPB_121981")],
