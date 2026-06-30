@@ -46,22 +46,10 @@ spark.conf.set("spark.sql.adaptive.enabled", "true")
 spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
 spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
 
-from config import (
-    db_cfg, tech_cfg, RUN_PARAMS, CLIENT_NAME, RECUP_NON_LABEL, CHECKPOINT_DIR,
-    EXPORT_DELTA_SCHEMA,
-)
-from core.io.load_data import load_cpt_raw, load_mrm_raw
-from core.prep.transform import clean_cpt, clean_mrm
-from core.match.matching import (
-    matching_waterfall, recover_late_declarations,
-    flag_late_it_observations, enrich_result_tags,
-)
+from config import CLIENT_NAME, EXPORT_DELTA_SCHEMA
 from core.synthese.kpi_export import print_synthese
 from core import metrics
-from main import _split_mrm_statut
-
-if CHECKPOINT_DIR:
-    spark.sparkContext.setCheckpointDir(CHECKPOINT_DIR)
+from main import build_df_result
 
 # ── Cible de l'export Power BI ───────────────────────────────────────────────
 # Delta (recommandé) : Power BI se connecte au SQL Warehouse Databricks et lit
@@ -80,42 +68,14 @@ print("Formats   :", FORMATS, "| schéma Delta :", DELTA_SCHEMA or "—")
 # MAGIC %md
 # MAGIC ## 2. Pipeline — construction de `df_result`
 # MAGIC
-# MAGIC Identique à `main.run` : matching principal (MRM statut OUI), récupération
-# MAGIC N+1, repêchage statut NON (hors métriques), obs tardives IT, tags persistants.
+# MAGIC `main.build_df_result` (le cœur de `main.run`, sans la restitution) :
+# MAGIC matching principal (MRM statut OUI), récupération N+1, repêchage statut NON
+# MAGIC (hors métriques), obs tardives IT, tags persistants. Sources et périmètre
+# MAGIC pilotés par `config/profile.py`.
 
 # COMMAND ----------
 
-cpt_clean = clean_cpt(load_cpt_raw(spark, db_cfg), tech_cfg)
-mrm_clean = clean_mrm(load_mrm_raw(spark, db_cfg), tech_cfg)
-
-# Statut NON réservé au repêchage des CPT_ONLY (PM MRM = 0).
-mrm_oui, mrm_non = _split_mrm_statut(mrm_clean)
-
-df_result = matching_waterfall(cpt_clean, mrm_oui)
-
-# Déclarations tardives : CPT_ONLY retrouvés dans l'inventaire MRM N+1 (→ CPT_LATE).
-# Seuls les OUI du N+1 → CPT_LATE (dans les métriques) ; les NON du N+1 → passe
-# statut NON (CPT_RECUP_NON, hors métriques).
-mrm_n1_non = None
-if RUN_PARAMS.get("fichier_mrm_n1"):
-    mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
-    mrm_n1_oui, mrm_n1_non = _split_mrm_statut(mrm_n1)
-    df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1_oui)])
-
-# Repêchage via statut NON (→ CPT_RECUP_NON, hors métriques) sur les DEUX
-# exercices, LATE_SOURCE distinct (STATUT_NON / STATUT_NON_N1) pour ventiler la part.
-non_inventories = [("STATUT_NON", mrm_non)]
-if mrm_n1_non is not None:
-    non_inventories.append(("STATUT_NON_N1", mrm_n1_non))
-df_result = recover_late_declarations(
-    df_result, non_inventories, label=RECUP_NON_LABEL,
-)
-
-# Obs tardives IT (anomalies, jamais matchées) + tags persistants.
-df_result = flag_late_it_observations(df_result)
-df_result = enrich_result_tags(df_result)
-
-df_result = df_result.persist()
+df_result = build_df_result(spark).persist()
 print("df_result :", df_result.count(), "lignes")
 
 # COMMAND ----------
