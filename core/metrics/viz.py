@@ -18,6 +18,10 @@ problématique de fiabilisation (direction financière et engagements) :
                                 gros chiffre + PM ; N+1 rappelé à part)
     8. kpi_conformite_globale — LE ratio de suivi des consignes au global (donut)
     9. pm_par_consigne        — PM revue vs PM compte par consigne (Δ en € et en %)
+   10. chute_par_anciennete   — chute par année de survenance (N / N-1 / N-2+) :
+                                la méthode d'inventaire diffère selon l'année
+   11. orphelins_par_compte   — quel compte PB concentre les orphelins (souscripteur
+                                à investiguer)
 
 Usage (notebook Databricks) :
     from core.metrics.viz import restituer_graphiques
@@ -35,8 +39,9 @@ from pyspark.sql import DataFrame
 
 from core.synthese.kpi_export import compute_synthese, kas_totaux
 from core.metrics import (
-    chute_par_clause, anomalies_cpt_only, output_dir, _to_local,
-    EXERCICE_INV,
+    chute_par_clause, chute_par_anciennete, anomalies_cpt_only,
+    orphelins_par_clause, output_dir, _to_local,
+    EXERCICE_INV, _annee_inventaire,
 )
 
 # Palette AXA en priorité, complétée quand la sémantique l'exige.
@@ -481,6 +486,93 @@ def graph_pm_par_consigne(d: dict):
 
 
 # ============================================================================
+# 10. TAUX DE CHUTE PAR ANCIENNETÉ (année de survenance)
+# ============================================================================
+
+def _empty_fig(message: str):
+    """Figure « aucune donnée » (garde-fou pour les axes ré-agrégés vides)."""
+    fig, ax = plt.subplots(figsize=(8, 3))
+    ax.axis("off")
+    ax.text(0.5, 0.5, message, ha="center", va="center",
+            fontsize=F_TITRE, color="#555555")
+    return fig
+
+
+def graph_chute_par_anciennete(pdf_anc, d: dict):
+    """La méthode d'inventaire diffère selon l'année de survenance.
+
+    pdf_anc = metrics.chute_par_anciennete(df_result, annee), bloc « Inventaire
+    courant » (les stats globales) ; N+1 reste une analyse séparée."""
+    pdf = pdf_anc[pdf_anc["EXERCICE"] == EXERCICE_INV].copy()
+    if pdf.empty:
+        return _empty_fig("Taux de chute par ancienneté : aucune donnée")
+    labels = list(pdf["BLOC_ANCIENNETE"])
+    taux   = list(pdf["taux_chute_pct"])
+    colors = [C_SIENNE if t > 0 else C_OCEAN for t in taux]
+
+    fig, ax = plt.subplots(figsize=(11, 5.6))
+    ax.bar(labels, taux, color=colors, width=0.5)
+    span = (max(taux) - min(taux)) or 1
+    for i, (_, r) in enumerate(pdf.iterrows()):
+        au_dessus = taux[i] >= 0
+        ax.text(i, taux[i] + (span * 0.06 if au_dessus else -span * 0.06),
+                f"{_pct(r['taux_chute_pct'])} — écart {_meur(r['ecart_signe'])}, "
+                f"poids {_pct(r['poids_pm_pct'])}",
+                ha="center", va="bottom" if au_dessus else "top", fontsize=F_TXT - 1)
+    ax.axhline(0, color="#333333", linewidth=0.8, zorder=0.5)
+    ax.axhline(d["taux_chute_inventaire"], color=C_GRIS, linewidth=1.4, linestyle="--",
+               zorder=0.5,
+               label=f"taux de chute inventaire : {_pct(d['taux_chute_inventaire'])}")
+    ax.margins(y=0.26)
+    ax.legend(loc="lower left", fontsize=F_LEG, frameon=False)
+    _style(ax, ylabel="Taux de chute (%)")
+    _title(
+        fig,
+        "Taux de chute par ancienneté : la méthode d'inventaire diffère selon "
+        "l'année de survenance",
+        "N / N-1 / N-2 et antérieur (revue tête par tête sur N-1) — matchés de "
+        "l'inventaire courant, hors « à supprimer » / statut NON ; N+1 à part",
+    )
+    fig.subplots_adjust(top=0.78, bottom=0.10, left=0.10, right=0.96)
+    return fig
+
+
+# ============================================================================
+# 11. ORPHELINS PAR COMPTE PB (investigation souscripteur)
+# ============================================================================
+
+def graph_orphelins_par_compte(pdf_orph, d: dict, top: int = 12):
+    """Quel compte PB concentre le plus d'orphelins ? (à investiguer avec le
+    souscripteur). pdf_orph = metrics.orphelins_par_clause(df_result)."""
+    if pdf_orph.empty:
+        return _empty_fig("Orphelins par compte PB : aucun orphelin")
+    pdf = pdf_orph.head(top)[::-1]                       # plus gros volume en haut
+    labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_CLAUSE"])]
+    colors = [C_ROUGE if r == 1 else C_OCEAN for r in pdf["RANG"]]
+
+    h = 0.5 * len(pdf) + 3
+    fig, ax = plt.subplots(figsize=(12, h))
+    ax.barh(labels, pdf["NB_DOSSIERS"], color=colors, height=0.6)
+    vmax = float(pdf["NB_DOSSIERS"].max()) or 1
+    for i, (_, r) in enumerate(pdf.iterrows()):
+        ax.text(r["NB_DOSSIERS"] + vmax * 0.015, i,
+                f"{_n(r['NB_DOSSIERS'])} ({_pct(r['POIDS_NB_PCT'])}) — {_meur(r['PM_CPT'])}",
+                va="center", fontsize=F_TXT - 1)
+    ax.set_xlim(0, vmax * 1.45)
+    _style(ax, xlabel="Nombre d'orphelins compte (dossiers sans contrepartie MRM)")
+    top1 = pdf_orph.iloc[0]
+    _title(
+        fig,
+        f"Orphelins par compte PB : le compte {top1['CLAUSE']} en concentre "
+        f"{_n(top1['NB_DOSSIERS'])} ({_pct(top1['POIDS_NB_PCT'])})",
+        f"Compte préposé le plus représentatif (RANG 1, en rouge) à investiguer "
+        f"avec le souscripteur — {_n(d['def_nb'])} orphelins au total ({_meur(d['def_pm'])})",
+    )
+    fig.subplots_adjust(top=max(0.80, 1 - 1.3 / h), bottom=1.1 / h, left=0.22, right=0.97)
+    return fig
+
+
+# ============================================================================
 # ORCHESTRATEUR
 # ============================================================================
 
@@ -492,7 +584,7 @@ def restituer_graphiques(
     top      : int = 12,
 ) -> dict:
     """
-    Construit les 9 graphiques de restitution, les affiche (notebook) et les
+    Construit les 11 graphiques de restitution, les affiche (notebook) et les
     écrit en PNG (save_dir, DBFS). save_dir=None → pas d'écriture.
 
     `d` = dict de compute_synthese si déjà calculé (ex. retour de
@@ -502,6 +594,7 @@ def restituer_graphiques(
         dict {nom: Figure} — réutilisable (insertion Excel/PowerPoint).
     """
     d = d if d is not None else compute_synthese(df_result)
+    annee = _annee_inventaire(d)
 
     figs = {
         "1_compte_justification"   : graph_compte_justification(d),
@@ -513,6 +606,8 @@ def restituer_graphiques(
         "7_kpi_chute"              : graph_kpi_chute(d),
         "8_kpi_conformite_globale" : graph_kpi_conformite_globale(d),
         "9_pm_par_consigne"        : graph_pm_par_consigne(d),
+        "10_chute_par_anciennete"  : graph_chute_par_anciennete(chute_par_anciennete(df_result, annee), d),
+        "11_orphelins_par_compte"  : graph_orphelins_par_compte(orphelins_par_clause(df_result), d),
     }
 
     if save_dir:

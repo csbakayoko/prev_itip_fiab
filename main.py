@@ -6,7 +6,7 @@ Spine essentiel, multi-périmètre :
 
 Le calcul des indicateurs vit dans core.metrics (des fonctions qui
 reshapent le dict de la synthèse — une passe Spark — en tables pandas),
-leur mise en forme dans core.metrics.viz (9 graphiques-messages).
+leur mise en forme dans core.metrics.viz (11 graphiques-messages).
 
 Périmètre piloté par config/profile.py (par défaut : toutes les clauses). Lancement :
     spark-submit main.py        (ou exécution dans un notebook Databricks)
@@ -46,8 +46,15 @@ def _split_mrm_statut(mrm_clean: DataFrame, statut_col: str = "MRM_STATUT_INV"):
     return mrm_clean.filter(~is_non), mrm_clean.filter(is_non)
 
 
-def run(spark: SparkSession) -> DataFrame:
-    """Exécute le pipeline complet et affiche la synthèse client."""
+def build_df_result(spark: SparkSession) -> DataFrame:
+    """Construit `df_result` : chargement → matching → récupérations → tags.
+
+    Cœur métier du pipeline, SANS la restitution (synthèse / métriques /
+    graphiques). Réutilisable tel quel par les notebooks (run par année,
+    comparaison multi-inventaires) — le périmètre, la date et les fichiers
+    source restent pilotés par la config (cf. core.runtime.configurer_run pour
+    rejouer plusieurs inventaires dans une même session).
+    """
     # Checkpoints fiables (DBFS) : les matérialisations du waterfall survivent
     # à la perte d'un executor (autoscaling). Sans checkpointDir, _materialize
     # retombe sur localCheckpoint → CHECKPOINT_RDD_BLOCK_ID_NOT_FOUND possible
@@ -55,57 +62,62 @@ def run(spark: SparkSession) -> DataFrame:
     if CHECKPOINT_DIR:
         spark.sparkContext.setCheckpointDir(CHECKPOINT_DIR)
 
+    cpt_clean = clean_cpt(load_cpt_raw(spark, db_cfg), tech_cfg)
+    mrm_clean = clean_mrm(load_mrm_raw(spark, db_cfg), tech_cfg)
+
+    # Le statut inventaire NON ne sert PAS au matching principal : il est
+    # réservé au repêchage des CPT_ONLY (PM MRM = 0, non remonté à la
+    # direction financière). On scinde : OUI (+ statut absent) pour le
+    # matching, NON pour la passe de repêchage dédiée.
+    mrm_oui, mrm_non = _split_mrm_statut(mrm_clean)
+
+    df_result = matching_waterfall(cpt_clean, mrm_oui)
+
+    # Déclarations tardives : CPT_ONLY retrouvés dans l'inventaire MRM N+1.
+    # Les dossiers récupérés sont enrichis des infos MRM (TYPE_RECONCILIATION=
+    # CPT_LATE). Cascade RECOVERY_KEYS : le waterfall principal rejoué dans
+    # l'ordre (strict → flexible), mêmes règles et mêmes fenêtres.
+    # L'étape gagnante est tracée dans LATE_KEY.
+    mrm_n1_non = None
+    if RUN_PARAMS.get("fichier_mrm_n1"):
+        mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
+        # Règle CPT_LATE (inchangée) : seuls les OUI (+ statut absent) du N+1
+        # produisent des CPT_LATE — un NON du N+1 a une PM MRM = 0, le prendre
+        # comme contrepartie fausserait l'univers de chute (CPT_LATE est
+        # INCLUS dans les métriques). On scinde le N+1 : les OUI alimentent le
+        # repêchage CPT_LATE ci-dessous, les NON rejoignent la passe statut
+        # NON (repêchage hors métriques, comme le NON de l'exercice N).
+        mrm_n1_oui, mrm_n1_non = _split_mrm_statut(mrm_n1)
+        df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1_oui)])
+
+    # Repêchage via statut NON : les CPT_ONLY restants retrouvés dans les MRM
+    # NON sont tagués CPT_RECUP_NON. Label distinct → EXCLU de toutes les
+    # métriques, présenté dans une analyse dédiée. Le statut NON est repêché
+    # sur les DEUX exercices, avec un LATE_SOURCE distinct (STATUT_NON pour N,
+    # STATUT_NON_N1 pour N+1) → la part de chaque exercice est ventilée dans
+    # la restitution. Les MRM NON non repêchés ne sont jamais unionnés (ils
+    # disparaissent, zéro empreinte). Même cascade RECOVERY_KEYS que le N+1.
+    non_inventories = [("STATUT_NON", mrm_non)]
+    if mrm_n1_non is not None:
+        non_inventories.append(("STATUT_NON_N1", mrm_n1_non))
+    df_result = recover_late_declarations(
+        df_result, non_inventories, label=RECUP_NON_LABEL,
+    )
+
+    # Observations tardives IT : CPT_ONLY garantie 60 survenus en fin d'année,
+    # absents du MRM courant et du N+1 → tagués CPT_OBS_TARDIVE (anomalie,
+    # LATE_SOURCE=OBS_TARDIVE_IT). Jamais matchés → exclus des taux et des PM.
+    df_result = flag_late_it_observations(df_result)
+
+    # Colonnes persistantes : consigne reformatée (MRM_ACTION) + tag des
+    # orphelins CPT_ONLY (TAG_CPT_ONLY).
+    return enrich_result_tags(df_result)
+
+
+def run(spark: SparkSession) -> DataFrame:
+    """Exécute le pipeline complet et affiche la synthèse client."""
     with timed("PIPELINE TOTAL"):
-        cpt_clean = clean_cpt(load_cpt_raw(spark, db_cfg), tech_cfg)
-        mrm_clean = clean_mrm(load_mrm_raw(spark, db_cfg), tech_cfg)
-
-        # Le statut inventaire NON ne sert PAS au matching principal : il est
-        # réservé au repêchage des CPT_ONLY (PM MRM = 0, non remonté à la
-        # direction financière). On scinde : OUI (+ statut absent) pour le
-        # matching, NON pour la passe de repêchage dédiée.
-        mrm_oui, mrm_non = _split_mrm_statut(mrm_clean)
-
-        df_result = matching_waterfall(cpt_clean, mrm_oui)
-
-        # Déclarations tardives : CPT_ONLY retrouvés dans l'inventaire MRM N+1.
-        # Les dossiers récupérés sont enrichis des infos MRM (TYPE_RECONCILIATION=
-        # CPT_LATE). Cascade RECOVERY_KEYS : le waterfall principal rejoué dans
-        # l'ordre (strict → flexible), mêmes règles et mêmes fenêtres.
-        # L'étape gagnante est tracée dans LATE_KEY.
-        mrm_n1_non = None
-        if RUN_PARAMS.get("fichier_mrm_n1"):
-            mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
-            # Règle CPT_LATE (inchangée) : seuls les OUI (+ statut absent) du N+1
-            # produisent des CPT_LATE — un NON du N+1 a une PM MRM = 0, le prendre
-            # comme contrepartie fausserait l'univers de chute (CPT_LATE est
-            # INCLUS dans les métriques). On scinde le N+1 : les OUI alimentent le
-            # repêchage CPT_LATE ci-dessous, les NON rejoignent la passe statut
-            # NON (repêchage hors métriques, comme le NON de l'exercice N).
-            mrm_n1_oui, mrm_n1_non = _split_mrm_statut(mrm_n1)
-            df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1_oui)])
-
-        # Repêchage via statut NON : les CPT_ONLY restants retrouvés dans les MRM
-        # NON sont tagués CPT_RECUP_NON. Label distinct → EXCLU de toutes les
-        # métriques, présenté dans une analyse dédiée. Le statut NON est repêché
-        # sur les DEUX exercices, avec un LATE_SOURCE distinct (STATUT_NON pour N,
-        # STATUT_NON_N1 pour N+1) → la part de chaque exercice est ventilée dans
-        # la restitution. Les MRM NON non repêchés ne sont jamais unionnés (ils
-        # disparaissent, zéro empreinte). Même cascade RECOVERY_KEYS que le N+1.
-        non_inventories = [("STATUT_NON", mrm_non)]
-        if mrm_n1_non is not None:
-            non_inventories.append(("STATUT_NON_N1", mrm_n1_non))
-        df_result = recover_late_declarations(
-            df_result, non_inventories, label=RECUP_NON_LABEL,
-        )
-
-        # Observations tardives IT : CPT_ONLY garantie 60 survenus en fin d'année,
-        # absents du MRM courant et du N+1 → tagués CPT_OBS_TARDIVE (anomalie,
-        # LATE_SOURCE=OBS_TARDIVE_IT). Jamais matchés → exclus des taux et des PM.
-        df_result = flag_late_it_observations(df_result)
-
-        # Colonnes persistantes : consigne reformatée (MRM_ACTION) + tag des
-        # orphelins CPT_ONLY (TAG_CPT_ONLY).
-        df_result = enrich_result_tags(df_result)
+        df_result = build_df_result(spark)
 
         with timed("persist df_result"):
             df_result = df_result.persist()

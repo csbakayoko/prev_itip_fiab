@@ -1,33 +1,32 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ITIP-FIAB — Notebook principal
+# MAGIC # ITIP-FIAB — Notebook principal (run par année d'inventaire)
 # MAGIC
 # MAGIC Pipeline de fiabilisation CPT/MRM, puis **couche métriques** (`core.metrics`).
 # MAGIC
 # MAGIC Déroulé :
-# MAGIC 1. Setup (Spark + config)
-# MAGIC 2. Construction de `df_result` (chargement → matching → récupérations → enrichissement)
+# MAGIC 1. Setup (Spark) + **widgets de run** (année d'inventaire 2023 / 2024)
+# MAGIC 2. Construction de `df_result` (`main.build_df_result`)
 # MAGIC 3. Synthèse console (rappel)
 # MAGIC 4. **Métriques** : une fonction par indicateur, affichées en table
+# MAGIC    (dont chute par ancienneté + investigation des orphelins)
 # MAGIC 5. **Export** des métriques (CSV / JSON / Parquet) sur DBFS
 # MAGIC 6. Graphiques de restitution *(optionnel)*
 # MAGIC
-# MAGIC Le périmètre, les fichiers source et les options sont pilotés par `config/profile.py`.
+# MAGIC L'**année d'inventaire** se choisit via le widget en tête (2023 / 2024) ;
+# MAGIC les fichiers MRM, la vision CPT et la date sont des widgets éditables.
+# MAGIC Pour comparer les deux années côte à côte : `itip_fiab_comparaison`.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Setup — session Spark + config
+# MAGIC ## 1. Setup — session Spark + widgets de run
 # MAGIC
 # MAGIC Le notebook vit dans le repo (dossier Git Databricks) : la racine du repo est
 # MAGIC **automatiquement** sur `sys.path`, aucun chemin à ajouter.
-# MAGIC
-# MAGIC Hors dossier Git uniquement, installer le projet à la place :
-# MAGIC `%pip install -e /Workspace/Repos/<vous>/prev_itip_fiab` (cf. `pyproject.toml`).
 
 # COMMAND ----------
 
-import pyspark.sql.functions as F
 from pyspark.sql import SparkSession
 
 spark = SparkSession.builder.appName("itip_fiab").getOrCreate()
@@ -36,64 +35,72 @@ spark.conf.set("spark.sql.adaptive.enabled", "true")
 spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
 spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
 
-from config import (
-    db_cfg, tech_cfg, RUN_PARAMS, CLIENT_NAME, RECUP_NON_LABEL, CHECKPOINT_DIR,
-)
-from core.io.load_data import load_cpt_raw, load_mrm_raw
-from core.prep.transform import clean_cpt, clean_mrm
-from core.match.matching import (
-    matching_waterfall, recover_late_declarations,
-    flag_late_it_observations, enrich_result_tags,
-)
+from main import build_df_result
+from core.runtime import configurer_run
 from core.synthese.kpi_export import print_synthese
-from main import _split_mrm_statut
+from core import metrics
 
-if CHECKPOINT_DIR:
-    spark.sparkContext.setCheckpointDir(CHECKPOINT_DIR)
+# COMMAND ----------
 
-print("Périmètre :", CLIENT_NAME)
+# MAGIC %md
+# MAGIC ### Widgets — année d'inventaire + sources
+# MAGIC
+# MAGIC `annee_inventaire` sélectionne le run (2023 / 2024). Les valeurs 2023 sont
+# MAGIC pré-remplies (cf. `profile.py`) ; **renseigner les chemins MRM 2024** (et la
+# MAGIC vision CC2024) avant de lancer le run 2024.
+
+# COMMAND ----------
+
+dbutils.widgets.dropdown("annee_inventaire", "2023", ["2023", "2024"], "Année d'inventaire")
+
+# 2023 — valeurs connues (alignées sur config/profile.py)
+dbutils.widgets.text("date_2023", "31/12/2023", "2023 · date d'inventaire")
+dbutils.widgets.text("vision_2023", "CC2023", "2023 · vision CPT")
+dbutils.widgets.text(
+    "mrm_2023",
+    "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_31_12_23_V3.csv",
+    "2023 · MRM courant",
+)
+dbutils.widgets.text(
+    "mrm_2023_n1",
+    "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_30_06_24.csv",
+    "2023 · MRM N+1",
+)
+
+# 2024 — vision CC2024 ; chemins MRM à renseigner (placeholders à ajuster).
+dbutils.widgets.text("date_2024", "31/12/2024", "2024 · date d'inventaire")
+dbutils.widgets.text("vision_2024", "CC2024", "2024 · vision CPT")
+dbutils.widgets.text(
+    "mrm_2024",
+    "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_31_12_24.csv",
+    "2024 · MRM courant (À AJUSTER)",
+)
+dbutils.widgets.text("mrm_2024_n1", "", "2024 · MRM N+1 (option)")
+
+# COMMAND ----------
+
+# Applique la config de l'année choisie AVANT toute construction.
+annee  = dbutils.widgets.get("annee_inventaire")
+profil = configurer_run(
+    date_inventaire=dbutils.widgets.get(f"date_{annee}"),
+    cpt_vision     =dbutils.widgets.get(f"vision_{annee}"),
+    fichier_mrm    =dbutils.widgets.get(f"mrm_{annee}"),
+    fichier_mrm_n1 =dbutils.widgets.get(f"mrm_{annee}_n1") or None,
+)
+print(f"Run inventaire {annee} :", profil)
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 2. Construction de `df_result`
 # MAGIC
-# MAGIC Reproduit fidèlement `main.run` (sans la restitution) : matching principal,
-# MAGIC récupération N+1, repêchage statut NON, obs tardives IT, tags.
+# MAGIC `main.build_df_result` : chargement → matching → récupération N+1 →
+# MAGIC repêchage statut NON → obs tardives IT → tags. Mêmes étapes que `main.run`,
+# MAGIC sans la restitution (pilotée ici cellule par cellule).
 
 # COMMAND ----------
 
-cpt_clean = clean_cpt(load_cpt_raw(spark, db_cfg), tech_cfg)
-mrm_clean = clean_mrm(load_mrm_raw(spark, db_cfg), tech_cfg)
-
-# Statut NON réservé au repêchage des CPT_ONLY (PM MRM = 0).
-mrm_oui, mrm_non = _split_mrm_statut(mrm_clean)
-
-df_result = matching_waterfall(cpt_clean, mrm_oui)
-
-# Déclarations tardives : CPT_ONLY retrouvés dans l'inventaire MRM N+1 (→ CPT_LATE).
-# Seuls les OUI du N+1 → CPT_LATE (dans les métriques) ; les NON du N+1 → passe
-# statut NON (CPT_RECUP_NON, hors métriques).
-mrm_n1_non = None
-if RUN_PARAMS.get("fichier_mrm_n1"):
-    mrm_n1 = clean_mrm(load_mrm_raw(spark, db_cfg, "fichier_mrm_n1"), tech_cfg)
-    mrm_n1_oui, mrm_n1_non = _split_mrm_statut(mrm_n1)
-    df_result = recover_late_declarations(df_result, [("MRM_N1", mrm_n1_oui)])
-
-# Repêchage via statut NON (→ CPT_RECUP_NON, hors métriques) sur les DEUX
-# exercices, LATE_SOURCE distinct (STATUT_NON / STATUT_NON_N1) pour ventiler la part.
-non_inventories = [("STATUT_NON", mrm_non)]
-if mrm_n1_non is not None:
-    non_inventories.append(("STATUT_NON_N1", mrm_n1_non))
-df_result = recover_late_declarations(
-    df_result, non_inventories, label=RECUP_NON_LABEL,
-)
-
-# Obs tardives IT (anomalies, jamais matchées) + tags persistants.
-df_result = flag_late_it_observations(df_result)
-df_result = enrich_result_tags(df_result)
-
-df_result = df_result.persist()
+df_result = build_df_result(spark).persist()
 print("df_result :", df_result.count(), "lignes")
 
 # COMMAND ----------
@@ -107,24 +114,21 @@ print("df_result :", df_result.count(), "lignes")
 # COMMAND ----------
 
 d = print_synthese(df_result)
+annee_inv = metrics._annee_inventaire(d)   # année dérivée de d["date_inventaire"]
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## 4. Métriques
 # MAGIC
-# MAGIC Des fonctions simples (`core.metrics`) : les métriques scalaires
-# MAGIC prennent `d` et renvoient un DataFrame pandas ; `chute_par_clause` et
-# MAGIC `anomalies_cpt_only` ré-agrègent `df_result` côté Spark.
-
-# COMMAND ----------
-
-from core import metrics
+# MAGIC Des fonctions simples (`core.metrics`) : les métriques scalaires prennent
+# MAGIC `d` ; `chute_par_*`, `anomalies_cpt_only` et `orphelins_*` ré-agrègent
+# MAGIC `df_result` côté Spark.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Synthèse (1 ligne) + taux de chute (PM MRM / PM Compte)
+# MAGIC ### Synthèse (1 ligne) + bilan cas par cas + taux de chute
 
 # COMMAND ----------
 
@@ -141,7 +145,7 @@ display(metrics.taux_chute(d))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Chute par exercice (inventaire courant / N+1 séparé) + suivi des consignes N+1
+# MAGIC ### Chute par exercice (inventaire courant / N+1 séparé) + suivi consignes N+1
 
 # COMMAND ----------
 
@@ -150,6 +154,18 @@ display(metrics.chute_par_exercice(d))
 # COMMAND ----------
 
 display(metrics.suivi_n1(d))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Chute par ancienneté — N / N-1 / N-2 et antérieur
+# MAGIC
+# MAGIC La méthode d'inventaire diffère selon l'année de survenance (revue tête par
+# MAGIC tête sur N-1). Σ du bloc « Inventaire courant » = taux de chute principal.
+
+# COMMAND ----------
+
+display(metrics.chute_par_anciennete(df_result, annee_inv))
 
 # COMMAND ----------
 
@@ -163,38 +179,42 @@ display(metrics.consignes(d))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Données derrière les graphiques
+# MAGIC ### Investigation des orphelins (CPT_ONLY, compte préposé)
+# MAGIC
+# MAGIC `orphelins_par_clause` : RANG 1 = compte PB le plus représentatif (à
+# MAGIC investiguer avec le souscripteur). `orphelins_cles_nulles` : composantes de
+# MAGIC la clé nulles/vides (explique pourquoi ces dossiers n'ont pas matché).
+
+# COMMAND ----------
+
+display(metrics.orphelins_par_clause(df_result))      # compte PB le plus représentatif (RANG 1)
+
+# COMMAND ----------
+
+display(metrics.orphelins_par_garantie(df_result))    # IT 60 / IP 64 / autre
+
+# COMMAND ----------
+
+display(metrics.orphelins_par_anciennete(df_result, annee_inv))
+
+# COMMAND ----------
+
+display(metrics.orphelins_cles_nulles(df_result))     # nullité des colonnes de la clé
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Autres données derrière les graphiques
 
 # COMMAND ----------
 
 display(metrics.compte_justification(d))            # graphe 1
-
-# COMMAND ----------
-
 display(metrics.couverture_mrm(d))                  # graphe 2
-
-# COMMAND ----------
-
 display(metrics.chute_par_clause(df_result, top=12))  # graphe 3 — top 12 par bloc EXERCICE
-
-# COMMAND ----------
-
 display(metrics.chute_par_consigne(d))              # graphe 4
-
-# COMMAND ----------
-
 display(metrics.conformite_consignes(d))            # graphe 5
-
-# COMMAND ----------
-
 display(metrics.anomalies_cpt_only(df_result))      # graphe 6
-
-# COMMAND ----------
-
 display(metrics.conformite_globale(d))              # graphe 8
-
-# COMMAND ----------
-
 display(metrics.pm_par_consigne(d))                 # graphe 9
 
 # COMMAND ----------
@@ -203,6 +223,8 @@ display(metrics.pm_par_consigne(d))                 # graphe 9
 # MAGIC ## 5. Export des métriques (CSV / JSON / Parquet) sur DBFS
 # MAGIC
 # MAGIC Dossier `.../<PERIMETRE>/metrics`. Une métrique = 3 fichiers (un par format).
+# MAGIC ⚠ Le nom d'export n'encode PAS l'année : pour historiser 2023 ET 2024 sans
+# MAGIC écrasement, ajuster `CLIENT_NAME` dans `profile.py` par run.
 
 # COMMAND ----------
 
@@ -213,7 +235,8 @@ _ = metrics.export_metriques(df_result, d, formats=("csv", "json", "parquet"))
 # MAGIC %md
 # MAGIC ## 6. Graphiques de restitution *(optionnel)*
 # MAGIC
-# MAGIC Restitution matplotlib (affichage + PNG DBFS), depuis la même passe métriques. Décommentez pour lancer.
+# MAGIC Restitution matplotlib (affichage + PNG DBFS), 11 graphiques (dont chute par
+# MAGIC ancienneté et orphelins par compte). Décommentez pour lancer.
 
 # COMMAND ----------
 

@@ -14,7 +14,7 @@ Power BI). Des fonctions simples, appelées depuis main :
 Les fonctions renvoient des DONNÉES BRUTES (nombres, pas de chaînes formatées) :
 le formatage (M€, %, séparateurs FR) reste au niveau restitution.
 
-Correspondance avec les 9 graphiques (core.metrics.viz) :
+Correspondance avec les 11 graphiques (core.metrics.viz) :
     1. compte_justification   → compte_justification(d)
     2. couverture_mrm         → couverture_mrm(d)
     3. chute_par_clause       → chute_par_clause(df_result)  [× exercice]
@@ -24,6 +24,8 @@ Correspondance avec les 9 graphiques (core.metrics.viz) :
     7. kpi_chute              → taux_chute(d)
     8. kpi_conformite_globale → conformite_globale(d)
     9. pm_par_consigne        → pm_par_consigne(d)
+   10. chute_par_anciennete   → chute_par_anciennete(df_result, annee)  [× exercice]
+   11. orphelins_par_compte   → orphelins_par_clause(df_result)
 
 Usage (main / notebook) :
     from core import metrics
@@ -44,6 +46,7 @@ import pyspark.sql.functions as F
 
 from config import (
     CLIENT_NAME, CLIENT_CLAUSES, MATCH_LABELS, TYPE_CLAUSE_CPT_PREFIX,
+    CODE_GARANTIE_IT, CODE_GARANTIE_IP,
 )
 from core.synthese.kpi_export import compute_synthese, kas_totaux
 from core.match.matching import categorize_mrm_conclusion
@@ -156,6 +159,40 @@ def _mois_label_expr(date_col: str) -> F.Column:
 EXERCICE_INV    = "Inventaire courant"
 EXERCICE_N1     = "Récupérés N+1"
 _EXERCICE_ORDRE = {EXERCICE_INV: 0, EXERCICE_N1: 1}
+
+
+# Blocs d'ancienneté = année de survenance relative à l'année d'inventaire.
+# La méthode d'inventaire diffère selon l'année (revue tête par tête sur N-1) →
+# le taux de chute est découpé N / N-1 / N-2 et antérieur (cf. chute_par_anciennete).
+BLOC_N          = "N"
+BLOC_N1         = "N-1"
+BLOC_N2_PLUS    = "N-2 et antérieur"
+BLOC_INDET      = "Indéterminée"        # année de survenance nulle / inventaire non daté
+_BLOC_ORDRE     = {BLOC_N: 0, BLOC_N1: 1, BLOC_N2_PLUS: 2, BLOC_INDET: 3}
+
+
+def _annee_inventaire(d: SyntheseScalars) -> Optional[int]:
+    """Année d'inventaire depuis d["date_inventaire"] ('dd/MM/yyyy'), None sinon."""
+    try:
+        return int(str(d["date_inventaire"]).split("/")[-1])
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _bloc_anciennete_expr(date_col: str, inv_year: Optional[int]) -> F.Column:
+    """Bloc d'ancienneté (N / N-1 / N-2 et antérieur) depuis l'année de survenance.
+
+    inv_year None (inventaire non daté) ou année de survenance nulle → BLOC_INDET.
+    """
+    if inv_year is None:
+        return F.lit(BLOC_INDET)
+    y = F.year(F.col(date_col))
+    return (
+        F.when(y == F.lit(inv_year),     F.lit(BLOC_N))
+         .when(y == F.lit(inv_year - 1), F.lit(BLOC_N1))
+         .when(y <= F.lit(inv_year - 2), F.lit(BLOC_N2_PLUS))
+         .otherwise(F.lit(BLOC_INDET))
+    )
 
 
 # ============================================================================
@@ -525,18 +562,26 @@ def chute_par_clause(df_result: DataFrame, top: Optional[int] = None) -> pd.Data
     return _finalise_chute_par_clause(pdf, top)
 
 
-def _finalise_chute_par_clause(pdf: pd.DataFrame, top: Optional[int] = None) -> pd.DataFrame:
-    """Taux et poids PM calculés DANS chaque bloc EXERCICE — pure pandas
-    (vérifiable sans Spark)."""
+def _taux_poids_par_exercice(pdf: pd.DataFrame) -> pd.DataFrame:
+    """Taux de chute et poids PM calculés DANS chaque bloc EXERCICE — pure pandas.
+
+    Commun à chute_par_clause et chute_par_anciennete : dans chaque exercice,
+    taux = Σécart / ΣPM MRM par ligne ; poids = part de la PM MRM de l'exercice
+    (le taux du bloc est la moyenne PONDÉRÉE des taux par ligne, pas leur somme).
+    """
     pdf = pdf.copy()
     pdf[["pm_mrm", "pm_cpt", "ecart_signe"]] = pdf[["pm_mrm", "pm_cpt", "ecart_signe"]].round(2)
     pdf["taux_chute_pct"] = (
         (pdf["ecart_signe"] / pdf["pm_mrm"] * 100).where(pdf["pm_mrm"] != 0, 0.0).round(2)
     )
-    # Poids de la clause dans la PM MRM de SON exercice : le taux du bloc est
-    # la moyenne PONDÉRÉE des taux par clause (pas leur somme).
     tot = pdf.groupby("EXERCICE")["pm_mrm"].transform("sum")
     pdf["poids_pm_pct"] = (pdf["pm_mrm"] / tot * 100).where(tot != 0, 0.0).round(2)
+    return pdf
+
+
+def _finalise_chute_par_clause(pdf: pd.DataFrame, top: Optional[int] = None) -> pd.DataFrame:
+    """Taux et poids PM par clause × exercice, triés par PM MRM décroissante."""
+    pdf = _taux_poids_par_exercice(pdf)
     pdf = (
         pdf.sort_values(["EXERCICE", "pm_mrm"], ascending=[True, False],
                         key=lambda s: s.map(_EXERCICE_ORDRE) if s.name == "EXERCICE" else s)
@@ -545,6 +590,58 @@ def _finalise_chute_par_clause(pdf: pd.DataFrame, top: Optional[int] = None) -> 
     if top:
         pdf = pdf.groupby("EXERCICE", sort=False).head(top).reset_index(drop=True)
     return pdf
+
+
+def _finalise_chute_par_anciennete(pdf: pd.DataFrame) -> pd.DataFrame:
+    """Taux et poids PM par bloc d'ancienneté × exercice, triés N → N-1 → N-2+."""
+    pdf = _taux_poids_par_exercice(pdf)
+    return (
+        pdf.sort_values(
+            ["EXERCICE", "BLOC_ANCIENNETE"], ascending=[True, True],
+            key=lambda s: s.map(_EXERCICE_ORDRE) if s.name == "EXERCICE"
+            else s.map(_BLOC_ORDRE),
+        )
+        .reset_index(drop=True)
+    )
+
+
+def chute_par_anciennete(
+    df_result      : DataFrame,
+    annee_inventaire: Optional[int],
+    date_col       : str = "CPT_D_SURVENANCE",
+) -> pd.DataFrame:
+    """Taux de chute par bloc d'ancienneté × exercice — graphe 10.
+
+    Découpe l'univers de chute (même filtre que chute_par_clause) par année de
+    survenance relative à l'inventaire : N / N-1 / N-2 et antérieur — la méthode
+    d'inventaire diffère selon l'année (revue tête par tête sur N-1). Comme
+    chute_par_clause : deux blocs EXERCICE (« Inventaire courant » = stats
+    globales / « Récupérés N+1 » = analyse séparée) ; dans chaque bloc, Σ des
+    lignes redonne le taux correspondant et les poids PM se lisent par ligne.
+    """
+    df = (
+        _filter_chute_universe(_with_mrm_action(df_result))
+        .withColumn("EXERCICE",
+            F.when(F.col("TYPE_RECONCILIATION") == "CPT_LATE", F.lit(EXERCICE_N1))
+             .otherwise(F.lit(EXERCICE_INV)))
+        .withColumn("BLOC_ANCIENNETE", _bloc_anciennete_expr(date_col, annee_inventaire))
+        .withColumn("_ecart", F.coalesce(F.col("MRM_PM"), F.lit(0.0))
+                            - F.coalesce(F.col("CPT_PM"), F.lit(0.0)))
+    )
+    pdf = (
+        df.groupBy("EXERCICE", "BLOC_ANCIENNETE")
+        .agg(
+            F.count("*").alias("nb_dossiers"),
+            F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("nb_sous"),
+            F.sum(F.when(F.col("_ecart") < 0, 1).otherwise(0)).alias("nb_sur"),
+            F.sum(F.when(F.col("_ecart") == 0, 1).otherwise(0)).alias("nb_conforme"),
+            F.coalesce(F.sum("MRM_PM"), F.lit(0.0)).alias("pm_mrm"),
+            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("pm_cpt"),
+            F.sum("_ecart").alias("ecart_signe"),
+        )
+        .toPandas()
+    )
+    return _finalise_chute_par_anciennete(pdf)
 
 
 def anomalies_cpt_only(
@@ -575,6 +672,149 @@ def anomalies_cpt_only(
                                      "NB_DOSSIERS", "PM_CPT", "IS_FIN_ANNEE"])
     pdf["IS_FIN_ANNEE"] = pdf["MOIS_SURVENANCE"].isin([10, 11, 12])
     return pdf
+
+
+# ============================================================================
+# INVESTIGATION DES ORPHELINS CPT_ONLY
+# ============================================================================
+# Orphelins du compte préposé : dossiers compte sans contrepartie MRM (anomalies
+# définitives, ≡ def_nb / def_pm de la synthèse — les obs tardives et repêchés
+# statut NON ont un label distinct, exclus). On les caractérise pour identifier
+# le compte PB le plus représentatif (à présenter au souscripteur) et comprendre
+# l'orphelinage (clé incomplète, garantie, ancienneté).
+
+_ORPHAN_LABEL = "CPT_ONLY"
+
+# Composantes de la clé de matching à auditer côté compte (suffixes canoniques,
+# préfixés CPT_). Les orphelins n'ont pas de colonnes MRM_* → audit côté CPT.
+_CLE_COMPONENTS      = ("RPP", "D_NAISSANCE", "D_SURVENANCE", "GARANTIE", "NOM_PRENOM", "CLAUSE")
+_CLE_DATE_COMPONENTS = ("D_NAISSANCE", "D_SURVENANCE")
+
+
+def _orphelins(df: DataFrame) -> DataFrame:
+    """Sous-ensemble CPT_ONLY (orphelins compte définitifs)."""
+    return df.filter(F.col("TYPE_RECONCILIATION") == F.lit(_ORPHAN_LABEL))
+
+
+def _finalise_orphelins(pdf: pd.DataFrame, with_rang: bool = False) -> pd.DataFrame:
+    """Ajoute les poids (nb, PM) — pure pandas. with_rang : tri nb décroissant +
+    RANG (1 = compte/modalité le plus représentatif)."""
+    pdf = pdf.copy()
+    pdf["PM_CPT"] = pdf["PM_CPT"].round(2)
+    tot_nb = pdf["NB_DOSSIERS"].sum() or 1
+    tot_pm = pdf["PM_CPT"].sum() or 1.0
+    pdf["POIDS_NB_PCT"] = (pdf["NB_DOSSIERS"] / tot_nb * 100).round(2)
+    pdf["POIDS_PM_PCT"] = (pdf["PM_CPT"] / tot_pm * 100).round(2)
+    if with_rang:
+        pdf = pdf.sort_values("NB_DOSSIERS", ascending=False).reset_index(drop=True)
+        pdf.insert(0, "RANG", range(1, len(pdf) + 1))
+    return pdf
+
+
+def orphelins_par_clause(df_result: DataFrame) -> pd.DataFrame:
+    """Orphelins CPT_ONLY par clause (compte PB) × type — graphe 11.
+
+    RANG 1 = compte PB le plus représentatif : à investiguer avec le souscripteur
+    (comment ces listes ont-elles été remontées sans apparaître dans MRM ?).
+    """
+    pdf = (
+        _orphelins(derive_clause_column(df_result))
+        .groupBy("CLAUSE", "TYPE_CLAUSE")
+        .agg(
+            F.count("*").alias("NB_DOSSIERS"),
+            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("PM_CPT"),
+        )
+        .toPandas()
+    )
+    return _finalise_orphelins(pdf, with_rang=True)[
+        ["RANG", "CLAUSE", "TYPE_CLAUSE", "NB_DOSSIERS", "PM_CPT",
+         "POIDS_NB_PCT", "POIDS_PM_PCT"]
+    ]
+
+
+def orphelins_par_garantie(df_result: DataFrame, garantie_col: str = "CPT_GARANTIE") -> pd.DataFrame:
+    """Orphelins CPT_ONLY ventilés par garantie (IT 60 / IP 64 / autre / non renseignée)."""
+    g    = F.col(garantie_col)
+    code = g.cast("int")
+    libelle = (
+        F.when(code == F.lit(CODE_GARANTIE_IT), F.lit("IT (incapacité)"))
+         .when(code == F.lit(CODE_GARANTIE_IP), F.lit("IP (invalidité)"))
+         .when(g.isNull() | (F.trim(g.cast("string")) == F.lit("")), F.lit("Non renseignée"))
+         .otherwise(F.concat(F.lit("Autre ("), code.cast("string"), F.lit(")")))
+    )
+    pdf = (
+        _orphelins(df_result)
+        .withColumn("GARANTIE_CODE", code)
+        .withColumn("GARANTIE_LIBELLE", libelle)
+        .groupBy("GARANTIE_CODE", "GARANTIE_LIBELLE")
+        .agg(
+            F.count("*").alias("NB_DOSSIERS"),
+            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("PM_CPT"),
+        )
+        .orderBy(F.col("NB_DOSSIERS").desc())
+        .toPandas()
+    )
+    return _finalise_orphelins(pdf)[
+        ["GARANTIE_CODE", "GARANTIE_LIBELLE", "NB_DOSSIERS", "PM_CPT",
+         "POIDS_NB_PCT", "POIDS_PM_PCT"]
+    ]
+
+
+def orphelins_par_anciennete(
+    df_result      : DataFrame,
+    annee_inventaire: Optional[int],
+    date_col       : str = "CPT_D_SURVENANCE",
+) -> pd.DataFrame:
+    """Orphelins CPT_ONLY par ancienneté (N / N-1 / N-2 et antérieur)."""
+    pdf = (
+        _orphelins(df_result)
+        .withColumn("BLOC_ANCIENNETE", _bloc_anciennete_expr(date_col, annee_inventaire))
+        .groupBy("BLOC_ANCIENNETE")
+        .agg(
+            F.count("*").alias("NB_DOSSIERS"),
+            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("PM_CPT"),
+        )
+        .toPandas()
+    )
+    pdf = _finalise_orphelins(pdf)
+    return (
+        pdf.sort_values("BLOC_ANCIENNETE", key=lambda s: s.map(_BLOC_ORDRE))
+        .reset_index(drop=True)[
+            ["BLOC_ANCIENNETE", "NB_DOSSIERS", "PM_CPT", "POIDS_NB_PCT", "POIDS_PM_PCT"]
+        ]
+    )
+
+
+def orphelins_cles_nulles(df_result: DataFrame) -> pd.DataFrame:
+    """Nullité des colonnes constitutives de la clé pour les orphelins CPT_ONLY.
+
+    Une composante souvent nulle/vide (ex. RPP, clause) explique l'orphelinage :
+    la clé concat_ws l'ignore → pas de rapprochement possible. Une ligne par
+    composante, triée par fréquence de nullité décroissante.
+    """
+    orph  = _orphelins(df_result)
+    comps = [c for c in _CLE_COMPONENTS if f"CPT_{c}" in orph.columns]
+    exprs = [F.count("*").alias("_total")]
+    for c in comps:
+        col  = F.col(f"CPT_{c}")
+        cond = col.isNull() if c in _CLE_DATE_COMPONENTS else (
+            col.isNull() | (F.trim(col.cast("string")) == F.lit(""))
+        )
+        exprs.append(F.sum(F.when(cond, 1).otherwise(0)).alias(c))
+    row   = orph.agg(*exprs).first()
+    total = int(row["_total"] or 0) if row else 0
+    rows  = [{
+        "COMPOSANTE"        : f"CPT_{c}",
+        "NB_NULL_OU_VIDE"   : int(row[c] or 0) if row else 0,
+        "PCT_NULL"          : round((int(row[c] or 0) if row else 0) / total * 100, 2) if total else 0.0,
+        "NB_TOTAL_ORPHELINS": total,
+    } for c in comps]
+    return (
+        pd.DataFrame(rows, columns=["COMPOSANTE", "NB_NULL_OU_VIDE", "PCT_NULL",
+                                    "NB_TOTAL_ORPHELINS"])
+        .sort_values("NB_NULL_OU_VIDE", ascending=False)
+        .reset_index(drop=True)
+    )
 
 
 # ============================================================================
@@ -609,10 +849,31 @@ def controles_coherence(tables: Dict[str, pd.DataFrame], d: SyntheseScalars) -> 
     ctrl("chute_par_clause N+1 : Σ nb = base chute N+1",  d["chute_n1_nb"],    int(n1["nb_dossiers"].sum()))
     ctrl("chute_par_clause N+1 : Σ PM MRM = base N+1",    d["chute_n1_pm_mrm"], float(n1["pm_mrm"].sum()), tol=1.0)
 
+    # chute_par_anciennete (ré-agrégation Spark) vs base chute / bloc N+1 de d :
+    # même univers que chute_par_clause, découpé par année de survenance.
+    anc     = tables["chute_par_anciennete"]
+    anc_inv = anc[anc["EXERCICE"] == EXERCICE_INV]
+    anc_n1  = anc[anc["EXERCICE"] == EXERCICE_N1]
+    ctrl("chute_par_anciennete inv. : Σ nb = base chute",     d["metrics_nb"],     int(anc_inv["nb_dossiers"].sum()))
+    ctrl("chute_par_anciennete inv. : Σ PM MRM = base chute", d["metrics_pm_mrm"], float(anc_inv["pm_mrm"].sum()), tol=1.0)
+    ctrl("chute_par_anciennete inv. : Σ PM CPT = base chute", d["metrics_pm_cpt"], float(anc_inv["pm_cpt"].sum()), tol=1.0)
+    ctrl("chute_par_anciennete N+1 : Σ nb = base chute N+1",  d["chute_n1_nb"],    int(anc_n1["nb_dossiers"].sum()))
+
     # anomalies_cpt_only (ré-agrégation Spark) vs CPT_ONLY de d.
     anom = tables["anomalies_cpt_only"]
     ctrl("anomalies : Σ nb = CPT_ONLY",     d["def_nb"], int(anom["NB_DOSSIERS"].sum()))
     ctrl("anomalies : Σ PM CPT = CPT_ONLY", d["def_pm"], float(anom["PM_CPT"].sum()), tol=1.0)
+
+    # Investigation orphelins : chaque ventilation partitionne les CPT_ONLY →
+    # Σ nb = def_nb (et Σ PM CPT = def_pm pour la clause).
+    orph_cl = tables["orphelins_par_clause"]
+    ctrl("orphelins_par_clause : Σ nb = CPT_ONLY",     d["def_nb"], int(orph_cl["NB_DOSSIERS"].sum()))
+    ctrl("orphelins_par_clause : Σ PM CPT = CPT_ONLY", d["def_pm"], float(orph_cl["PM_CPT"].sum()), tol=1.0)
+    ctrl("orphelins_par_garantie : Σ nb = CPT_ONLY",   d["def_nb"], int(tables["orphelins_par_garantie"]["NB_DOSSIERS"].sum()))
+    ctrl("orphelins_par_anciennete : Σ nb = CPT_ONLY", d["def_nb"], int(tables["orphelins_par_anciennete"]["NB_DOSSIERS"].sum()))
+    cles = tables["orphelins_cles_nulles"]
+    ctrl("orphelins_cles_nulles : total orphelins = CPT_ONLY",
+         d["def_nb"], int(cles["NB_TOTAL_ORPHELINS"].iloc[0]) if len(cles) else 0)
 
     # consignes : Σ bases KAS + hors consigne == base chute (cf. chute_coherente).
     kas = tables["consignes"][tables["consignes"]["PM_PERTINENTE"]]
@@ -674,6 +935,7 @@ def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) 
     print_synthese) — sinon la passe Spark est lancée ici.
     """
     d = d if d is not None else compute_synthese(df_result)
+    annee = _annee_inventaire(d)
     tables = {
         "synthese"             : synthese(d),
         "bilan_cas"            : bilan_cas(d),
@@ -684,9 +946,15 @@ def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) 
         "compte_justification" : compte_justification(d),
         "couverture_mrm"       : couverture_mrm(d),
         "chute_par_clause"     : chute_par_clause(df_result),
+        "chute_par_anciennete" : chute_par_anciennete(df_result, annee),
         "chute_par_consigne"   : chute_par_consigne(d),
         "conformite_consignes" : conformite_consignes(d),
         "anomalies_cpt_only"   : anomalies_cpt_only(df_result),
+        # Investigation des orphelins CPT_ONLY (compte préposé).
+        "orphelins_par_clause"    : orphelins_par_clause(df_result),
+        "orphelins_par_garantie"  : orphelins_par_garantie(df_result),
+        "orphelins_par_anciennete": orphelins_par_anciennete(df_result, annee),
+        "orphelins_cles_nulles"   : orphelins_cles_nulles(df_result),
         "conformite_globale"   : conformite_globale(d),
         "pm_par_consigne"      : pm_par_consigne(d),
     }

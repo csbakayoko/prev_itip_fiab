@@ -235,6 +235,15 @@ séparation : deux blocs `EXERCICE` (« Inventaire courant » = stats globales /
 Σ PM MRM) == le taux correspondant du §4.2, et les poids PM se lisent dans
 le bloc. Le graphe 3 ne trace que le bloc inventaire.
 
+La ventilation **par ancienneté** (`chute_par_anciennete`, graphe 10) découpe
+le même univers par **année de survenance** relative à l'inventaire :
+**N / N-1 / N-2 et antérieur** (bloc `Indéterminée` si la survenance est nulle
+ou l'inventaire non daté). Le découpage est métier : **la méthode d'inventaire
+diffère selon l'année** (revue tête par tête sur N-1). Même structure que par
+clause (deux blocs `EXERCICE`, taux/poids dans le bloc, Σ bloc inventaire ==
+taux principal) ; année dérivée de `year(CPT_D_SURVENANCE)`, référence
+`d["date_inventaire"]`.
+
 ### 4.3 Périmètre des consignes
 - **KEEP / ADD / STUDY** : chute pertinente (la PM doit être justifiée au
   compte). Entrent dans le taux de chute par consigne **et** dans le taux
@@ -322,7 +331,7 @@ le bloc. Le graphe 3 ne trace que le bloc inventaire.
 
 ## 6. Tables métriques exportées (core/metrics/__init__.py — toutes_metriques)
 
-Les 15 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
+Les 20 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
 Parquet / Excel / Delta) :
 
 | Table | Problématique | Univers |
@@ -336,9 +345,14 @@ Parquet / Excel / Delta) :
 | `compte_justification` | décomposition du compte (retrouvés, N+1, repêchés, clos, anomalies) | compte entier |
 | `couverture_mrm` | part de la revue retrouvée + non retrouvés par consigne | `MATCHÉS + MRM_MISSING` (+ DELETE retrouvées) |
 | `chute_par_clause` | chute par clause × exercice (2 blocs : inventaire courant = stats globales / N+1 = analyse séparée — Σ clauses d'un bloc = taux du bloc, cf. §4.2) | univers de chute, par exercice |
+| `chute_par_anciennete` | chute par année de survenance × exercice (N / N-1 / N-2 et antérieur — Σ bloc inventaire = taux principal, cf. §4.2) | univers de chute, par exercice |
 | `chute_par_consigne` / `pm_par_consigne` | chute et PM par consigne pertinente (vues de `consignes`) | matchés inventaire courant, KEEP/ADD/STUDY |
 | `conformite_consignes` / `conformite_globale` | application des consignes (détail + segments) | exercice courant (§5) |
 | `anomalies_cpt_only` | anomalies par mois de survenance (effet fin d'année) | `CPT_ONLY` |
+| `orphelins_par_clause` | orphelins compte par clause / compte PB + type, nb + PM + poids + RANG (1 = le plus représentatif, à investiguer avec le souscripteur) — graphe 11 | `CPT_ONLY` |
+| `orphelins_par_garantie` | orphelins compte par garantie (IT 60 / IP 64 / autre / non renseignée) | `CPT_ONLY` |
+| `orphelins_par_anciennete` | orphelins compte par année de survenance (N / N-1 / N-2 et antérieur) | `CPT_ONLY` |
+| `orphelins_cles_nulles` | nullité des colonnes constitutives de la clé (RPP, naissance, survenance, garantie, nom, clause) — explique l'orphelinage | `CPT_ONLY` |
 | `controles_coherence` | recoupements inter-tables (attendu / obtenu / OK) : une même grandeur a la même valeur dans tous les onglets Power BI ; bloquant dans le run de production | toutes les tables |
 
 ---
@@ -361,10 +375,12 @@ Parquet / Excel / Delta) :
   un `TYPE_RECONCILIATION` inattendu est signalé.
 - **Recoupements inter-tables** : `metrics.controles_coherence` vérifie à
   chaque export que les grandeurs partagées se recoupent d'une table à
-  l'autre (Σ blocs de `chute_par_clause` == base chute / bloc N+1, Σ
-  `anomalies_cpt_only` == CPT_ONLY, Σ consignes + hors consigne == base
-  chute, totaux de `bilan_cas`, etc.) — condition pour que les onglets
-  Power BI de l'étude racontent une seule histoire. Table exportée,
+  l'autre (Σ blocs de `chute_par_clause` / `chute_par_anciennete` == base
+  chute / bloc N+1, Σ `anomalies_cpt_only` == CPT_ONLY, Σ des ventilations
+  d'orphelins (`orphelins_par_clause` / `_par_garantie` / `_par_anciennete`,
+  total de `orphelins_cles_nulles`) == CPT_ONLY, Σ consignes + hors consigne
+  == base chute, totaux de `bilan_cas`, etc.) — condition pour que les
+  onglets Power BI de l'étude racontent une seule histoire. Table exportée,
   **assert bloquant** dans `notebooks/itip_fiab_powerbi.py`.
 
 ---
@@ -379,7 +395,7 @@ Parquet / Excel / Delta) :
 - **Base de données** : table Delta metastore (une par analyse).
 
 ### 8.2 Ce qui va en base
-- Les 15 tables du §6, une table Delta par métrique :
+- Les 20 tables du §6, une table Delta par métrique :
   `<schema>.itip_metric_<nom>_<perim>` (connexion Power BI via SQL Warehouse).
 - La table **`synthese`** ✅ tient lieu d'indicateurs scalaires : taux de
   couverture, récupération, chute (+ N+1 séparé), conformité, niveaux de PM,

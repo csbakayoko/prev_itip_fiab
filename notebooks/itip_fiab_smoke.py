@@ -3,7 +3,7 @@
 # MAGIC # ITIP-FIAB — Smoke test (tout le pipeline, rien d'écrit)
 # MAGIC
 # MAGIC But : vérifier de bout en bout que tout tourne après un `git pull` —
-# MAGIC pipeline → synthèse → 15 tables métriques → recoupements → 9 graphiques.
+# MAGIC pipeline → synthèse → 20 tables métriques → recoupements → 11 graphiques.
 # MAGIC **Aucune écriture** (ni DBFS, ni Delta) : si toutes les cellules passent,
 # MAGIC le pipeline est bon, lancer ensuite `itip_fiab_powerbi` pour l'export.
 # MAGIC
@@ -38,7 +38,7 @@ df_result = run(spark)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Contrôles bloquants : synthèse, 15 tables, recoupements inter-tables
+# MAGIC ## 2. Contrôles bloquants : synthèse, 20 tables, recoupements inter-tables
 
 # COMMAND ----------
 
@@ -61,7 +61,7 @@ display(tables["bilan_cas"])
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3. Les 9 graphiques (affichés, non écrits)
+# MAGIC ## 3. Les 11 graphiques (affichés, non écrits)
 
 # COMMAND ----------
 
@@ -70,5 +70,5 @@ print(f"✔ {len(figs)} graphiques rendus")
 
 # COMMAND ----------
 
-print("✅ SMOKE TEST OK — pipeline, synthèse, 15 tables, recoupements et 9 graphiques.")
+print("✅ SMOKE TEST OK — pipeline, synthèse, 20 tables, recoupements et 11 graphiques.")
 df_result.unpersist()

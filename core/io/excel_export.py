@@ -48,6 +48,8 @@ ONGLETS: Tuple[Tuple[str, str, str, str], ...] = (
      "Taux de chute : inventaire courant vs récupérés N+1 (analyse séparée)."),
     ("chute_par_clause",     "Chute par clause",        "Niveau de provisionnement",
      "Taux de chute ventilé par clause × exercice."),
+    ("chute_par_anciennete", "Chute par ancienneté",    "Niveau de provisionnement",
+     "Taux de chute par année de survenance (N / N-1 / N-2 et antérieur) × exercice."),
     ("chute_par_consigne",   "Chute par consigne",      "Niveau de provisionnement",
      "Taux de chute par consigne pertinente."),
     ("pm_par_consigne",      "PM revue vs compte",      "Niveau de provisionnement",
@@ -62,6 +64,14 @@ ONGLETS: Tuple[Tuple[str, str, str, str], ...] = (
      "Suivi des consignes des récupérés N+1 (analyse séparée)."),
     ("controles_coherence",  "Contrôles cohérence",     "Cohérence des sources",
      "Recoupements inter-onglets : une grandeur = une valeur partout (attendu/obtenu)."),
+    ("orphelins_par_clause",    "Orphelins par compte",    "Investigation orphelins",
+     "Orphelins compte (CPT_ONLY) par clause / compte PB + type ; RANG 1 = le plus représentatif."),
+    ("orphelins_par_garantie",  "Orphelins par garantie",  "Investigation orphelins",
+     "Orphelins compte ventilés par garantie (IT 60 / IP 64 / autre / non renseignée)."),
+    ("orphelins_par_anciennete", "Orphelins par ancienneté", "Investigation orphelins",
+     "Orphelins compte par année de survenance (N / N-1 / N-2 et antérieur)."),
+    ("orphelins_cles_nulles",   "Orphelins clés nulles",   "Investigation orphelins",
+     "Nullité des colonnes constitutives de la clé (explique l'orphelinage)."),
 )
 
 # Palette AXA pour l'en-tête du Sommaire.

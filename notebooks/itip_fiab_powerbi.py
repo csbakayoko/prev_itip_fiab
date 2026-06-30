@@ -8,7 +8,7 @@
 # MAGIC 1. **Setup** — session Spark + config (fichiers source et périmètre pilotés par `config/profile.py`)
 # MAGIC 2. **Pipeline** — chargement → nettoyage → matching → récupérations (N+1, statut NON) → tags
 # MAGIC 3. **Synthèse** — contrôles de cohérence console (`chute_coherente`, lignes classées)
-# MAGIC 4. **Export Power BI** — les 15 tables métriques écrites en Delta (+ fichiers DBFS),
+# MAGIC 4. **Export Power BI** — les 20 tables métriques écrites en Delta (+ fichiers DBFS),
 # MAGIC    puis contrôles inter-tables BLOQUANTS (les onglets doivent se recouper)
 # MAGIC
 # MAGIC Tables produites (tidy, une table par question métier) :
@@ -144,7 +144,7 @@ assert d["chute_coherente"], (
 # MAGIC %md
 # MAGIC ## 4. Export Power BI
 # MAGIC
-# MAGIC Une passe : les 15 tables métriques écrites en Delta + parquet/csv sur DBFS.
+# MAGIC Une passe : les 20 tables métriques écrites en Delta + parquet/csv sur DBFS.
 
 # COMMAND ----------
 
