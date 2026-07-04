@@ -30,6 +30,7 @@ from core.match.matching import (
 )
 from core.metrics import export_metriques
 from core.metrics.viz import restituer_graphiques
+from core.runtime import get_spark
 from core.synthese.kpi_export import print_synthese
 from core._timing import timed
 import pyspark.sql.functions as F
@@ -152,10 +153,4 @@ def run(spark: SparkSession) -> DataFrame:
 
 
 if __name__ == "__main__":
-    spark = SparkSession.builder.appName("itip_fiab").getOrCreate()
-    # AQE + skew join : critique pour les theta-joins des étapes windowed
-    # (key + |datediff| <= N) qui sinon partent en shuffle déséquilibré.
-    spark.conf.set("spark.sql.adaptive.enabled", "true")
-    spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
-    spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
-    run(spark)
+    run(get_spark())

@@ -1,6 +1,10 @@
 """
-Surcharge de configuration au runtime — pour rejouer plusieurs inventaires.
+Runtime du pipeline — session Spark partagée + surcharge de configuration.
 
+`get_spark()` : LA session Spark du pipeline (réglages AQE appliqués), utilisée
+par main.py et tous les notebooks — un seul endroit où régler la conf Spark.
+
+`configurer_run()` : rejouer plusieurs inventaires dans une même session.
 POURQUOI : les valeurs de `config/profile.py` sont liées **par valeur** dans les
 modules consommateurs au moment de l'import (`from config import DATE_INVENTAIRE`).
 Réassigner `config.DATE_INVENTAIRE` après coup n'a donc aucun effet. Pour rejouer
@@ -23,7 +27,28 @@ historisé par run). C'est un utilitaire de notebook/analyse, pas un chemin prod
 
 from typing import Optional
 
+from pyspark.sql import SparkSession
+
 from config import RUN_PARAMS
+
+
+def get_spark(app_name: str = "itip_fiab") -> SparkSession:
+    """Session Spark du pipeline, réglages appliqués.
+
+    AQE + skew join : critique pour les theta-joins des étapes windowed
+    (key + |datediff| <= N) qui sinon partent en shuffle déséquilibré.
+
+    Args:
+        app_name : nom d'application Spark (défaut "itip_fiab").
+
+    Returns:
+        SparkSession active (créée ou réutilisée), conf AQE posée.
+    """
+    spark = SparkSession.builder.appName(app_name).getOrCreate()
+    spark.conf.set("spark.sql.adaptive.enabled", "true")
+    spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
+    spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
+    return spark
 
 
 def configurer_run(
