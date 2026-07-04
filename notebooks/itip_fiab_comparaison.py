@@ -24,46 +24,27 @@
 # COMMAND ----------
 
 import pandas as pd
-from pyspark.sql import SparkSession
 
-spark = SparkSession.builder.appName("itip_fiab").getOrCreate()
-spark.conf.set("spark.sql.adaptive.enabled", "true")
-spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
-spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
-
-from main import build_df_result
-from core.runtime import configurer_run
+from config import INVENTAIRES
+from core.runtime import configurer_run, get_spark
 from core.synthese.kpi_export import compute_synthese
 from core import metrics
 from core.metrics.viz import graph_chute_par_anciennete, graph_orphelins_par_compte
+from main import build_df_result
+
+spark = get_spark()
 
 # COMMAND ----------
 
-# 2023 — valeurs connues (cf. config/profile.py)
-dbutils.widgets.text("date_2023", "31/12/2023", "2023 · date")
-dbutils.widgets.text("vision_2023", "CC2023", "2023 · vision CPT")
-dbutils.widgets.text(
-    "mrm_2023",
-    "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_31_12_23_V3.csv",
-    "2023 · MRM courant",
-)
-dbutils.widgets.text(
-    "mrm_2023_n1",
-    "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_30_06_24.csv",
-    "2023 · MRM N+1",
-)
+# Défauts par année : config/profile.py (INVENTAIRES) — source unique des
+# chemins. Les widgets restent éditables au run (ex. MRM 2024 à ajuster).
+for _annee, _inv in INVENTAIRES.items():
+    dbutils.widgets.text(f"date_{_annee}",   _inv["date"],   f"{_annee} · date d'inventaire")
+    dbutils.widgets.text(f"vision_{_annee}", _inv["vision"], f"{_annee} · vision CPT")
+    dbutils.widgets.text(f"mrm_{_annee}",    _inv["mrm"],    f"{_annee} · MRM courant")
+    dbutils.widgets.text(f"mrm_{_annee}_n1", _inv["mrm_n1"], f"{_annee} · MRM N+1 (option)")
 
-# 2024 — vision CC2024 ; chemins MRM À AJUSTER.
-dbutils.widgets.text("date_2024", "31/12/2024", "2024 · date")
-dbutils.widgets.text("vision_2024", "CC2024", "2024 · vision CPT")
-dbutils.widgets.text(
-    "mrm_2024",
-    "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_31_12_24.csv",
-    "2024 · MRM courant (À AJUSTER)",
-)
-dbutils.widgets.text("mrm_2024_n1", "", "2024 · MRM N+1 (option)")
-
-ANNEES = ("2023", "2024")
+ANNEES = tuple(INVENTAIRES)
 
 # COMMAND ----------
 

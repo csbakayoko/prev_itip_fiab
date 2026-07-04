@@ -11,17 +11,12 @@
 
 # COMMAND ----------
 
-from pyspark.sql import SparkSession
-
-spark = SparkSession.builder.appName("itip_fiab").getOrCreate()
-# AQE + skew join : critique pour les theta-joins des étapes windowed.
-spark.conf.set("spark.sql.adaptive.enabled", "true")
-spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
-spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
-
-from main import run
+from core.runtime import get_spark
 from core import metrics
 from core.metrics.viz import restituer_graphiques
+from main import run
+
+spark = get_spark()
 
 # COMMAND ----------
 

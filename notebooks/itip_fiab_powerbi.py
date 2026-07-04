@@ -38,18 +38,13 @@
 
 # COMMAND ----------
 
-from pyspark.sql import SparkSession
-
-spark = SparkSession.builder.appName("itip_fiab").getOrCreate()
-# AQE + skew join : critique pour les theta-joins des étapes windowed.
-spark.conf.set("spark.sql.adaptive.enabled", "true")
-spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
-spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
-
 from config import CLIENT_NAME, EXPORT_DELTA_SCHEMA
+from core.runtime import get_spark
 from core.synthese.kpi_export import print_synthese
 from core import metrics
 from main import build_df_result
+
+spark = get_spark()
 
 # ── Cible de l'export Power BI ───────────────────────────────────────────────
 # Delta (recommandé) : Power BI se connecte au SQL Warehouse Databricks et lit

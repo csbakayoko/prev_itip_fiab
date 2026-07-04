@@ -12,17 +12,13 @@
 
 # COMMAND ----------
 
-from pyspark.sql import SparkSession
-
-spark = SparkSession.builder.appName("itip_fiab").getOrCreate()
-spark.conf.set("spark.sql.adaptive.enabled", "true")
-spark.conf.set("spark.sql.adaptive.skewJoin.enabled", "true")
-spark.conf.set("spark.sql.adaptive.coalescePartitions.enabled", "true")
-
 from config import db_cfg, tech_cfg
 from core.io.load_data import load_cpt_raw, load_mrm_raw
 from core.prep.transform import clean_cpt, clean_mrm
 from core.match import key_audit
+from core.runtime import get_spark
+
+spark = get_spark()
 
 # COMMAND ----------
 
