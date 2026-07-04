@@ -61,6 +61,25 @@ CLIENT_TYPE_CLAUSES = ["PB"]       # "PB" / "HPB" ; filtre type (MRM = PB seul)
 FICHIER_MRM    = _inv["mrm"]
 FICHIER_MRM_N1 = _inv["mrm_n1"] or None
 
+# ── Source SharePoint (PRÊT À ACTIVER — en attente app registration Azure AD) ─
+# Un chemin source "sharepoint:/<chemin dans la bibliothèque>" (INVENTAIRES ou
+# widget fichier_mrm*) déclenche le téléchargement Microsoft Graph vers
+# SHAREPOINT_STAGING avant lecture (.xlsx lu nativement). Tant que ces champs
+# sont vides, seuls les chemins dbfs:/ sont utilisés (comportement actuel).
+# Prérequis IT (cf. core/io/sources.py) : app registration Azure AD (tenant_id,
+# client_id), permission Graph Sites.Read.All, secret d'app stocké dans un
+# secret scope Databricks — JAMAIS en dur ici.
+SHAREPOINT = {
+    "tenant_id"    : os.environ.get("ITIP_SP_TENANT_ID", ""),
+    "client_id"    : os.environ.get("ITIP_SP_CLIENT_ID", ""),
+    "client_secret": "",                 # laisser vide : résolu via le secret scope
+    "secret_scope" : "itip",             # dbutils.secrets.get(scope, key)
+    "secret_key"   : "sp_client_secret",
+    "hostname"     : "",                 # ex. "axa.sharepoint.com"
+    "site"         : "",                 # ex. "/sites/PrevoyanceITIP"
+}
+SHAREPOINT_STAGING = f"{_DBFS_HOME}/sharepoint_staging"  # cache DBFS des téléchargements
+
 # ── Source CPT parquet (prioritaire sur la table Hive si défini et lisible) ──
 # Export parquet de la table compte (mêmes colonnes brutes que la table Hive).
 # Chargé EN PRIORITÉ par load_cpt_raw pour accélérer / fiabiliser le run ;
@@ -94,3 +113,8 @@ EXPORT_FORMATS     = ("excel", "csv", "parquet")  # ⊆ {excel, csv, parquet, js
 # Surcharge : variable d'environnement ITIP_DELTA_SCHEMA ("" = pas de Delta),
 # ou widget delta_schema du notebook itip_fiab_powerbi.
 EXPORT_DELTA_SCHEMA = os.environ.get("ITIP_DELTA_SCHEMA", "hive_metastore.itip_fiab") or None
+
+# Table Delta du DÉTAIL df_result (dans EXPORT_DELTA_SCHEMA), historisée par
+# date d'inventaire : rejouer un inventaire remplace ses lignes, 2023 et 2024
+# coexistent — analyses fines Power BI au-delà des tables métriques agrégées.
+EXPORT_RESULT_TABLE = "resultat_backtest"

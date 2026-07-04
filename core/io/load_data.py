@@ -31,7 +31,10 @@ from config import (
     TYPE_CLAUSE_CPT_PREFIX,
     TYPE_CLAUSE_MRM_VALUE,
     MRM_TYPE_CLAUSE_COL,
+    SHAREPOINT,
+    SHAREPOINT_STAGING,
 )
+from core.io.sources import read_excel_to_spark, resolve_source_path
 from core._timing import timed_fn
 
 logger = logging.getLogger(__name__)
@@ -179,18 +182,26 @@ def load_mrm_raw(
     if not mrm_path:
         raise ValueError(f"RUN_PARAMS['{path_key}'] est absent ou vide.")
 
-    # Fix T-02 : inferSchema=false → toutes colonnes en string, casts ciblés
-    # dans clean_mrm (to_date pour les dates, regexp_replace+cast double pour PM/PSAP).
-    # Évite : (1) double-pass du CSV, (2) dates inférées comme string aléatoirement.
-    df = (
-        spark.read
-             .option("header",      True)
-             .option("delimiter",   cfg.mrm_delimiter)
-             .option("inferSchema", "false")
-             .option("encoding",    "UTF-8")
-             .option("nullValue",   "")
-             .csv(mrm_path)
-    )
+    # Chemin "sharepoint:/..." → téléchargement Microsoft Graph vers le staging
+    # DBFS (config SHAREPOINT requise). Les chemins dbfs:/ passent tels quels.
+    mrm_path = resolve_source_path(spark, mrm_path, SHAREPOINT, SHAREPOINT_STAGING)
+
+    # Tout est lu EN STRING, casts ciblés dans clean_mrm (to_date pour les dates,
+    # regexp_replace+cast double pour PM/PSAP) — fix T-02. Évite : (1) double-pass
+    # du fichier, (2) types inférés au hasard.
+    if mrm_path.lower().endswith((".xlsx", ".xlsm")):
+        # Source Excel (SharePoint ou DBFS) : lecture driver-side openpyxl.
+        df = read_excel_to_spark(spark, mrm_path, as_string=True)
+    else:
+        df = (
+            spark.read
+                 .option("header",      True)
+                 .option("delimiter",   cfg.mrm_delimiter)
+                 .option("inferSchema", "false")
+                 .option("encoding",    "UTF-8")
+                 .option("nullValue",   "")
+                 .csv(mrm_path)
+        )
 
     # ── Filtre 0 : statut inventaire (optionnel) ──────────────────────────────
     if CLIENT_MRM_STATUT_INV:

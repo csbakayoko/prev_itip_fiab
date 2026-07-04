@@ -37,6 +37,77 @@ logger = logging.getLogger(__name__)
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 
+# Schéma de chemin déclenchant la voie SharePoint dans resolve_source_path :
+#   "sharepoint:/Documents partages/MRM/MRM_Fiab_31_12_24.xlsx"
+SHAREPOINT_SCHEME = "sharepoint:"
+
+
+def _to_local(path: str) -> str:
+    """Convertit un chemin dbfs:/... en /dbfs/... (writers/readers driver-side)."""
+    return path.replace("dbfs:/", "/dbfs/", 1) if path.startswith("dbfs:/") else path
+
+
+def is_sharepoint_path(path) -> bool:
+    """True si le chemin source désigne un fichier SharePoint (schéma sharepoint:)."""
+    return bool(path) and str(path).lower().startswith(SHAREPOINT_SCHEME)
+
+
+def resolve_source_path(
+    spark      : SparkSession,
+    path       : str,
+    sp_cfg     : dict,
+    staging_dir: str,
+) -> str:
+    """
+    Résout un chemin source vers un chemin lisible par Spark.
+
+    "sharepoint:/<chemin dans la bibliothèque>" → téléchargement Microsoft
+    Graph vers <staging_dir>/<nom du fichier> (DBFS) ; tout autre chemin
+    (dbfs:/, abfss:/, local) est renvoyé tel quel.
+
+    Args:
+        spark       : SparkSession active (résolution du secret via dbutils).
+        path        : chemin source (INVENTAIRES / widget fichier_mrm*).
+        sp_cfg      : config SHAREPOINT (tenant_id, client_id, hostname, site,
+                      client_secret OU secret_scope+secret_key).
+        staging_dir : dossier DBFS de dépôt des téléchargements.
+
+    Returns:
+        Chemin Spark (dbfs:/...) du fichier téléchargé, ou `path` inchangé.
+
+    Raises:
+        ValueError si le chemin est SharePoint mais la config est incomplète
+        (app registration Azure AD pas encore fournie — cf. config/profile.py).
+    """
+    if not is_sharepoint_path(path):
+        return path
+
+    manquants = [k for k in ("tenant_id", "client_id", "hostname", "site")
+                 if not sp_cfg.get(k)]
+    if manquants:
+        raise ValueError(
+            f"Chemin SharePoint '{path}' mais config SHAREPOINT incomplète "
+            f"(champs vides : {', '.join(manquants)}) — cf. config/profile.py."
+        )
+
+    secret = sp_cfg.get("client_secret")
+    if not secret and sp_cfg.get("secret_scope"):
+        from pyspark.dbutils import DBUtils  # dispo sur cluster Databricks uniquement
+        secret = DBUtils(spark).secrets.get(sp_cfg["secret_scope"], sp_cfg["secret_key"])
+    if not secret:
+        raise ValueError(
+            "Secret SharePoint introuvable : renseigner SHAREPOINT['secret_scope'/"
+            "'secret_key'] (secret scope Databricks) ou 'client_secret'."
+        )
+
+    file_path = path[len(SHAREPOINT_SCHEME):].lstrip("/")
+    dest_dbfs = f"{staging_dir.rstrip('/')}/{file_path.rsplit('/', 1)[-1]}"
+    token = get_graph_token(sp_cfg["tenant_id"], sp_cfg["client_id"], secret)
+    download_sharepoint_file(
+        token, sp_cfg["hostname"], sp_cfg["site"], file_path, _to_local(dest_dbfs),
+    )
+    return dest_dbfs
+
 
 # ============================================================================
 # LECTURE EXCEL → SPARK
@@ -54,8 +125,8 @@ def read_excel_to_spark(
 
     Args:
         spark     : SparkSession active.
-        path      : chemin LOCAL du driver — pour un fichier DBFS, préfixer "/dbfs/"
-                    (ex. "dbfs:/FileStore/x.xlsx" → "/dbfs/FileStore/x.xlsx").
+        path      : chemin du fichier — dbfs:/... accepté (converti en /dbfs/...),
+                    sinon chemin local du driver.
         sheet     : nom ou index de l'onglet (0 = premier).
         header    : ligne d'en-tête (0 = première).
         as_string : True = tout lire en STRING (recommandé : les casts ciblés sont
@@ -68,7 +139,7 @@ def read_excel_to_spark(
     import pandas as pd
 
     pdf = pd.read_excel(
-        path, sheet_name=sheet, header=header,
+        _to_local(path), sheet_name=sheet, header=header,
         dtype=str if as_string else None, engine="openpyxl",
     )
     # En-têtes propres + valeurs NaN → None (Spark n'aime pas les float('nan') en string).
