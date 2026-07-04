@@ -396,27 +396,8 @@ def prefix_columns(
     ])
 
 
-def drop_duplicate_columns(df: DataFrame) -> DataFrame:
-    """
-    Supprime les colonnes dupliquées produites par un join Spark.
-    Les doublons sont renommés __DUP_{idx} puis droppés.
-    """
-    seen     = set()
-    new_cols = []
-    for idx, c in enumerate(df.columns):
-        if c not in seen:
-            seen.add(c)
-            new_cols.append(c)
-        else:
-            new_cols.append(f"{c}__DUP_{idx}")
-
-    tmp     = df.toDF(*new_cols)
-    to_drop = [c for c in tmp.columns if "__DUP_" in c]
-    return tmp.drop(*to_drop)
-
-
 # ============================================================================
-# PIPELINES DE NETTOYAGE CPT / MRM (point d'entrée depuis api.py)
+# PIPELINES DE NETTOYAGE CPT / MRM (point d'entrée depuis main.py)
 # ============================================================================
 
 @timed_fn("clean_cpt")

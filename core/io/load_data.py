@@ -126,8 +126,8 @@ def load_cpt_raw(spark: SparkSession, cfg: DatabaseConfig) -> DataFrame:
             )
             df = df.filter(type_cond)
 
-    # Pas de .count() ici — comptage centralisé dans api.py (un seul appel),
-    # car .count() ici déclenche un job Spark complet sur la table Hive.
+    # Pas de .count() ici — un .count() déclencherait un job Spark complet
+    # sur la table Hive ; la volumétrie est tracée en aval (LOG_VOLUMETRIE).
     _clauses = ", ".join(CLIENT_CLAUSES)      if CLIENT_CLAUSES      else "TOUTES"
     _types   = ", ".join(CLIENT_TYPE_CLAUSES) if CLIENT_TYPE_CLAUSES else "TOUS"
     logger.info(f"CPT chargé [vision={CLIENT_CPT_VISION}, clauses={_clauses}, types={_types}]")
