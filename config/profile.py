@@ -7,8 +7,15 @@ ventilées par CLAUSE × TYPE_CLAUSE (portées par les données). SODEXO (clause
 rejouer seul, remettre CLIENT_CLAUSES = ["121981"] / CLIENT_TYPE_CLAUSES = ["PB"].
 """
 
+import os
+
 # ── Racine DBFS de travail (sources uploadées, checkpoints, exports) ─────────
-_DBFS_HOME = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr"
+# Surcharge sans toucher au code : variable d'environnement ITIP_DBFS_HOME
+# (à poser dans la conf du cluster / du Job pour un autre espace de travail).
+_DBFS_HOME = os.environ.get(
+    "ITIP_DBFS_HOME",
+    "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr",
+)
 
 # ── Inventaires connus — SOURCE UNIQUE des dates / visions / chemins MRM ────
 # Une entrée par année : date d'inventaire, vision CPT, MRM courant, MRM N+1
@@ -62,8 +69,6 @@ FICHIER_MRM_N1 = _inv["mrm_n1"] or None
 CPT_PARQUET_PATH = None
 
 # ── Mode d'exécution ────────────────────────────────────────────────────────
-DEV_MODE = True                   # False en prod (Job Databricks remplit RUN_PARAMS)
-
 # Volumétrie dans les logs : les comptages Spark (.count()) PUREMENT informatifs
 # du waterfall (matchs/étape, entrée, union) et de la préparation (imputation,
 # dédoublonnage). Chacun déclenche un job Spark. True = trace les volumétries
@@ -84,4 +89,8 @@ EXPORT_BASE_PATH   = f"{_DBFS_HOME}/itip_fiab_exports"  # racine DBFS des sortie
 EXPORT_ANALYSES    = False        # True = écrit les analyses sur disque (DBFS)
 EXPORT_GRAPHS      = True         # True = graphiques de restitution (affichage + PNG DBFS)
 EXPORT_FORMATS     = ("excel", "csv", "parquet")  # ⊆ {excel, csv, parquet, json, delta} — Excel privilégié (Power BI)
-EXPORT_DELTA_SCHEMA = None        # schéma metastore cible si "delta" ∈ EXPORT_FORMATS
+# Schéma metastore des tables métriques Delta (run de production Power BI).
+# Créé automatiquement au premier export (CREATE SCHEMA IF NOT EXISTS).
+# Surcharge : variable d'environnement ITIP_DELTA_SCHEMA ("" = pas de Delta),
+# ou widget delta_schema du notebook itip_fiab_powerbi.
+EXPORT_DELTA_SCHEMA = os.environ.get("ITIP_DELTA_SCHEMA", "hive_metastore.itip_fiab") or None

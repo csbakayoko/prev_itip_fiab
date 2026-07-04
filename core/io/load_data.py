@@ -31,7 +31,6 @@ from config import (
     TYPE_CLAUSE_CPT_PREFIX,
     TYPE_CLAUSE_MRM_VALUE,
     MRM_TYPE_CLAUSE_COL,
-    DEV_MODE,
 )
 from core._timing import timed_fn
 
@@ -213,11 +212,11 @@ def load_mrm_raw(
         if mrm_type_values:
             if MRM_TYPE_CLAUSE_COL in df.columns:
                 df = df.filter(F.col(MRM_TYPE_CLAUSE_COL).isin(mrm_type_values))
-            elif DEV_MODE:
+            else:
                 logger.warning(
                     f"Colonne '{MRM_TYPE_CLAUSE_COL}' absente du CSV MRM — "
                     f"filtre type_clause non appliqué. "
-                    f"Vérifier MRM_TYPE_CLAUSE_COL dans settings.py (valeur actuelle: '{MRM_TYPE_CLAUSE_COL}')."
+                    f"Vérifier MRM_TYPE_CLAUSE_COL dans config/mappings.py."
                 )
 
     # ── Filtre 2 : clause ─────────────────────────────────────────────────────
