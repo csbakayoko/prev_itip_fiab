@@ -22,7 +22,7 @@ Power BI → Power Automate → Databricks Job
 |---|---|
 | `main.py` | Point d'entrée du pipeline : `build_df_result` (cœur métier) + `run` (avec restitution) |
 | `config/` | Toute la configuration — `profile.py` (périmètre, sources, exports), `mappings.py` (colonnes brutes → canoniques), `params.py` (matching, dédoublonnage) |
-| `core/io/` | Chargement CPT (Hive/parquet) et MRM (CSV), export Excel Power BI, ponts Excel/SharePoint (`sources.py`, préparé — branché à l'intégration SharePoint) |
+| `core/io/` | Chargement CPT (Hive/parquet) et MRM (CSV, Excel, chemins `sharepoint:` via Microsoft Graph), export Excel Power BI, écriture Delta du détail (`save_result.py`) |
 | `core/prep/` | Contrôles qualité, nettoyage, dédoublonnage, clés de matching |
 | `core/match/` | Waterfall de matching, récupérations (N+1, statut NON), audit de clé |
 | `core/synthese/` | Synthèse : passe Spark unique (`compute_synthese`), contrat typé, rendu console |
@@ -56,6 +56,12 @@ Un run paramétré (widgets notebook, paramètres de Job) passe par
 `core.runtime.configurer_run`, qui surcharge date, vision et fichiers MRM —
 et permet aussi de rejouer plusieurs inventaires dans une même session.
 
+**SharePoint (prêt à activer)** : un chemin source `sharepoint:/<chemin dans
+la bibliothèque>` déclenche le téléchargement du fichier via Microsoft Graph
+avant lecture (`.xlsx` lu nativement). Activation : remplir `SHAREPOINT` dans
+`config/profile.py` (app registration Azure AD + secret scope Databricks —
+prérequis IT décrits dans `core/io/sources.py`).
+
 ## Exploitation — Databricks Job (production)
 
 Le Job lance le notebook **`notebooks/itip_fiab_powerbi`**. Tous les
@@ -70,8 +76,11 @@ paramètres sont des widgets, surchargeables en « base parameters » du Job :
 
 Le run est **bloquant** sur les contrôles (lignes toutes classées, taux de
 chute cohérent, recoupements inter-tables) : un Job vert = des onglets
-Power BI fiables. Power BI se connecte ensuite au SQL Warehouse (tables
-`<schema>.itip_metric_*`) ou importe le classeur Excel écrit sous
+Power BI fiables. En sortie : les 20 tables métriques
+(`<schema>.itip_metric_*`) et le détail dossier par dossier
+(`<schema>.resultat_backtest`, historisé par date d'inventaire — rejouer un
+inventaire remplace ses lignes, 2023 et 2024 coexistent). Power BI se
+connecte au SQL Warehouse, ou importe le classeur Excel écrit sous
 `EXPORT_BASE_PATH`.
 
 ## Développement local
