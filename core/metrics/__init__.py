@@ -973,10 +973,13 @@ def export_metriques(
     formats ⊆ {excel, csv, parquet, json, delta} — EXCEL est le format
     privilégié (classeur multi-onglets propre, onglets nommés par axe d'étude,
     tables Excel détectées par Power BI — cf. core/io/excel_export.py) ; delta
-    requiert delta_schema (une table <schema>.itip_metric_<nom>_<perim> par métrique).
+    requiert delta_schema (une table <schema>.itip_metric_<nom>_<perim> par
+    métrique) ; le schéma est créé s'il n'existe pas (run idempotent).
     """
     tables  = toutes_metriques(df_result, d)
     formats = {f.lower() for f in formats}
+    if "delta" in formats and delta_schema:
+        df_result.sparkSession.sql(f"CREATE SCHEMA IF NOT EXISTS {delta_schema}")
     out = _to_local(output_dir(base_path, "metrics"))
     os.makedirs(out, exist_ok=True)
     print(f"[METRICS] périmètre {CLIENT_NAME} / clauses {_PERIMETRE} → {sorted(formats)}")

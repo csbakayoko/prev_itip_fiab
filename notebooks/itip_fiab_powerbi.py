@@ -32,27 +32,59 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Setup — session Spark + config
+# MAGIC ## 1. Setup — session Spark + paramètres du run
 # MAGIC
 # MAGIC Le notebook vit dans le repo (dossier Git Databricks) : la racine est sur `sys.path`.
+# MAGIC
+# MAGIC **Tous les paramètres sont des widgets** (= « base parameters » du Job
+# MAGIC Databricks) : le Job surcharge n'importe lequel sans toucher au code.
+# MAGIC Un widget vide = défaut de `config/profile.py` (`INVENTAIRES[annee]`).
 
 # COMMAND ----------
 
-from config import CLIENT_NAME, EXPORT_DELTA_SCHEMA
-from core.runtime import get_spark
+from config import ANNEE_INVENTAIRE, CLIENT_NAME, EXPORT_DELTA_SCHEMA, INVENTAIRES
+from core.runtime import configurer_run, get_spark
 from core.synthese.kpi_export import print_synthese
 from core import metrics
 from main import build_df_result
 
 spark = get_spark()
 
+# COMMAND ----------
+
+# ── Paramètres du run (widgets = paramètres du Job) ──────────────────────────
+dbutils.widgets.dropdown("annee_inventaire", ANNEE_INVENTAIRE, list(INVENTAIRES), "Année d'inventaire")
+dbutils.widgets.text("date_inventaire", "", "Date d'inventaire (vide = config)")
+dbutils.widgets.text("vision_cpt",      "", "Vision CPT (vide = config)")
+dbutils.widgets.text("fichier_mrm",     "", "MRM courant (vide = config)")
+dbutils.widgets.text("fichier_mrm_n1",  "", "MRM N+1 (vide = config, 'aucun' = sans)")
+dbutils.widgets.text("delta_schema",    EXPORT_DELTA_SCHEMA or "", "Schéma Delta (vide = pas de Delta)")
+
+
+def _param(nom: str, defaut: str) -> str:
+    """Valeur du widget, ou le défaut de config si le widget est vide."""
+    return dbutils.widgets.get(nom).strip() or defaut
+
+
+_annee = dbutils.widgets.get("annee_inventaire")
+_inv   = INVENTAIRES[_annee]
+
+# 'aucun' force un run SANS récupération N+1 même si la config en définit une.
+_mrm_n1 = _param("fichier_mrm_n1", _inv["mrm_n1"])
+profil  = configurer_run(
+    date_inventaire = _param("date_inventaire", _inv["date"]),
+    cpt_vision      = _param("vision_cpt",      _inv["vision"]),
+    fichier_mrm     = _param("fichier_mrm",     _inv["mrm"]),
+    fichier_mrm_n1  = None if _mrm_n1.lower() in ("", "aucun") else _mrm_n1,
+)
+print(f"Run inventaire {_annee} :", profil)
+
 # ── Cible de l'export Power BI ───────────────────────────────────────────────
 # Delta (recommandé) : Power BI se connecte au SQL Warehouse Databricks et lit
 # les tables <schema>.itip_metric_<nom>_<perim>. Sans schéma, les fichiers
 # parquet/csv sous DBFS restent disponibles (connecteur fichier / import).
-DELTA_SCHEMA = EXPORT_DELTA_SCHEMA            # ex. "hive_metastore.itip_fiab"
-# Excel TOUJOURS produit (classeur propre multi-onglets, import fichier Power BI) ;
-# Delta en plus si un schéma est configuré (connexion SQL Warehouse).
+# Excel TOUJOURS produit (classeur propre multi-onglets, import fichier Power BI).
+DELTA_SCHEMA = _param("delta_schema", "") or None
 FORMATS      = ("excel", "delta", "parquet", "csv") if DELTA_SCHEMA else ("excel", "parquet", "csv")
 
 print("Périmètre :", CLIENT_NAME)
@@ -65,8 +97,8 @@ print("Formats   :", FORMATS, "| schéma Delta :", DELTA_SCHEMA or "—")
 # MAGIC
 # MAGIC `main.build_df_result` (le cœur de `main.run`, sans la restitution) :
 # MAGIC matching principal (MRM statut OUI), récupération N+1, repêchage statut NON
-# MAGIC (hors métriques), obs tardives IT, tags persistants. Sources et périmètre
-# MAGIC pilotés par `config/profile.py`.
+# MAGIC (hors métriques), obs tardives IT, tags persistants. Sources et date pilotées
+# MAGIC par les widgets ci-dessus (défauts : `config/profile.py`).
 
 # COMMAND ----------
 
