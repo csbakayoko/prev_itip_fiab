@@ -44,11 +44,35 @@ Power BI → Power Automate → Databricks Job
 ## Configuration
 
 Aucun chemin en dur dans `core/` : tout est piloté par `config/profile.py`
-(périmètre, vision CPT, date d'inventaire, fichiers MRM, exports) et
-`config/params.py` (règles de matching). En production (`DEV_MODE = False`),
-le Job Databricks remplit `config.RUN_PARAMS` avant l'import des modules ;
-en session interactive, `core.runtime.configurer_run` permet de rejouer
-plusieurs inventaires sans redémarrer.
+(inventaires connus `INVENTAIRES`, périmètre, exports) et `config/params.py`
+(règles de matching). Deux surcharges d'environnement pour changer d'espace
+sans toucher au code (conf du cluster / du Job) :
+
+- `ITIP_DBFS_HOME` — racine DBFS de travail (sources MRM, checkpoints, exports) ;
+- `ITIP_DELTA_SCHEMA` — schéma des tables métriques Delta
+  (défaut `hive_metastore.itip_fiab`, `""` = pas d'export Delta).
+
+Un run paramétré (widgets notebook, paramètres de Job) passe par
+`core.runtime.configurer_run`, qui surcharge date, vision et fichiers MRM —
+et permet aussi de rejouer plusieurs inventaires dans une même session.
+
+## Exploitation — Databricks Job (production)
+
+Le Job lance le notebook **`notebooks/itip_fiab_powerbi`**. Tous les
+paramètres sont des widgets, surchargeables en « base parameters » du Job :
+
+| Paramètre | Défaut | Rôle |
+|---|---|---|
+| `annee_inventaire` | `2023` | sélectionne l'entrée `INVENTAIRES` de la config |
+| `date_inventaire` / `vision_cpt` / `fichier_mrm` | vide = config | surcharges unitaires |
+| `fichier_mrm_n1` | vide = config | chemin MRM N+1 ; `aucun` = run sans récupération tardive |
+| `delta_schema` | `hive_metastore.itip_fiab` | schéma des 20 tables métriques (créé si absent ; vide = pas de Delta) |
+
+Le run est **bloquant** sur les contrôles (lignes toutes classées, taux de
+chute cohérent, recoupements inter-tables) : un Job vert = des onglets
+Power BI fiables. Power BI se connecte ensuite au SQL Warehouse (tables
+`<schema>.itip_metric_*`) ou importe le classeur Excel écrit sous
+`EXPORT_BASE_PATH`.
 
 ## Développement local
 
