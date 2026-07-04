@@ -5,11 +5,14 @@
 # MAGIC Notebook **final** : données + config en entrée, tables métriques en sortie.
 # MAGIC
 # MAGIC Déroulé :
-# MAGIC 1. **Setup** — session Spark + config (fichiers source et périmètre pilotés par `config/profile.py`)
+# MAGIC 1. **Setup** — session Spark + paramètres du run (widgets = paramètres du Job,
+# MAGIC    défauts `config/profile.py`)
 # MAGIC 2. **Pipeline** — chargement → nettoyage → matching → récupérations (N+1, statut NON) → tags
 # MAGIC 3. **Synthèse** — contrôles de cohérence console (`chute_coherente`, lignes classées)
 # MAGIC 4. **Export Power BI** — les 20 tables métriques écrites en Delta (+ fichiers DBFS),
 # MAGIC    puis contrôles inter-tables BLOQUANTS (les onglets doivent se recouper)
+# MAGIC 5. **Détail du run** — `df_result` écrit en table Delta `resultat_backtest`,
+# MAGIC    historisée par date d'inventaire (2023 et 2024 coexistent)
 # MAGIC
 # MAGIC Tables produites (tidy, une table par question métier) :
 # MAGIC
@@ -43,6 +46,7 @@
 # COMMAND ----------
 
 from config import ANNEE_INVENTAIRE, CLIENT_NAME, EXPORT_DELTA_SCHEMA, INVENTAIRES
+from core.io.save_result import save_result_delta
 from core.runtime import configurer_run, get_spark
 from core.synthese.kpi_export import print_synthese
 from core import metrics
@@ -154,6 +158,22 @@ assert ctrl["OK"].all(), (
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC ## 5. Détail du run — table `resultat_backtest` (historisée)
+# MAGIC
+# MAGIC Le dossier par dossier (`df_result`) : la partition de la date d'inventaire
+# MAGIC du run est remplacée, les autres inventaires sont préservés.
+
+# COMMAND ----------
+
+if DELTA_SCHEMA:
+    table_resultat = save_result_delta(df_result, DELTA_SCHEMA, d["date_inventaire"])
+    print("Détail du run →", table_resultat)
+else:
+    print("Pas de schéma Delta (widget delta_schema vide) : détail non historisé.")
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC ### Récapitulatif des sorties (connexion Power BI)
 
 # COMMAND ----------
@@ -164,6 +184,7 @@ if DELTA_SCHEMA:
     print("Tables Delta (connecteur Power BI ▸ Azure Databricks ▸ SQL Warehouse) :")
     for name in tables:
         print(f"  {DELTA_SCHEMA}.itip_metric_{name}_{metrics._PERIMETRE}")
+    print(f"  {table_resultat}  (détail df_result, historisé par DATE_INVENTAIRE)")
 else:
     print("Pas de schéma Delta configuré (EXPORT_DELTA_SCHEMA dans config/profile.py)")
     print("→ Power BI : importer le classeur Excel (onglets par axe + Sommaire) ou les parquet/csv du dossier ci-dessus.")
