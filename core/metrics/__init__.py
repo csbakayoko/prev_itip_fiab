@@ -46,7 +46,7 @@ import pyspark.sql.functions as F
 
 from config import (
     CLIENT_NAME, CLIENT_CLAUSES, MATCH_LABELS, TYPE_CLAUSE_CPT_PREFIX,
-    CODE_GARANTIE_IT, CODE_GARANTIE_IP,
+    CODE_GARANTIE_IT, CODE_GARANTIE_IP, EXPORT_BASE_PATH,
 )
 from core.synthese.kpi_export import compute_synthese, kas_totaux
 from core.match.matching import categorize_mrm_conclusion
@@ -62,17 +62,13 @@ from core.synthese.synthese_contract import SyntheseScalars
 # filtré sur une seule, sinon "MULTI". La clause réelle reste DANS les tables.
 _PERIMETRE = CLIENT_CLAUSES[0] if (CLIENT_CLAUSES and len(CLIENT_CLAUSES) == 1) else "MULTI"
 
-DEFAULT_BASE_PATH = (
-    "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/itip_fiab_exports"
-)
-
 
 def _to_local(path: str) -> str:
     """Convertit un chemin dbfs:/... en /dbfs/... pour les writers locaux (pandas)."""
     return path.replace("dbfs:/", "/dbfs/", 1) if path.startswith("dbfs:/") else path
 
 
-def output_dir(base_path: str = DEFAULT_BASE_PATH, sub: str = "") -> str:
+def output_dir(base_path: str = EXPORT_BASE_PATH, sub: str = "") -> str:
     """Sous-dossier d'export propre au périmètre (<base>/<CLIENT>_<PERIM>[/sub])."""
     out = f"{base_path.rstrip('/')}/{CLIENT_NAME}_{_PERIMETRE}"
     return f"{out}/{sub}" if sub else out
@@ -967,7 +963,7 @@ def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) 
 def export_metriques(
     df_result   : DataFrame,
     d           : Optional[SyntheseScalars] = None,
-    base_path   : str = DEFAULT_BASE_PATH,
+    base_path   : str = EXPORT_BASE_PATH,
     formats     : Iterable[str] = ("excel", "csv", "parquet"),
     delta_schema: Optional[str] = None,
 ) -> Dict[str, pd.DataFrame]:

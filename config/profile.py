@@ -7,10 +7,35 @@ ventilées par CLAUSE × TYPE_CLAUSE (portées par les données). SODEXO (clause
 rejouer seul, remettre CLIENT_CLAUSES = ["121981"] / CLIENT_TYPE_CLAUSES = ["PB"].
 """
 
+# ── Racine DBFS de travail (sources uploadées, checkpoints, exports) ─────────
+_DBFS_HOME = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr"
+
+# ── Inventaires connus — SOURCE UNIQUE des dates / visions / chemins MRM ────
+# Une entrée par année : date d'inventaire, vision CPT, MRM courant, MRM N+1
+# ("" = pas de N+1, pas de récupération tardive). Consommé par :
+#   - l'inventaire ACTIF ci-dessous (run direct main.py / itip_fiab_powerbi) ;
+#   - les widgets des notebooks (itip_fiab_main, itip_fiab_comparaison).
+INVENTAIRES = {
+    "2023": {
+        "date"  : "31/12/2023",
+        "vision": "CC2023",
+        "mrm"   : f"{_DBFS_HOME}/MRM_FILES/MRM_Fiab_31_12_23_V3.csv",
+        "mrm_n1": f"{_DBFS_HOME}/MRM_FILES/MRM_Fiab_30_06_24.csv",   # 30/06/2024
+    },
+    "2024": {
+        "date"  : "31/12/2024",
+        "vision": "CC2024",
+        "mrm"   : f"{_DBFS_HOME}/MRM_FILES/MRM_Fiab_31_12_24.csv",   # à déposer sur DBFS
+        "mrm_n1": "",
+    },
+}
+ANNEE_INVENTAIRE = "2023"          # inventaire ACTIF (DEV) — les valeurs en dérivent
+_inv = INVENTAIRES[ANNEE_INVENTAIRE]
+
 # ── Identité du run ─────────────────────────────────────────────────────────
 CLIENT_NAME            = "PERIMETRE_GLOBAL"  # libellé du run (synthèse + noms d'export)
-CLIENT_CPT_VISION      = "CC2023"      # vision comptable CPT (filtre obligatoire)
-DATE_INVENTAIRE        = "31/12/2023"  # date d'inventaire (en dur). "auto" = max(MRM_D_INVENTAIRE).
+CLIENT_CPT_VISION      = _inv["vision"]      # vision comptable CPT (filtre obligatoire)
+DATE_INVENTAIRE        = _inv["date"]        # date d'inventaire. "auto" = max(MRM_D_INVENTAIRE).
 CLIENT_MRM_STATUT_INV  = None          # filtre statut inventaire au chargement. None = charge
                                        # OUI+NON (un MRM NON n'est pas remonté à la direction
                                        # financière mais reste mappable). La distinction est
@@ -23,12 +48,11 @@ CLIENT_MRM_STATUT_INV  = None          # filtre statut inventaire au chargement.
 CLIENT_CLAUSES      = None         # numéros sans préfixe ; None = toutes les clauses
 CLIENT_TYPE_CLAUSES = ["PB"]       # "PB" / "HPB" ; filtre type (MRM = PB seul)
 
-# ── Chemins source MRM (CSV DBFS) ───────────────────────────────────────────
-# Principal = inventaire de référence (ex: 31/12/2023). N+1 = inventaire
-# postérieur (ex: 30/06/2024) pour récupérer les déclarations tardives parmi
-# les CPT_ONLY. None si absent.
-FICHIER_MRM    = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_31_12_23_V3.csv"
-FICHIER_MRM_N1 = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/MRM_FILES/MRM_Fiab_30_06_24.csv"  # MRM N+1 (30/06/2024)
+# ── Chemins source MRM (CSV DBFS) de l'inventaire actif ─────────────────────
+# Principal = inventaire de référence. N+1 = inventaire postérieur pour
+# récupérer les déclarations tardives parmi les CPT_ONLY. None si absent.
+FICHIER_MRM    = _inv["mrm"]
+FICHIER_MRM_N1 = _inv["mrm_n1"] or None
 
 # ── Source CPT parquet (prioritaire sur la table Hive si défini et lisible) ──
 # Export parquet de la table compte (mêmes colonnes brutes que la table Hive).
@@ -53,9 +77,10 @@ LOG_VOLUMETRIE = True
 # dont les blocs vivent sur les executors (→ CHECKPOINT_RDD_BLOCK_ID_NOT_FOUND
 # irrécupérable quand le cluster réduit). None = retomber sur localCheckpoint
 # (uniquement pour cluster à taille fixe).
-CHECKPOINT_DIR = "dbfs:/FileStore/shared_uploads/cheickseko.bakayoko@axa.fr/itip_fiab_checkpoints"
+CHECKPOINT_DIR = f"{_DBFS_HOME}/itip_fiab_checkpoints"
 
 # ── Export des analyses (restitution toujours en console ; écriture fichiers) ─
+EXPORT_BASE_PATH   = f"{_DBFS_HOME}/itip_fiab_exports"  # racine DBFS des sorties (métriques, graphiques)
 EXPORT_ANALYSES    = False        # True = écrit les analyses sur disque (DBFS)
 EXPORT_GRAPHS      = True         # True = graphiques de restitution (affichage + PNG DBFS)
 EXPORT_FORMATS     = ("excel", "csv", "parquet")  # ⊆ {excel, csv, parquet, json, delta} — Excel privilégié (Power BI)
