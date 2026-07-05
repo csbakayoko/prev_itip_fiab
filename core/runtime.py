@@ -11,7 +11,7 @@ Réassigner `config.DATE_INVENTAIRE` après coup n'a donc aucun effet. Pour rejo
 le pipeline sur plusieurs inventaires DANS UNE MÊME SESSION (ex. comparaison
 2023 vs 2024), on réassigne les globals **là où ils sont effectivement lus** :
 
-    - DATE_INVENTAIRE    → core.match.matching  (tag obs tardives IT, année)
+    - DATE_INVENTAIRE    → core.match.recovery  (tag obs tardives IT, année)
                            core.synthese.kpi_export (date de la synthèse)
     - CLIENT_CPT_VISION  → core.io.load_data    (filtre vision du compte)
     - fichiers MRM       → config.RUN_PARAMS    (dict PARTAGÉ : sa mutation est
@@ -70,11 +70,11 @@ def configurer_run(
         dict récapitulatif du run appliqué (traçabilité notebook).
     """
     import core.io.load_data as load_data
-    import core.match.matching as matching
+    import core.match.recovery as recovery
     import core.synthese.kpi_export as kpi_export
 
     load_data.CLIENT_CPT_VISION = cpt_vision
-    matching.DATE_INVENTAIRE    = date_inventaire
+    recovery.DATE_INVENTAIRE    = date_inventaire
     kpi_export.DATE_INVENTAIRE  = date_inventaire
 
     # RUN_PARAMS est le dict PARTAGÉ lu par load_mrm_raw → mutation in place.

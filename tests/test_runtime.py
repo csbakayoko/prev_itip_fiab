@@ -7,7 +7,7 @@ pytest.importorskip("pyspark")          # les modules consommateurs importent py
 from core.runtime import configurer_run
 from config import RUN_PARAMS
 import core.io.load_data as load_data
-import core.match.matching as matching
+import core.match.recovery as recovery
 import core.synthese.kpi_export as kpi_export
 
 
@@ -16,8 +16,8 @@ def test_configurer_run_propage_les_globals():
         date_inventaire="31/12/2024", cpt_vision="CC2024",
         fichier_mrm="dbfs:/x/mrm_2024.csv", fichier_mrm_n1="dbfs:/x/mrm_2024_n1.csv",
     )
-    # date lue par matching (tag obs tardives) ET kpi_export (date synthèse)
-    assert matching.DATE_INVENTAIRE == "31/12/2024"
+    # date lue par recovery (tag obs tardives) ET kpi_export (date synthèse)
+    assert recovery.DATE_INVENTAIRE == "31/12/2024"
     assert kpi_export.DATE_INVENTAIRE == "31/12/2024"
     # vision lue par load_cpt_raw
     assert load_data.CLIENT_CPT_VISION == "CC2024"
