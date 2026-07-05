@@ -1,9 +1,9 @@
 """
 Métriques par axe — ré-agrégations Spark de df_result.
 
-Chute par clause / ancienneté, anomalies par mois de survenance,
-investigation des orphelins CPT_ONLY. Les finalisations (_finalise_*) sont
-en pure pandas, testables sans Spark.
+Chute par clause / ancienneté, consignes par clause (tableau de bord),
+anomalies par mois de survenance, investigation des orphelins CPT_ONLY.
+Les finalisations (_finalise_*) sont en pure pandas, testables sans Spark.
 """
 
 from typing import Optional
@@ -12,7 +12,7 @@ import pandas as pd
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame
 
-from config import CODE_GARANTIE_IT, CODE_GARANTIE_IP
+from config import CODE_GARANTIE_IT, CODE_GARANTIE_IP, MATCH_LABELS, RECUP_NON_LABEL
 from core.metrics.base import (
     EXERCICE_INV, EXERCICE_N1, _EXERCICE_ORDRE, _BLOC_ORDRE,
     derive_clause_column, _with_mrm_action, _filter_chute_universe,
@@ -44,7 +44,7 @@ def chute_par_clause(df_result: DataFrame, top: Optional[int] = None) -> pd.Data
                             - F.coalesce(F.col("CPT_PM"), F.lit(0.0)))
     )
     pdf = (
-        df.groupBy("EXERCICE", "CLAUSE", "TYPE_CLAUSE")
+        df.groupBy("EXERCICE", "CLAUSE", "TYPE_COMPTE")
         .agg(
             F.count("*").alias("nb_dossiers"),
             F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("nb_sous"),
@@ -172,6 +172,83 @@ def anomalies_cpt_only(
 
 
 # ============================================================================
+# CONSIGNES PAR CLAUSE (tableau de bord Power BI)
+# ============================================================================
+
+# Ordre d'affichage des consignes (aligné sur l'écran Power BI).
+_CONSIGNE_ORDRE = {"KEEP": 0, "ADD": 1, "STUDY": 2, "DELETE": 3}
+
+
+def _finalise_consignes_par_clause(pdf: pd.DataFrame) -> pd.DataFrame:
+    """PCT_SUIVI + libellé CONSIGNE (sans préfixe MRM_) + tri — pure pandas."""
+    pdf = pdf.copy()
+    pdf["CONSIGNE"] = pdf["MRM_ACTION"].str.replace("MRM_", "", regex=False)
+    pdf[["PM_MRM", "PM_CPT"]] = pdf[["PM_MRM", "PM_CPT"]].round(2)
+    tot = pdf["NB_SUIVIES"] + pdf["NB_NON_SUIVIES"]
+    pdf["PCT_SUIVI"] = (pdf["NB_SUIVIES"] / tot * 100).where(tot != 0, 0.0).round(1)
+    pdf = pdf.sort_values(
+        ["TYPE_COMPTE", "CLAUSE", "CONSIGNE"],
+        key=lambda s: s.map(_CONSIGNE_ORDRE) if s.name == "CONSIGNE" else s,
+        na_position="last",
+    ).reset_index(drop=True)
+    return pdf[["TYPE_COMPTE", "CLAUSE", "CONSIGNE", "NB_DOSSIERS",
+                "NB_SUIVIES", "NB_NON_SUIVIES", "PCT_SUIVI",
+                "PM_MRM", "PM_CPT", "NB_NON_REMONTE_DF"]]
+
+
+def consignes_par_clause(df_result: DataFrame) -> pd.DataFrame:
+    """Suivi opérationnel des consignes par TYPE_COMPTE × CLAUSE × CONSIGNE.
+
+    Alimente le « tableau de bord des consignes » Power BI : les cartes par
+    périmètre (PB / autres) et le tableau filtrable se calculent en DAX par
+    simple filtre sur cette table — aucun second run du moteur.
+
+    Exercice courant pur, mêmes règles que la table `consignes` globale :
+        KEEP/ADD/STUDY : suivie = dossier retrouvé au compte (matché) ;
+                         non suivie = non retrouvé (MRM_MISSING).
+        DELETE         : suivie = suppression effective (absent du compte) ;
+                         non suivie = encore au compte (matché).
+    Les récupérés N+1 (suivi séparé, cf. suivi_n1) sont exclus.
+
+    NB_NON_REMONTE_DF : dossiers repêchés via statut inventaire NON (PM MRM
+    = 0, non remontée à la Direction Financière) — hors conformité, comptés
+    à part pour la colonne « remonté DF » de l'écran.
+    """
+    df = derive_clause_column(_with_mrm_action(df_result))
+
+    matched   = F.col("TYPE_RECONCILIATION").isin(list(MATCH_LABELS))
+    missing   = F.col("TYPE_RECONCILIATION") == "MRM_MISSING"
+    deleted   = F.col("TYPE_RECONCILIATION") == "MRM_DELETE"
+    recup_non = F.col("TYPE_RECONCILIATION") == RECUP_NON_LABEL
+    is_delete = F.col("MRM_ACTION") == "MRM_DELETE"
+
+    univers = df.filter(
+        F.col("MRM_ACTION").isNotNull() & (matched | missing | deleted | recup_non)
+    )
+    suivie     = F.when(is_delete, deleted).otherwise(matched)
+    non_suivie = F.when(is_delete, matched).otherwise(missing)
+
+    pdf = (
+        univers.groupBy("TYPE_COMPTE", "CLAUSE", "MRM_ACTION")
+        .agg(
+            F.sum(F.when(~recup_non, 1).otherwise(0)).alias("NB_DOSSIERS"),
+            F.sum(F.when(~recup_non & suivie, 1).otherwise(0)).alias("NB_SUIVIES"),
+            F.sum(F.when(~recup_non & non_suivie, 1).otherwise(0)).alias("NB_NON_SUIVIES"),
+            F.coalesce(F.sum(F.when(~recup_non, F.col("MRM_PM"))), F.lit(0.0)).alias("PM_MRM"),
+            F.coalesce(F.sum(F.when(~recup_non, F.col("CPT_PM"))), F.lit(0.0)).alias("PM_CPT"),
+            F.sum(F.when(recup_non, 1).otherwise(0)).alias("NB_NON_REMONTE_DF"),
+        )
+        .toPandas()
+    )
+    if pdf.empty:
+        return pd.DataFrame(columns=["TYPE_COMPTE", "CLAUSE", "CONSIGNE",
+                                     "NB_DOSSIERS", "NB_SUIVIES", "NB_NON_SUIVIES",
+                                     "PCT_SUIVI", "PM_MRM", "PM_CPT",
+                                     "NB_NON_REMONTE_DF"])
+    return _finalise_consignes_par_clause(pdf)
+
+
+# ============================================================================
 # INVESTIGATION DES ORPHELINS CPT_ONLY
 # ============================================================================
 # Orphelins du compte préposé : dossiers compte sans contrepartie MRM (anomalies
@@ -216,7 +293,7 @@ def orphelins_par_clause(df_result: DataFrame) -> pd.DataFrame:
     """
     pdf = (
         _orphelins(derive_clause_column(df_result))
-        .groupBy("CLAUSE", "TYPE_CLAUSE")
+        .groupBy("CLAUSE", "TYPE_COMPTE")
         .agg(
             F.count("*").alias("NB_DOSSIERS"),
             F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("PM_CPT"),
@@ -224,7 +301,7 @@ def orphelins_par_clause(df_result: DataFrame) -> pd.DataFrame:
         .toPandas()
     )
     return _finalise_orphelins(pdf, with_rang=True)[
-        ["RANG", "CLAUSE", "TYPE_CLAUSE", "NB_DOSSIERS", "PM_CPT",
+        ["RANG", "CLAUSE", "TYPE_COMPTE", "NB_DOSSIERS", "PM_CPT",
          "POIDS_NB_PCT", "POIDS_PM_PCT"]
     ]
 

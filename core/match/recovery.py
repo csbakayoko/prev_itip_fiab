@@ -4,7 +4,9 @@ Récupérations post-waterfall et tags persistants du résultat.
 - recover_late_declarations : seconde chance des CPT_ONLY sur des inventaires
   ultérieurs (CPT_LATE) ou les MRM statut NON (CPT_RECUP_NON, hors métriques) ;
 - flag_late_it_observations : obs tardives IT (CPT_OBS_TARDIVE, hors métriques) ;
-- enrich_result_tags : MRM_ACTION + segmentation TAG_CPT_ONLY.
+- enrich_result_tags : MRM_ACTION, segmentation TAG_CPT_ONLY et dimensions
+  d'export persistées par ligne — CLAUSE (nullable), TYPE_COMPTE (PB/HPB/…,
+  jamais muet) et REMONTE_DF (statut inventaire Direction Financière).
 
 ⚠ DATE_INVENTAIRE est lue ICI (année d'inventaire des tags) : pour rejouer un
 autre inventaire dans la même session, configurer_run réassigne
@@ -14,16 +16,79 @@ core.match.recovery.DATE_INVENTAIRE (cf. core/runtime.py).
 from functools import reduce
 from typing import List, Optional, Tuple
 
-from pyspark.sql import DataFrame
+from pyspark.sql import Column, DataFrame
 import pyspark.sql.functions as F
 
 from config import (
     DATE_INVENTAIRE, LATE_IT_GARANTIE, OBS_TARDIVE_LABEL,
     ORPHAN_FIN_ANNEE_MOIS, ORPHAN_PM_THRESHOLD, LOG_VOLUMETRIE,
+    TYPE_CLAUSE_CPT_PREFIX,
 )
 from core._timing import timed_fn
 from core.match.steps import RECOVERY_KEYS, _materialize
 from core.match.waterfall import categorize_mrm_conclusion
+
+
+# ============================================================================
+# DIMENSIONS D'EXPORT (CLAUSE, TYPE_COMPTE, REMONTE_DF)
+# ============================================================================
+
+# Préfixe CPT → type de compte (ex. "CPB" → "PB"). Réciproque de
+# TYPE_CLAUSE_CPT_PREFIX ; un préfixe non mappé (futur HPB, …) reste tel quel.
+_CPT_PREFIX_TO_TYPE = {v.rstrip("_"): t for t, v in TYPE_CLAUSE_CPT_PREFIX.items()}
+
+
+def derive_clause_column(df: DataFrame) -> DataFrame:
+    """
+    Ajoute les colonnes CLAUSE et TYPE_COMPTE (dimensions d'export par ligne).
+
+    Après le waterfall, la clause est portée par CPT_CLAUSE (ex. "CPB_121981",
+    préfixe = type) et/ou MRM_CLAUSE (ex. "121981") :
+
+        CLAUSE      = MRM_CLAUSE sinon CPT_CLAUSE sans son préfixe. NULLABLE :
+                      un compte sans n° de clause est une donnée légitime.
+        TYPE_COMPTE = MRM_TYPE_CLAUSE sinon type déduit du préfixe CPT via le
+                      mapping, SINON LE PRÉFIXE BRUT : un type non mappé
+                      (futur HPB, …) reste VISIBLE dans les exports au lieu
+                      de disparaître en null — on le repère, on l'ajoute au
+                      mapping (config/mappings.py).
+
+    Idempotente : si les colonnes existent déjà (pipeline), passthrough —
+    les métriques réutilisent les dimensions persistées telles quelles.
+    """
+    if "CLAUSE" in df.columns and "TYPE_COMPTE" in df.columns:
+        return df
+
+    clause_parts = []
+    if "MRM_CLAUSE" in df.columns:
+        clause_parts.append(F.col("MRM_CLAUSE"))
+    if "CPT_CLAUSE" in df.columns:
+        clause_parts.append(F.regexp_replace(F.col("CPT_CLAUSE"), r"^[A-Za-z]+_", ""))
+    clause = F.coalesce(*clause_parts) if clause_parts else F.lit(None).cast("string")
+
+    type_parts = []
+    if "MRM_TYPE_CLAUSE" in df.columns:
+        type_parts.append(F.col("MRM_TYPE_CLAUSE"))
+    if "CPT_CLAUSE" in df.columns:
+        prefix = F.regexp_extract(F.col("CPT_CLAUSE"), r"^([A-Za-z]+)_", 1)
+        type_from_cpt = F.when(prefix == "", F.lit(None).cast("string")).otherwise(prefix)
+        for pfx, t in _CPT_PREFIX_TO_TYPE.items():
+            type_from_cpt = F.when(prefix == pfx, F.lit(t)).otherwise(type_from_cpt)
+        type_parts.append(type_from_cpt)
+    type_compte = F.coalesce(*type_parts) if type_parts else F.lit(None).cast("string")
+
+    return df.withColumn("CLAUSE", clause).withColumn("TYPE_COMPTE", type_compte)
+
+
+def _remonte_df_expr(df: DataFrame) -> Column:
+    """Oui/Non : le dossier MRM est-il remonté à la Direction Financière ?
+
+    Statut inventaire NON = PM MRM à 0, non remontée (cf. RECUP_NON_LABEL).
+    Statut absent → null (pas d'info — le matching le traite comme un OUI)."""
+    if "MRM_STATUT_INV" not in df.columns:
+        return F.lit(None).cast("string")
+    statut = F.upper(F.trim(F.col("MRM_STATUT_INV")))
+    return F.when(statut == "NON", F.lit("Non")).when(statut.isNotNull(), F.lit("Oui"))
 
 
 # ============================================================================
@@ -223,10 +288,17 @@ def enrich_result_tags(
                       ORPHELIN_A_ANALYSER     : les autres orphelins.
                       null pour les lignes non CPT_ONLY.
 
+    Ajoute aussi les DIMENSIONS D'EXPORT par ligne — dérivées UNE fois ici,
+    réutilisées telles quelles par les métriques et resultat_backtest :
+    CLAUSE (nullable), TYPE_COMPTE (PB/HPB/…, cf. derive_clause_column) et
+    REMONTE_DF (Oui/Non — statut inventaire Direction Financière).
+
     À appeler après flag_late_it_observations (les obs tardives ne doivent plus
     être taguées comme CPT_ONLY).
     """
     df = df_result.withColumn("MRM_ACTION", categorize_mrm_conclusion(F.col(conclusion_col)))
+    df = derive_clause_column(df)
+    df = df.withColumn("REMONTE_DF", _remonte_df_expr(df))
 
     is_cpt_only = F.col("TYPE_RECONCILIATION") == "CPT_ONLY"
     inv_year    = _inventory_year()

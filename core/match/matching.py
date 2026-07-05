@@ -26,6 +26,7 @@ from core.match.waterfall import (
     tag_orphans,
 )
 from core.match.recovery import (
+    derive_clause_column,
     enrich_result_tags,
     flag_late_it_observations,
     recover_late_declarations,
@@ -38,6 +39,7 @@ __all__ = [
     "filter_mrm_by_action",
     "matching_waterfall",
     "tag_orphans",
+    "derive_clause_column",
     "enrich_result_tags",
     "flag_late_it_observations",
     "recover_late_declarations",

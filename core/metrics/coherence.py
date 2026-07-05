@@ -79,6 +79,21 @@ def controles_coherence(tables: Dict[str, pd.DataFrame], d: SyntheseScalars) -> 
     ctrl("consignes : Σ PM MRM KAS + hors consigne = base chute",
          d["metrics_pm_mrm"], float(kas["PM_MRM"].sum()) + d["hors_consigne_pm_mrm"], tol=1.0)
 
+    # consignes_par_clause (ré-agrégation Spark) vs consignes (globale, issue
+    # de d) : mêmes règles de suivi, ventilées par TYPE_COMPTE × CLAUSE —
+    # Σ des clauses d'une consigne = la ligne globale de cette consigne.
+    cpc      = tables["consignes_par_clause"]
+    cons_idx = tables["consignes"].set_index("CONSIGNE")
+    for code, libelle in (("KEEP", "À conserver"), ("ADD", "À ajouter"),
+                          ("STUDY", "À étudier"), ("DELETE", "À supprimer")):
+        if libelle not in cons_idx.index:
+            continue
+        sel = cpc[cpc["CONSIGNE"] == code]
+        ctrl(f"consignes_par_clause {code} : Σ suivies = conformes",
+             int(cons_idx.loc[libelle, "NB_CONFORMES"]), int(sel["NB_SUIVIES"].sum()))
+        ctrl(f"consignes_par_clause {code} : Σ non suivies = KO",
+             int(cons_idx.loc[libelle, "NB_KO"]), int(sel["NB_NON_SUIVIES"].sum()))
+
     # bilan_cas : totaux internes + recoupement avec la synthèse.
     b = tables["bilan_cas"].set_index("CAS")
     ctrl("bilan_cas : TOTAL matchés = Σ des 4 clés",

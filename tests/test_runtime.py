@@ -36,3 +36,20 @@ def test_configurer_run_sans_n1_retire_la_cle():
     # pas de N+1 → la clé est retirée (sinon récupération tardive parasite)
     assert "fichier_mrm_n1" not in RUN_PARAMS
     assert load_data.CLIENT_CPT_VISION == "CC2023"
+
+
+def test_configurer_run_types_compte():
+    avant = load_data.CLIENT_TYPE_CLAUSES
+    # None (défaut) : le périmètre configuré n'est pas touché.
+    configurer_run(date_inventaire="31/12/2023", cpt_vision="CC2023",
+                   fichier_mrm="dbfs:/x/mrm.csv")
+    assert load_data.CLIENT_TYPE_CLAUSES == avant
+    # Liste csv : normalisée en majuscules.
+    configurer_run(date_inventaire="31/12/2023", cpt_vision="CC2023",
+                   fichier_mrm="dbfs:/x/mrm.csv", types_compte="pb, hpb")
+    assert load_data.CLIENT_TYPE_CLAUSES == ["PB", "HPB"]
+    # "*" = tout le portefeuille (aucun filtre type).
+    configurer_run(date_inventaire="31/12/2023", cpt_vision="CC2023",
+                   fichier_mrm="dbfs:/x/mrm.csv", types_compte="*")
+    assert load_data.CLIENT_TYPE_CLAUSES is None
+    load_data.CLIENT_TYPE_CLAUSES = avant   # restaure pour les autres tests

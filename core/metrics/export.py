@@ -1,7 +1,7 @@
 """
 Orchestration de la couche métriques — toutes les tables, et leur export.
 
-toutes_metriques : les 20 tables pandas en un dict (contrôles inclus).
+toutes_metriques : toutes les tables pandas en un dict (contrôles inclus).
 export_metriques : écriture multi-format (Excel privilégié, CSV/JSON/Parquet
 DBFS, Delta si schéma) sous <EXPORT_BASE_PATH>/<CLIENT>_<PERIM>/metrics.
 """
@@ -10,10 +10,12 @@ import os
 from typing import Dict, Iterable, Optional
 
 import pandas as pd
+import pyspark.sql.functions as F
 from pyspark.sql import DataFrame
 
 from config import CLIENT_NAME, EXPORT_BASE_PATH
 from core.io.excel_export import export_excel
+from core.io.save_result import to_date_iso, write_delta_historise
 from core.synthese.kpi_export import compute_synthese
 from core.synthese.synthese_contract import SyntheseScalars
 from core.metrics.base import _PERIMETRE, _to_local, output_dir, _annee_inventaire
@@ -24,6 +26,7 @@ from core.metrics.scalaires import (
 )
 from core.metrics.agregats import (
     chute_par_clause, chute_par_anciennete, anomalies_cpt_only,
+    consignes_par_clause,
     orphelins_par_clause, orphelins_par_garantie, orphelins_par_anciennete,
     orphelins_cles_nulles,
 )
@@ -49,6 +52,7 @@ def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) 
         "chute_par_exercice"   : chute_par_exercice(d),
         "suivi_n1"             : suivi_n1(d),
         "consignes"            : consignes(d),
+        "consignes_par_clause" : consignes_par_clause(df_result),
         "compte_justification" : compte_justification(d),
         "couverture_mrm"       : couverture_mrm(d),
         "chute_par_clause"     : chute_par_clause(df_result),
@@ -84,12 +88,24 @@ def export_metriques(
     privilégié (classeur multi-onglets propre, onglets nommés par axe d'étude,
     tables Excel détectées par Power BI — cf. core/io/excel_export.py) ; delta
     requiert delta_schema (une table <schema>.itip_metric_<nom>_<perim> par
-    métrique) ; le schéma est créé s'il n'existe pas (run idempotent).
+    métrique), créée si absente et HISTORISÉE par DATE_INVENTAIRE
+    (replaceWhere : rejouer un inventaire remplace SES lignes, les autres
+    inventaires coexistent).
+
+    Schéma standard des exports : toutes les tables portent les colonnes de
+    run DATE_INVENTAIRE et LIBELLE_RUN.
     """
+    d       = d if d is not None else compute_synthese(df_result)
     tables  = toutes_metriques(df_result, d)
     formats = {f.lower() for f in formats}
-    if "delta" in formats and delta_schema:
-        df_result.sparkSession.sql(f"CREATE SCHEMA IF NOT EXISTS {delta_schema}")
+
+    # Colonnes de run (schéma standard) : date ISO si résoluble — l'export
+    # Delta, lui, EXIGE une date résoluble (pas d'historisation aveugle).
+    date_iso = to_date_iso(d["date_inventaire"], strict="delta" in formats and bool(delta_schema))
+    for pdf in tables.values():
+        pdf["DATE_INVENTAIRE"] = date_iso or d["date_inventaire"]
+        pdf["LIBELLE_RUN"]     = CLIENT_NAME
+
     out = _to_local(output_dir(base_path, "metrics"))
     os.makedirs(out, exist_ok=True)
     print(f"[METRICS] périmètre {CLIENT_NAME} / clauses {_PERIMETRE} → {sorted(formats)}")
@@ -116,10 +132,10 @@ def export_metriques(
             print(f"  ✓ [PARQUET] {out}/{name}.parquet")
         if "delta" in formats and delta_schema:
             table = f"{delta_schema}.itip_metric_{name}_{_PERIMETRE}"
-            (df_result.sparkSession.createDataFrame(pdf)
-                      .write.format("delta").mode("overwrite")
-                      .option("overwriteSchema", "true").saveAsTable(table))
-            print(f"  ✓ [DELTA]   {table}")
+            sdf = (df_result.sparkSession.createDataFrame(pdf)
+                            .withColumn("DATE_INVENTAIRE", F.lit(date_iso).cast("date")))
+            write_delta_historise(sdf, table, date_iso)
+            print(f"  ✓ [DELTA]   {table}  (partition {date_iso} remplacée)")
 
     if "excel" in formats:
         path = f"{out}/metrics_{CLIENT_NAME}_{_PERIMETRE}.xlsx"

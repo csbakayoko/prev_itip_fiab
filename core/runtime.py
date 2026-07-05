@@ -14,6 +14,7 @@ le pipeline sur plusieurs inventaires DANS UNE MÊME SESSION (ex. comparaison
     - DATE_INVENTAIRE    → core.match.recovery  (tag obs tardives IT, année)
                            core.synthese.kpi_export (date de la synthèse)
     - CLIENT_CPT_VISION  → core.io.load_data    (filtre vision du compte)
+    - CLIENT_TYPE_CLAUSES→ core.io.load_data    (types de compte PB/HPB/…)
     - fichiers MRM       → config.RUN_PARAMS    (dict PARTAGÉ : sa mutation est
                            visible partout sans réassignation)
 
@@ -57,6 +58,7 @@ def configurer_run(
     cpt_vision     : str,
     fichier_mrm    : str,
     fichier_mrm_n1 : Optional[str] = None,
+    types_compte   : Optional[str] = None,
 ) -> dict:
     """Applique la config d'UN inventaire aux modules déjà importés.
 
@@ -65,6 +67,9 @@ def configurer_run(
         cpt_vision      : vision comptable CPT (ex. "CC2023", "CC2024").
         fichier_mrm     : chemin du MRM de l'inventaire courant.
         fichier_mrm_n1  : chemin du MRM N+1 (None = pas de récupération tardive).
+        types_compte    : types de compte à charger — "PB", "PB,HPB", … ;
+                          "*" ou "" = tout le portefeuille ; None = ne pas
+                          toucher au périmètre configuré (profile.py).
 
     Returns:
         dict récapitulatif du run appliqué (traçabilité notebook).
@@ -76,6 +81,12 @@ def configurer_run(
     load_data.CLIENT_CPT_VISION = cpt_vision
     recovery.DATE_INVENTAIRE    = date_inventaire
     kpi_export.DATE_INVENTAIRE  = date_inventaire
+
+    if types_compte is not None:
+        load_data.CLIENT_TYPE_CLAUSES = (
+            None if types_compte.strip() in ("", "*")
+            else [t.strip().upper() for t in types_compte.split(",") if t.strip()]
+        )
 
     # RUN_PARAMS est le dict PARTAGÉ lu par load_mrm_raw → mutation in place.
     RUN_PARAMS["fichier_mrm"] = fichier_mrm
@@ -89,4 +100,5 @@ def configurer_run(
         "cpt_vision"     : cpt_vision,
         "fichier_mrm"    : fichier_mrm,
         "fichier_mrm_n1" : fichier_mrm_n1,
+        "types_compte"   : types_compte if types_compte is not None else "(config)",
     }

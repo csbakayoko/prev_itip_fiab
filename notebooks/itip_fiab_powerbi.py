@@ -45,7 +45,10 @@
 
 # COMMAND ----------
 
-from config import ANNEE_INVENTAIRE, CLIENT_NAME, EXPORT_DELTA_SCHEMA, INVENTAIRES
+from config import (
+    ANNEE_INVENTAIRE, CLIENT_NAME, CLIENT_TYPE_CLAUSES, EXPORT_DELTA_SCHEMA,
+    INVENTAIRES,
+)
 from core.io.save_result import save_result_delta
 from core.runtime import configurer_run, get_spark
 from core.synthese.kpi_export import print_synthese
@@ -62,6 +65,8 @@ dbutils.widgets.text("date_inventaire", "", "Date d'inventaire (vide = config)")
 dbutils.widgets.text("vision_cpt",      "", "Vision CPT (vide = config)")
 dbutils.widgets.text("fichier_mrm",     "", "MRM courant (vide = config)")
 dbutils.widgets.text("fichier_mrm_n1",  "", "MRM N+1 (vide = config, 'aucun' = sans)")
+dbutils.widgets.text("types_compte",    ",".join(CLIENT_TYPE_CLAUSES or []) or "*",
+                     "Types de compte (PB,HPB… ; * = tous)")
 dbutils.widgets.text("delta_schema",    EXPORT_DELTA_SCHEMA or "", "Schéma Delta (vide = pas de Delta)")
 
 
@@ -80,6 +85,7 @@ profil  = configurer_run(
     cpt_vision      = _param("vision_cpt",      _inv["vision"]),
     fichier_mrm     = _param("fichier_mrm",     _inv["mrm"]),
     fichier_mrm_n1  = None if _mrm_n1.lower() in ("", "aucun") else _mrm_n1,
+    types_compte    = dbutils.widgets.get("types_compte"),
 )
 print(f"Run inventaire {_annee} :", profil)
 

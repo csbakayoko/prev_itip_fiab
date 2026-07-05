@@ -192,7 +192,7 @@ def graph_chute_par_clause(pdf_clauses, d: dict):
     EXERCICE. Barres = bloc « Inventaire courant » (les stats globales) ;
     les récupérés N+1 restent une analyse séparée (bloc dédié de la table)."""
     pdf = pdf_clauses[pdf_clauses["EXERCICE"] == EXERCICE_INV][::-1]
-    labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_CLAUSE"])]
+    labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_COMPTE"])]
     colors = [C_SIENNE if v > 0 else C_OCEAN for v in pdf["taux_chute_pct"]]
 
     h = 0.6 * len(pdf) + 3.2
@@ -547,7 +547,7 @@ def graph_orphelins_par_compte(pdf_orph, d: dict, top: int = 12):
     if pdf_orph.empty:
         return _empty_fig("Orphelins par compte PB : aucun orphelin")
     pdf = pdf_orph.head(top)[::-1]                       # plus gros volume en haut
-    labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_CLAUSE"])]
+    labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_COMPTE"])]
     colors = [C_ROUGE if r == 1 else C_OCEAN for r in pdf["RANG"]]
 
     h = 0.5 * len(pdf) + 3

@@ -56,6 +56,8 @@ ONGLETS: Tuple[Tuple[str, str, str, str], ...] = (
      "PM revue MRM vs PM compte par consigne, écart."),
     ("consignes",            "Consignes (détail)",      "Niveau de provisionnement",
      "Analyse complète par consigne : conformité, PM, taux de chute."),
+    ("consignes_par_clause", "Consignes par clause",    "Cohérence des sources",
+     "Tableau de bord des consignes : suivi par type de compte × clause × consigne."),
     ("conformite_consignes", "Conformité consignes",    "Cohérence des sources",
      "Conformité par consigne (conforme / non retrouvé)."),
     ("conformite_globale",   "Conformité globale",      "Cohérence des sources",

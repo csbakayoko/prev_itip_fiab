@@ -3,7 +3,10 @@ Socle partagé de la couche métriques — chemins d'export et helpers Spark.
 
 Consommé par les modules frères (scalaires, agregats, coherence, export) et
 par viz : libellés d'exercice (EXERCICE_*), blocs d'ancienneté (BLOC_*),
-dérivation CLAUSE/TYPE_CLAUSE, univers du taux de chute, chemins DBFS.
+univers du taux de chute, chemins DBFS. Les dimensions CLAUSE / TYPE_COMPTE /
+REMONTE_DF sont persistées par le PIPELINE (core.match.recovery.
+derive_clause_column via enrich_result_tags) — re-exportée ici pour l'usage
+ad hoc (elle est idempotente : passthrough si les colonnes existent déjà).
 """
 
 from typing import Optional
@@ -12,10 +15,10 @@ import pyspark.sql.functions as F
 from pyspark.sql import DataFrame
 
 from config import (
-    CLIENT_NAME, CLIENT_CLAUSES, MATCH_LABELS, TYPE_CLAUSE_CPT_PREFIX,
+    CLIENT_NAME, CLIENT_CLAUSES, MATCH_LABELS,
     EXPORT_BASE_PATH,
 )
-from core.match.matching import categorize_mrm_conclusion
+from core.match.matching import categorize_mrm_conclusion, derive_clause_column  # noqa: F401 — ré-export
 from core.synthese.synthese_contract import SyntheseScalars
 
 
@@ -40,44 +43,8 @@ def output_dir(base_path: str = EXPORT_BASE_PATH, sub: str = "") -> str:
 
 
 # ============================================================================
-# HELPERS SPARK (clause + univers de chute)
+# HELPERS SPARK (univers de chute)
 # ============================================================================
-
-# Préfixe CPT → type de clause (ex. "CPB" → "PB"). Réciproque de
-# TYPE_CLAUSE_CPT_PREFIX, pour dériver le type des dossiers sans contrepartie MRM.
-_CPT_PREFIX_TO_TYPE = {v.rstrip("_"): t for t, v in TYPE_CLAUSE_CPT_PREFIX.items()}
-
-
-def derive_clause_column(df: DataFrame) -> DataFrame:
-    """
-    Ajoute les colonnes CLAUSE et TYPE_CLAUSE attendues par les agrégations
-    par clause. Après le waterfall la clause est portée par CPT_CLAUSE
-    (ex. "CPB_121981", préfixe = type) et/ou MRM_CLAUSE (ex. "121981") :
-
-        CLAUSE      = MRM_CLAUSE sinon CPT_CLAUSE sans son préfixe ("CPB_…").
-        TYPE_CLAUSE = MRM_TYPE_CLAUSE sinon type déduit du préfixe CPT
-                      (CPT_ONLY : pas de MRM → on lit le type dans "CPB_…").
-    """
-    clause_parts = []
-    if "MRM_CLAUSE" in df.columns:
-        clause_parts.append(F.col("MRM_CLAUSE"))
-    if "CPT_CLAUSE" in df.columns:
-        clause_parts.append(F.regexp_replace(F.col("CPT_CLAUSE"), r"^[A-Za-z]+_", ""))
-    clause = F.coalesce(*clause_parts) if clause_parts else F.lit(None).cast("string")
-
-    type_parts = []
-    if "MRM_TYPE_CLAUSE" in df.columns:
-        type_parts.append(F.col("MRM_TYPE_CLAUSE"))
-    if "CPT_CLAUSE" in df.columns:
-        prefix = F.regexp_extract(F.col("CPT_CLAUSE"), r"^([A-Za-z]+)_", 1)
-        type_from_cpt = F.lit(None).cast("string")
-        for pfx, t in _CPT_PREFIX_TO_TYPE.items():
-            type_from_cpt = F.when(prefix == pfx, F.lit(t)).otherwise(type_from_cpt)
-        type_parts.append(type_from_cpt)
-    type_clause = F.coalesce(*type_parts) if type_parts else F.lit(None).cast("string")
-
-    return df.withColumn("CLAUSE", clause).withColumn("TYPE_CLAUSE", type_clause)
-
 
 def _with_mrm_action(df: DataFrame) -> DataFrame:
     """MRM_ACTION persistée par enrich_result_tags ; recalculée si absente."""

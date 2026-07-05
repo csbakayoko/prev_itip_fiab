@@ -72,12 +72,14 @@ from core.metrics.agregats import (
     chute_par_clause,
     chute_par_anciennete,
     anomalies_cpt_only,
+    consignes_par_clause,
     orphelins_par_clause,
     orphelins_par_garantie,
     orphelins_par_anciennete,
     orphelins_cles_nulles,
     _finalise_chute_par_clause,
     _finalise_chute_par_anciennete,
+    _finalise_consignes_par_clause,
     _finalise_orphelins,
 )
 from core.metrics.coherence import controles_coherence
