@@ -72,16 +72,19 @@ paramètres sont des widgets, surchargeables en « base parameters » du Job :
 | `annee_inventaire` | `2023` | sélectionne l'entrée `INVENTAIRES` de la config |
 | `date_inventaire` / `vision_cpt` / `fichier_mrm` | vide = config | surcharges unitaires |
 | `fichier_mrm_n1` | vide = config | chemin MRM N+1 ; `aucun` = run sans récupération tardive |
-| `delta_schema` | `hive_metastore.itip_fiab` | schéma des 20 tables métriques (créé si absent ; vide = pas de Delta) |
+| `types_compte` | `PB` | types de compte chargés (`PB,HPB`, … ; `*` = tout le portefeuille) |
+| `delta_schema` | `hive_metastore.itip_fiab` | schéma des tables métriques (créé si absent ; vide = pas de Delta) |
 
 Le run est **bloquant** sur les contrôles (lignes toutes classées, taux de
 chute cohérent, recoupements inter-tables) : un Job vert = des onglets
-Power BI fiables. En sortie : les 20 tables métriques
-(`<schema>.itip_metric_*`) et le détail dossier par dossier
-(`<schema>.resultat_backtest`, historisé par date d'inventaire — rejouer un
-inventaire remplace ses lignes, 2023 et 2024 coexistent). Power BI se
-connecte au SQL Warehouse, ou importe le classeur Excel écrit sous
-`EXPORT_BASE_PATH`.
+Power BI fiables. En sortie : les tables métriques (`<schema>.itip_metric_*`,
+dont `consignes_par_clause` — le tableau de bord par type de compte × clause)
+et le détail dossier par dossier (`<schema>.resultat_backtest`). **Toutes les
+tables Delta sont historisées par date d'inventaire** (rejouer un inventaire
+remplace ses lignes, 2023 et 2024 coexistent) et portent les colonnes de run
+`DATE_INVENTAIRE` / `LIBELLE_RUN` ; les lignes ventilées portent `TYPE_COMPTE`
+(PB/HPB/…) et `CLAUSE` (nullable). Power BI se connecte au SQL Warehouse, ou
+importe le classeur Excel écrit sous `EXPORT_BASE_PATH`.
 
 ## Développement local
 

@@ -334,6 +334,13 @@ taux principal) ; année dérivée de `year(CPT_D_SURVENANCE)`, référence
 Les 20 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
 Parquet / Excel / Delta) :
 
+> **Schéma standard des exports** : chaque table porte les colonnes de run
+> `DATE_INVENTAIRE` et `LIBELLE_RUN` ; en Delta, chaque table est **historisée**
+> par `DATE_INVENTAIRE` (partition remplacée par le run, les autres inventaires
+> coexistent). Les lignes ventilées portent `TYPE_COMPTE` (PB / HPB / préfixe
+> brut si type non mappé — jamais null muet) et `CLAUSE` (nullable : un compte
+> sans n° de clause est une donnée légitime).
+
 | Table | Problématique | Univers |
 |---|---|---|
 | `synthese` | tous les KPI en 1 ligne / run (historisable) | univers de chaque ratio |
@@ -342,6 +349,7 @@ Parquet / Excel / Delta) :
 | `chute_par_exercice` | 1 ligne / exercice : inventaire courant (stats globales), N+1 (analyse séparée) | univers de chute, par exercice |
 | `suivi_n1` | consignes des récupérés N+1 (analyse séparée) | `CPT_LATE` hors statut NON |
 | `consignes` | conformité + PM + chute par consigne, exercice courant pur | conformité : matchés + missing ; PM/chute : matchés inventaire courant |
+| `consignes_par_clause` | tableau de bord : suivi des consignes par TYPE_COMPTE × CLAUSE × CONSIGNE (nb, suivies/non suivies, PM, `NB_NON_REMONTE_DF`) | mêmes règles que `consignes`, ventilées ; repêchés statut NON comptés à part, hors conformité |
 | `compte_justification` | décomposition du compte (retrouvés, N+1, repêchés, clos, anomalies) | compte entier |
 | `couverture_mrm` | part de la revue retrouvée + non retrouvés par consigne | `MATCHÉS + MRM_MISSING` (+ DELETE retrouvées) |
 | `chute_par_clause` | chute par clause × exercice (2 blocs : inventaire courant = stats globales / N+1 = analyse séparée — Σ clauses d'un bloc = taux du bloc, cf. §4.2) | univers de chute, par exercice |
