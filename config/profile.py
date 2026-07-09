@@ -55,6 +55,14 @@ CLIENT_MRM_STATUT_INV  = None          # filtre statut inventaire au chargement.
 CLIENT_CLAUSES      = None         # numéros sans préfixe ; None = toutes les clauses
 CLIENT_TYPE_CLAUSES = ["PB"]       # "PB" / "HPB" ; filtre type (MRM = PB seul)
 
+# Libellé de périmètre du run : la clause si le run est filtré sur une seule,
+# sinon "MULTI". Nomme les dossiers/fichiers d'export et alimente la colonne
+# PERIMETRE du schéma standard des tables Delta — la clé d'historisation est
+# (DATE_INVENTAIRE, PERIMETRE) : les noms de tables, eux, restent STABLES
+# (pas de suffixe de périmètre qui casserait les connexions Power BI quand la
+# config change).
+PERIMETRE_LABEL = CLIENT_CLAUSES[0] if (CLIENT_CLAUSES and len(CLIENT_CLAUSES) == 1) else "MULTI"
+
 # ── Chemins source MRM (CSV DBFS) de l'inventaire actif ─────────────────────
 # Principal = inventaire de référence. N+1 = inventaire postérieur pour
 # récupérer les déclarations tardives parmi les CPT_ONLY. None si absent.

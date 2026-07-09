@@ -331,15 +331,17 @@ taux principal) ; année dérivée de `year(CPT_D_SURVENANCE)`, référence
 
 ## 6. Tables métriques exportées (core/metrics/__init__.py — toutes_metriques)
 
-Les 20 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
+Les 21 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
 Parquet / Excel / Delta) :
 
 > **Schéma standard des exports** : chaque table porte les colonnes de run
-> `DATE_INVENTAIRE` et `LIBELLE_RUN` ; en Delta, chaque table est **historisée**
-> par `DATE_INVENTAIRE` (partition remplacée par le run, les autres inventaires
-> coexistent). Les lignes ventilées portent `TYPE_COMPTE` (PB / HPB / préfixe
-> brut si type non mappé — jamais null muet) et `CLAUSE` (nullable : un compte
-> sans n° de clause est une donnée légitime).
+> `DATE_INVENTAIRE`, `PERIMETRE` (libellé de périmètre — `MULTI` ou la clause
+> si le run est filtré sur une seule) et `LIBELLE_RUN` ; en Delta, chaque
+> table est **historisée par run** (`replaceWhere` sur `DATE_INVENTAIRE ×
+> PERIMETRE` : rejouer un run remplace SES lignes, les autres inventaires /
+> périmètres coexistent). Les lignes ventilées portent `TYPE_COMPTE` (PB /
+> HPB / préfixe brut si type non mappé — jamais null muet) et `CLAUSE`
+> (nullable : un compte sans n° de clause est une donnée légitime).
 
 | Table | Problématique | Univers |
 |---|---|---|
@@ -402,9 +404,18 @@ Parquet / Excel / Delta) :
 - **JSON** : une ligne par enregistrement, par table (`export_json`). ✅
 - **Base de données** : table Delta metastore (une par analyse).
 
-### 8.2 Ce qui va en base
-- Les 20 tables du §6, une table Delta par métrique :
-  `<schema>.itip_metric_<nom>_<perim>` (connexion Power BI via SQL Warehouse).
+### 8.2 Ce qui va en base — nomenclature
+- **Schéma unique** de l'application : `hive_metastore.itip_fiab`
+  (`EXPORT_DELTA_SCHEMA`, créé au premier export).
+- Les 21 tables du §6, une table Delta par métrique : `<schema>.metrique_<nom>`
+  (connexion Power BI via SQL Warehouse). Les noms de tables sont **stables** :
+  le périmètre est une **colonne** (`PERIMETRE`), pas un suffixe de nom — une
+  connexion Power BI ne casse jamais quand la config de périmètre change.
+- Le **détail du mapping tête par tête** : `<schema>.resultat_backtest`
+  (df_result, une ligne = un dossier avec sa clé gagnante
+  `TYPE_RECONCILIATION`, ses PM des deux côtés et ses dimensions), pour les
+  analyses fines au-delà des tables agrégées.
+- Toutes historisées par run (`DATE_INVENTAIRE × PERIMETRE`, cf. §6).
 - La table **`synthese`** ✅ tient lieu d'indicateurs scalaires : taux de
   couverture, récupération, chute (+ N+1 séparé), conformité, niveaux de PM,
   volumétries — une ligne par run (date d'inventaire) → historisation et

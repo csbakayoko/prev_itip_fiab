@@ -15,8 +15,8 @@ import pyspark.sql.functions as F
 from pyspark.sql import DataFrame
 
 from config import (
-    CLIENT_NAME, CLIENT_CLAUSES, MATCH_LABELS,
-    EXPORT_BASE_PATH,
+    CLIENT_NAME, MATCH_LABELS,
+    EXPORT_BASE_PATH, PERIMETRE_LABEL,
 )
 from core.match.matching import categorize_mrm_conclusion, derive_clause_column  # noqa: F401 — ré-export
 from core.synthese.synthese_contract import SyntheseScalars
@@ -26,9 +26,9 @@ from core.synthese.synthese_contract import SyntheseScalars
 # CHEMINS D'EXPORT (DBFS)
 # ============================================================================
 
-# Libellé de périmètre pour nommer les sorties : la clause si le run est
-# filtré sur une seule, sinon "MULTI". La clause réelle reste DANS les tables.
-_PERIMETRE = CLIENT_CLAUSES[0] if (CLIENT_CLAUSES and len(CLIENT_CLAUSES) == 1) else "MULTI"
+# Libellé de périmètre (config.PERIMETRE_LABEL) : nomme les sorties fichiers
+# et alimente la colonne PERIMETRE des tables. La clause réelle reste DANS les tables.
+_PERIMETRE = PERIMETRE_LABEL
 
 
 def _to_local(path: str) -> str:

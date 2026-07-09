@@ -87,13 +87,13 @@ def export_metriques(
     formats ⊆ {excel, csv, parquet, json, delta} — EXCEL est le format
     privilégié (classeur multi-onglets propre, onglets nommés par axe d'étude,
     tables Excel détectées par Power BI — cf. core/io/excel_export.py) ; delta
-    requiert delta_schema (une table <schema>.itip_metric_<nom>_<perim> par
-    métrique), créée si absente et HISTORISÉE par DATE_INVENTAIRE
-    (replaceWhere : rejouer un inventaire remplace SES lignes, les autres
-    inventaires coexistent).
+    requiert delta_schema (une table <schema>.metrique_<nom> par métrique —
+    nom STABLE, le périmètre est une colonne), créée si absente et HISTORISÉE
+    par run (replaceWhere sur DATE_INVENTAIRE × PERIMETRE : rejouer un run
+    remplace SES lignes, les autres inventaires/périmètres coexistent).
 
     Schéma standard des exports : toutes les tables portent les colonnes de
-    run DATE_INVENTAIRE et LIBELLE_RUN.
+    run DATE_INVENTAIRE, PERIMETRE et LIBELLE_RUN.
     """
     d       = d if d is not None else compute_synthese(df_result)
     tables  = toutes_metriques(df_result, d)
@@ -104,6 +104,7 @@ def export_metriques(
     date_iso = to_date_iso(d["date_inventaire"], strict="delta" in formats and bool(delta_schema))
     for pdf in tables.values():
         pdf["DATE_INVENTAIRE"] = date_iso or d["date_inventaire"]
+        pdf["PERIMETRE"]       = _PERIMETRE
         pdf["LIBELLE_RUN"]     = CLIENT_NAME
 
     out = _to_local(output_dir(base_path, "metrics"))
@@ -131,11 +132,11 @@ def export_metriques(
             pdf.to_parquet(f"{out}/{name}.parquet", index=False)
             print(f"  ✓ [PARQUET] {out}/{name}.parquet")
         if "delta" in formats and delta_schema:
-            table = f"{delta_schema}.itip_metric_{name}_{_PERIMETRE}"
+            table = f"{delta_schema}.metrique_{name}"
             sdf = (df_result.sparkSession.createDataFrame(pdf)
                             .withColumn("DATE_INVENTAIRE", F.lit(date_iso).cast("date")))
             write_delta_historise(sdf, table, date_iso)
-            print(f"  ✓ [DELTA]   {table}  (partition {date_iso} remplacée)")
+            print(f"  ✓ [DELTA]   {table}  (run {date_iso} / {_PERIMETRE} remplacé)")
 
     if "excel" in formats:
         path = f"{out}/metrics_{CLIENT_NAME}_{_PERIMETRE}.xlsx"

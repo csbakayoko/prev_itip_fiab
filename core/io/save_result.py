@@ -1,14 +1,16 @@
 """
 Écriture Delta historisée — détail du backtesting et briques partagées.
 
-Les tables du projet sont HISTORISÉES par date d'inventaire : partitionnées
-par DATE_INVENTAIRE et écrites en replaceWhere — rejouer un inventaire
-remplace SES lignes, un nouvel inventaire s'ajoute (2023 et 2024 coexistent).
-Power BI (SQL Warehouse) filtre et compare les inventaires nativement.
+Les tables du projet sont HISTORISÉES par run : partitionnées par
+DATE_INVENTAIRE et écrites en replaceWhere sur (DATE_INVENTAIRE, PERIMETRE) —
+rejouer un run remplace exactement SES lignes, un nouvel inventaire ou un
+autre périmètre s'ajoute (2023 et 2024 coexistent). Les noms de tables sont
+STABLES (le périmètre est une colonne, pas un suffixe de nom) : Power BI
+(SQL Warehouse) filtre et compare les inventaires nativement.
 
 - save_result_delta      : df_result (une ligne = un dossier du run) →
   <schema>.resultat_backtest, pour les analyses fines au-delà des tables
-  métriques agrégées (itip_metric_*) ;
+  métriques agrégées (metrique_*) ;
 - write_delta_historise / to_date_iso : briques réutilisées par l'export des
   métriques (core.metrics.export).
 """
@@ -20,7 +22,7 @@ from typing import Optional
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame
 
-from config import CLIENT_NAME, EXPORT_RESULT_TABLE
+from config import CLIENT_NAME, EXPORT_RESULT_TABLE, PERIMETRE_LABEL
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +46,15 @@ def to_date_iso(date_inventaire: str, strict: bool = True) -> Optional[str]:
         return None
 
 
-def write_delta_historise(df: DataFrame, table: str, date_iso: str) -> str:
-    """Écrit df en table Delta partitionnée par DATE_INVENTAIRE (replaceWhere).
+def write_delta_historise(
+    df: DataFrame, table: str, date_iso: str, perimetre: str = PERIMETRE_LABEL,
+) -> str:
+    """Écrit df en table Delta partitionnée par DATE_INVENTAIRE, historisée
+    par run : replaceWhere sur (DATE_INVENTAIRE, PERIMETRE).
 
-    Seule la partition du run est remplacée ; le schéma metastore est créé
-    s'il n'existe pas. `df` doit porter une colonne DATE_INVENTAIRE (date).
+    Seules les lignes du run (même date, même périmètre) sont remplacées ; le
+    schéma metastore est créé s'il n'existe pas. `df` doit porter les colonnes
+    DATE_INVENTAIRE (date) et PERIMETRE.
 
     Returns:
         Nom complet de la table écrite.
@@ -58,11 +64,12 @@ def write_delta_historise(df: DataFrame, table: str, date_iso: str) -> str:
     (
         df.write.format("delta")
           .mode("overwrite")
-          .option("replaceWhere", f"DATE_INVENTAIRE = '{date_iso}'")
+          .option("replaceWhere",
+                  f"DATE_INVENTAIRE = '{date_iso}' AND PERIMETRE = '{perimetre}'")
           .partitionBy("DATE_INVENTAIRE")
           .saveAsTable(table)
     )
-    logger.info("Delta → %s (partition %s remplacée)", table, date_iso)
+    logger.info("Delta → %s (run %s / %s remplacé)", table, date_iso, perimetre)
     return table
 
 
@@ -75,14 +82,16 @@ def save_result_delta(
     """
     Écrit df_result en table Delta <delta_schema>.<table_name>.
 
-    Colonnes de run ajoutées : DATE_INVENTAIRE (date, partition),
-    LIBELLE_RUN (libellé du run) et TS_RUN (horodatage d'écriture).
+    Colonnes de run ajoutées (schéma standard) : DATE_INVENTAIRE (date,
+    partition), PERIMETRE (clé d'historisation avec la date), LIBELLE_RUN
+    (libellé du run) et TS_RUN (horodatage d'écriture).
 
     Args:
         df_result       : résultat du pipeline (main.build_df_result).
         delta_schema    : schéma metastore cible (créé s'il n'existe pas).
-        date_inventaire : date du run au format "dd/MM/yyyy" — sa partition
-                          est remplacée, les autres inventaires sont préservés.
+        date_inventaire : date du run au format "dd/MM/yyyy" — les lignes
+                          (date, périmètre) du run sont remplacées, les autres
+                          inventaires/périmètres sont préservés.
         table_name      : nom de la table (défaut : config.EXPORT_RESULT_TABLE).
 
     Returns:
@@ -99,6 +108,7 @@ def save_result_delta(
     df = (
         df_result
         .withColumn("DATE_INVENTAIRE", F.lit(date_iso).cast("date"))
+        .withColumn("PERIMETRE",       F.lit(PERIMETRE_LABEL))
         .withColumn("LIBELLE_RUN",     F.lit(CLIENT_NAME))
         .withColumn("TS_RUN",          F.current_timestamp())
     )

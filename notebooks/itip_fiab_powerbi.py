@@ -9,7 +9,7 @@
 # MAGIC    défauts `config/profile.py`)
 # MAGIC 2. **Pipeline** — chargement → nettoyage → matching → récupérations (N+1, statut NON) → tags
 # MAGIC 3. **Synthèse** — contrôles de cohérence console (`chute_coherente`, lignes classées)
-# MAGIC 4. **Export Power BI** — les 20 tables métriques écrites en Delta (+ fichiers DBFS),
+# MAGIC 4. **Export Power BI** — les 21 tables métriques écrites en Delta (+ fichiers DBFS),
 # MAGIC    puis contrôles inter-tables BLOQUANTS (les onglets doivent se recouper)
 # MAGIC 5. **Détail du run** — `df_result` écrit en table Delta `resultat_backtest`,
 # MAGIC    historisée par date d'inventaire (2023 et 2024 coexistent)
@@ -91,7 +91,8 @@ print(f"Run inventaire {_annee} :", profil)
 
 # ── Cible de l'export Power BI ───────────────────────────────────────────────
 # Delta (recommandé) : Power BI se connecte au SQL Warehouse Databricks et lit
-# les tables <schema>.itip_metric_<nom>_<perim>. Sans schéma, les fichiers
+# les tables <schema>.metrique_<nom> (noms stables ; le run est porté par les
+# colonnes DATE_INVENTAIRE × PERIMETRE). Sans schéma, les fichiers
 # parquet/csv sous DBFS restent disponibles (connecteur fichier / import).
 # Excel TOUJOURS produit (classeur propre multi-onglets, import fichier Power BI).
 DELTA_SCHEMA = _param("delta_schema", "") or None
@@ -141,7 +142,7 @@ assert d["chute_coherente"], (
 # MAGIC %md
 # MAGIC ## 4. Export Power BI
 # MAGIC
-# MAGIC Une passe : les 20 tables métriques écrites en Delta + parquet/csv sur DBFS.
+# MAGIC Une passe : les 21 tables métriques écrites en Delta + parquet/csv sur DBFS.
 
 # COMMAND ----------
 
@@ -189,8 +190,9 @@ print(f"Fichiers DBFS : {out_dir}\n")
 if DELTA_SCHEMA:
     print("Tables Delta (connecteur Power BI ▸ Azure Databricks ▸ SQL Warehouse) :")
     for name in tables:
-        print(f"  {DELTA_SCHEMA}.itip_metric_{name}_{metrics._PERIMETRE}")
-    print(f"  {table_resultat}  (détail df_result, historisé par DATE_INVENTAIRE)")
+        print(f"  {DELTA_SCHEMA}.metrique_{name}")
+    print(f"  {table_resultat}  (détail df_result tête par tête)")
+    print("Toutes historisées par run : DATE_INVENTAIRE × PERIMETRE.")
 else:
     print("Pas de schéma Delta configuré (EXPORT_DELTA_SCHEMA dans config/profile.py)")
     print("→ Power BI : importer le classeur Excel (onglets par axe + Sommaire) ou les parquet/csv du dossier ci-dessus.")

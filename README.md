@@ -3,7 +3,7 @@
 Backtesting entre la **revue d'inventaire MRM** (fichier Excel/CSV, à terme lu
 depuis SharePoint) et le **compte CPT** (table du Lab Databricks) : contrôles
 qualité, matching en cascade, calcul des KPI (chute, couverture, conformité),
-puis restitution — 20 tables métriques (Delta / Excel / CSV / Parquet / JSON)
+puis restitution — 21 tables métriques (Delta / Excel / CSV / Parquet / JSON)
 consommées par Power BI, et 11 graphiques.
 
 ## Chaîne cible
@@ -26,16 +26,16 @@ Power BI → Power Automate → Databricks Job
 | `core/prep/` | Contrôles qualité, nettoyage, dédoublonnage, clés de matching |
 | `core/match/` | Waterfall de matching, récupérations (N+1, statut NON), audit de clé |
 | `core/synthese/` | Synthèse : passe Spark unique (`compute_synthese`), contrat typé, rendu console |
-| `core/metrics/` | Les 20 tables métriques + contrôles de cohérence inter-tables ; `viz.py` = 11 graphiques |
+| `core/metrics/` | Les 21 tables métriques + contrôles de cohérence inter-tables ; `viz.py` = 11 graphiques |
 | `notebooks/` | Orchestration uniquement — aucune logique métier |
 | `tests/` | Tests unitaires (pytest) — lancés en CI |
-| `docs/` | `METRIQUES.md` (contrat formel des métriques) · `GUIDE_KPI.md` (interprétation, exemples chiffrés) |
+| `docs/` | `RECETTE_ETUDE.md` (fabrication de l'étude de bout en bout) · `METRIQUES.md` (contrat formel des métriques) · `GUIDE_KPI.md` (interprétation, exemples chiffrés) · `POWERBI_MAQUETTE.md` (maquette du rapport, branchement SQL Warehouse) |
 
 ## Notebooks (Databricks Repos — la racine du repo est sur `sys.path`)
 
 | Notebook | Usage |
 |---|---|
-| `itip_fiab_powerbi` | **Production** : pipeline → contrôles bloquants → export des 20 tables (Delta + fichiers) |
+| `itip_fiab_powerbi` | **Production** : pipeline → contrôles bloquants → export des 21 tables (Delta + fichiers) |
 | `itip_fiab_main` | Run interactif par année d'inventaire (widgets 2023/2024), métriques affichées table par table |
 | `itip_fiab_comparaison` | Comparaison côte à côte des inventaires 2023 vs 2024 |
 | `itip_fiab_smoke` | Smoke test après `git pull` : tout le pipeline, **aucune écriture** |
@@ -77,14 +77,16 @@ paramètres sont des widgets, surchargeables en « base parameters » du Job :
 
 Le run est **bloquant** sur les contrôles (lignes toutes classées, taux de
 chute cohérent, recoupements inter-tables) : un Job vert = des onglets
-Power BI fiables. En sortie : les tables métriques (`<schema>.itip_metric_*`,
-dont `consignes_par_clause` — le tableau de bord par type de compte × clause)
-et le détail dossier par dossier (`<schema>.resultat_backtest`). **Toutes les
-tables Delta sont historisées par date d'inventaire** (rejouer un inventaire
-remplace ses lignes, 2023 et 2024 coexistent) et portent les colonnes de run
-`DATE_INVENTAIRE` / `LIBELLE_RUN` ; les lignes ventilées portent `TYPE_COMPTE`
-(PB/HPB/…) et `CLAUSE` (nullable). Power BI se connecte au SQL Warehouse, ou
-importe le classeur Excel écrit sous `EXPORT_BASE_PATH`.
+Power BI fiables. En sortie : les tables métriques (`<schema>.metrique_*`,
+dont `metrique_consignes_par_clause` — le tableau de bord par type de compte
+× clause) et le détail dossier par dossier (`<schema>.resultat_backtest`).
+Les noms de tables sont **stables** (le périmètre est la colonne `PERIMETRE`,
+pas un suffixe de nom) et **toutes les tables Delta sont historisées par run**
+(`replaceWhere` sur `DATE_INVENTAIRE × PERIMETRE` : rejouer un run remplace
+ses lignes, 2023 et 2024 coexistent) ; colonnes de run `DATE_INVENTAIRE` /
+`PERIMETRE` / `LIBELLE_RUN`, lignes ventilées avec `TYPE_COMPTE` (PB/HPB/…)
+et `CLAUSE` (nullable). Power BI se connecte au SQL Warehouse, ou importe le
+classeur Excel écrit sous `EXPORT_BASE_PATH`.
 
 ## Développement local
 
