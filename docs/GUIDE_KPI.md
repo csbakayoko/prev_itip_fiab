@@ -63,7 +63,7 @@ justifie un ajustement de provision.
   lire en regard de `chute_par_clause` / `chute_par_consigne`.
 - Ne porte que sur les **retrouvés** : un dossier non retrouvé (`MRM_MISSING`) ne
   pèse pas dans la chute (il pèse dans la *couverture*).
-- Exclut « à supprimer » et statut NON (cf. §8).
+- Exclut « à supprimer » (cf. §11) et statut NON (cf. §13, piège 6).
 
 > **Pourquoi une formule AGRÉGÉE et non une moyenne de ratios ?** Soit deux
 > dossiers — A : MRM 1 000 000, CPT 950 000 (ratio 5 %) ; B : MRM 1 000, CPT 0
@@ -93,19 +93,24 @@ conformité de la revue courante. D'où deux blocs `EXERCICE` distincts partout.
 
 ---
 
-## 3. Taux de chute par consigne / par clause
+## 3. Taux de chute par consigne / par clause / par ancienneté
 
-**Définition.** Le même taux de chute, **ventilé** par consigne (KEEP/ADD/STUDY)
-ou par clause × exercice.
+**Définition.** Le même taux de chute, **ventilé** par consigne (KEEP/ADD/STUDY),
+par clause × exercice, ou par **ancienneté** × exercice (année de survenance
+relative à l'inventaire : **N / N-1 / N-2 et antérieur** — bloc `Indéterminée`
+si la survenance est nulle ou l'inventaire non daté).
 
 **Exemple fil rouge (consigne « à conserver »).** base 50 matchés, PM MRM
 600 000, PM CPT 540 000 → chute = 60 000 / 600 000 = **10 %**.
 
 **À dire à l'oral.** « Le sous-provisionnement vient surtout de la consigne *à
-conserver* / de la clause X — c'est là qu'il faut ajuster. »
+conserver* / de la clause X / des survenances N-1 — c'est là qu'il faut ajuster. »
 
-**Intérêt.** Localise l'écart : **quelles consignes / quelles clauses portent le
-risque**. C'est l'angle « action » de l'étude.
+**Intérêt.** Localise l'écart : **quelles consignes / quelles clauses / quelles
+années de survenance portent le risque**. C'est l'angle « action » de l'étude.
+Le découpage par ancienneté est **métier** : la méthode d'inventaire diffère
+selon l'année (revue tête par tête sur N-1) — un écart concentré sur un bloc
+interroge la méthode de ce bloc, pas la revue entière.
 
 **Cohérence garantie.** Dans chaque exercice, **Σ des lignes = le taux global**
 (Σécarts / ΣPM par clause redonne `taux_chute_inventaire`). Vérifié à chaque run
@@ -236,6 +241,14 @@ dossier conforme peut être fortement sous-provisionné (c'est la chute qui le d
 Les deux lectures (conformité vs provisionnement) sont **complémentaires**, jamais
 interchangeables.
 
+**Déclinaison opérationnelle.** La table `consignes_par_clause` applique la même
+règle ventilée par **TYPE_COMPTE × CLAUSE × consigne** (nb, suivies / non
+suivies, PM) : c'est le « tableau de bord des consignes » Power BI — les cartes
+par périmètre (PB / autres) et le tableau filtrable s'en déduisent par simple
+filtre. Sa colonne `NB_NON_REMONTE_DF` compte **à part, hors conformité**, les
+dossiers repêchés via le statut inventaire NON (PM MRM = 0, non remontée à la
+Direction Financière).
+
 ---
 
 ## 10. Conformité globale
@@ -276,7 +289,40 @@ de PM associée ; ce taux est en **nombre**.
 
 ---
 
-## 12. Pièges de lecture (cohérence) — la check-list orale
+## 12. Investigation des orphelins compte (`CPT_ONLY`)
+
+**But.** Les anomalies `CPT_ONLY` définitives sont le « reste à instruire » de
+l'étude (complément du taux de récupération global, §8). Quatre tables les
+découpent pour **orienter l'investigation** — ce sont des vues de diagnostic,
+pas des KPI :
+
+| Table | Découpage | Ce qu'elle révèle |
+|---|---|---|
+| `orphelins_par_clause` | clause (compte PB) × type, avec **RANG** | RANG 1 = le compte le plus représentatif → **à investiguer avec le souscripteur** (graphe 11) |
+| `orphelins_par_garantie` | IT (60) / IP (64) / autre / non renseignée | une garantie sur-représentée oriente la recherche de cause |
+| `orphelins_par_anciennete` | N / N-1 / N-2 et antérieur | stock ancien (récurrent) vs flux récent (ponctuel) |
+| `orphelins_cles_nulles` | % de nullité de chaque composante de la clé (RPP, naissance, survenance, garantie, nom, clause) | une composante souvent vide **explique mécaniquement l'orphelinage** (pas de rapprochement possible) |
+
+**Exemple fil rouge.** Sur les 15 anomalies : le compte PB de RANG 1 en
+concentre 8 (53 % du nombre) ; `orphelins_cles_nulles` montre un RPP nul sur
+9 dossiers (60 %) → la clé principale ne *pouvait pas* matcher ces lignes.
+
+**À dire à l'oral.** « Les anomalies ne sont pas diffuses : **un compte** en
+concentre la moitié, et **le RPP manquant** explique l'essentiel du
+non-rapprochement — la question à poser au souscripteur est *comment ces listes
+ont été remontées sans apparaître dans la revue*. »
+
+**Intérêt.** Transforme un stock d'anomalies en **plan d'action** ciblé
+(quel compte, quelle garantie, quelle donnée manquante).
+
+**Limite.** Les `POIDS_NB_PCT` / `POIDS_PM_PCT` sont des poids **internes aux
+orphelins** (Σ = 100 % du bloc `CPT_ONLY`), pas des taux de l'étude. Les quatre
+ventilations se recoupent (Σ chacune = total `CPT_ONLY`, vérifié par
+`controles_coherence`).
+
+---
+
+## 13. Pièges de lecture (cohérence) — la check-list orale
 
 1. **Nombre vs valeur.** Couverture / conformité = en **dossiers** ; chute /
    niveaux de PM = en **euros**. Ne jamais conclure « bien provisionné » à partir
@@ -296,7 +342,7 @@ de PM associée ; ce taux est en **nombre**.
 
 ---
 
-## 13. Récapitulatif — une ligne par KPI
+## 14. Récapitulatif — une ligne par KPI
 
 | KPI | Formule | Exemple fil rouge | Lecture |
 |---|---|---|---|

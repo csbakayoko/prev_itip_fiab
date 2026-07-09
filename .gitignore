@@ -48,5 +48,19 @@ htmlcov/
 # VS Code
 .vscode/
 
+# =========================
+# Folders
+# =========================
+memoire/
+
 # Fichier de notes, à ignorer
 notes.txt
+
+# =========================
+# Documents bureautiques (jamais versionnés)
+# =========================
+*.docx
+*.pdf
+
+# macOS
+.DS_Store
