@@ -124,15 +124,26 @@ LOG_VOLUMETRIE = True
 # (uniquement pour cluster à taille fixe).
 CHECKPOINT_DIR = f"{_DBFS_HOME}/itip_fiab_checkpoints"
 
-# ── Export des analyses (restitution toujours en console ; écriture fichiers) ─
+# ── Export des analyses ─────────────────────────────────────────────────────
+# La restitution console est toujours faite ; ces réglages pilotent l'ÉCRITURE.
 EXPORT_BASE_PATH   = f"{_DBFS_HOME}/itip_fiab_exports"  # racine DBFS des sorties (métriques, graphiques)
-EXPORT_ANALYSES    = False        # True = écrit les analyses sur disque (DBFS)
+EXPORT_ANALYSES    = True         # True = écrit les métriques (Delta + fichiers DBFS)
 EXPORT_GRAPHS      = True         # True = graphiques de restitution (affichage + PNG DBFS)
-EXPORT_FORMATS     = ("excel", "csv", "parquet")  # ⊆ {excel, csv, parquet, json, delta} — Excel privilégié (Power BI)
-# Schéma metastore des tables métriques Delta (run de production Power BI).
+
+# Formats d'écriture, ⊆ {delta, excel, csv, parquet, json}.
+# DELTA EN PREMIER : le Hive est la sortie de RÉFÉRENCE (c'est lui que Power BI
+# interroge via le SQL Warehouse, et lui seul est historisé par run). Les
+# fichiers DBFS (Excel / parquet / csv) sont une sortie SECONDAIRE : dépannage,
+# partage ponctuel, import Power BI quand le Warehouse n'est pas disponible.
+# Retirer "delta" ici coupe l'écriture Hive sans toucher au reste.
+EXPORT_FORMATS     = ("delta", "excel", "parquet", "csv")
+
+# Schéma metastore des tables métriques Delta — la cible de référence.
 # Créé automatiquement au premier export (CREATE SCHEMA IF NOT EXISTS).
 # Surcharge : variable d'environnement ITIP_DELTA_SCHEMA ("" = pas de Delta),
 # ou widget delta_schema du notebook itip_fiab_powerbi.
+# ⚠ L'export Delta EXIGE une DATE_INVENTAIRE résoluble (dd/MM/yyyy) : c'est la
+# clé d'historisation, on refuse d'écrire à l'aveugle (cf. core/io/save_result).
 EXPORT_DELTA_SCHEMA = os.environ.get("ITIP_DELTA_SCHEMA", "hive_metastore.itip_fiab") or None
 
 # Table Delta du DÉTAIL df_result (dans EXPORT_DELTA_SCHEMA), historisée par

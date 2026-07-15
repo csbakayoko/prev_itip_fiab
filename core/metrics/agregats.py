@@ -1,9 +1,15 @@
 """
 Métriques par axe — ré-agrégations Spark de df_result.
 
-Chute par clause / ancienneté, consignes par clause (tableau de bord),
-anomalies par mois de survenance, investigation des orphelins CPT_ONLY.
+Chute par type de compte / ancienneté, consignes par type de compte (tableau de
+bord), anomalies par mois de survenance, investigation des orphelins CPT_ONLY.
 Les finalisations (_finalise_*) sont en pure pandas, testables sans Spark.
+
+L'axe d'analyse est TYPE_COMPTE (PB / HPB / …), le périmètre métier. La CLAUSE
+n'est pas un axe : elle remplace le RPP dans la clé de matching quand celui-ci
+est nul, et tous les types de compte n'en portent pas. Elle ne subsiste que
+dans `orphelins_par_clause` (détail d'investigation) et comme composante auditée
+dans `orphelins_cles_nulles`.
 """
 
 from typing import Optional
@@ -24,16 +30,19 @@ from core.metrics.base import (
 # MÉTRIQUES PAR AXE (ré-agrégation Spark de df_result)
 # ============================================================================
 
-def chute_par_clause(df_result: DataFrame, top: Optional[int] = None) -> pd.DataFrame:
-    """Taux de chute par clause × exercice, trié par PM MRM — graphe 3.
+def chute_par_type_compte(df_result: DataFrame) -> pd.DataFrame:
+    """Taux de chute par type de compte × exercice, trié par PM MRM — graphe 3.
+
+    Axe = TYPE_COMPTE (PB / HPB / …), le périmètre métier. La clause n'est PAS
+    un axe d'analyse : c'est un substitut du RPP dans la clé de matching, et
+    tous les types de compte n'en portent pas.
 
     Deux blocs EXERCICE : « Inventaire courant » (les stats globales) et
     « Récupérés N+1 » (analyse séparée, hors stats globales). Même univers et
     même formule agrégée que les taux de chute : dans chaque bloc, Σ des
     lignes (Σ écart / Σ PM MRM) redonne le taux correspondant
     (taux_chute_inventaire / taux_chute_n1), et les poids PM se lisent dans
-    le bloc. top=N → ne garde que les N clauses de plus forte PM MRM de
-    chaque bloc.
+    le bloc.
     """
     df = (
         _filter_chute_universe(_with_mrm_action(derive_clause_column(df_result)))
@@ -44,7 +53,7 @@ def chute_par_clause(df_result: DataFrame, top: Optional[int] = None) -> pd.Data
                             - F.coalesce(F.col("CPT_PM"), F.lit(0.0)))
     )
     pdf = (
-        df.groupBy("EXERCICE", "CLAUSE", "TYPE_COMPTE")
+        df.groupBy("EXERCICE", "TYPE_COMPTE")
         .agg(
             F.count("*").alias("NB_DOSSIERS"),
             F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("NB_SOUS_PROVISION"),
@@ -56,13 +65,13 @@ def chute_par_clause(df_result: DataFrame, top: Optional[int] = None) -> pd.Data
         )
         .toPandas()
     )
-    return _finalise_chute_par_clause(pdf, top)
+    return _finalise_chute_par_type_compte(pdf)
 
 
 def _taux_poids_par_exercice(pdf: pd.DataFrame) -> pd.DataFrame:
     """Taux de chute et poids PM calculés DANS chaque bloc EXERCICE — pure pandas.
 
-    Commun à chute_par_clause et chute_par_anciennete : dans chaque exercice,
+    Commun à chute_par_type_compte et chute_par_anciennete : dans chaque exercice,
     taux = Σécart / ΣPM MRM par ligne ; poids = part de la PM MRM de l'exercice
     (le taux du bloc est la moyenne PONDÉRÉE des taux par ligne, pas leur somme).
     """
@@ -76,17 +85,14 @@ def _taux_poids_par_exercice(pdf: pd.DataFrame) -> pd.DataFrame:
     return pdf
 
 
-def _finalise_chute_par_clause(pdf: pd.DataFrame, top: Optional[int] = None) -> pd.DataFrame:
-    """Taux et poids PM par clause × exercice, triés par PM MRM décroissante."""
+def _finalise_chute_par_type_compte(pdf: pd.DataFrame) -> pd.DataFrame:
+    """Taux et poids PM par type de compte × exercice, triés par PM MRM décroissante."""
     pdf = _taux_poids_par_exercice(pdf)
-    pdf = (
+    return (
         pdf.sort_values(["EXERCICE", "PM_MRM"], ascending=[True, False],
                         key=lambda s: s.map(_EXERCICE_ORDRE) if s.name == "EXERCICE" else s)
         .reset_index(drop=True)
     )
-    if top:
-        pdf = pdf.groupby("EXERCICE", sort=False).head(top).reset_index(drop=True)
-    return pdf
 
 
 def _finalise_chute_par_anciennete(pdf: pd.DataFrame) -> pd.DataFrame:
@@ -109,10 +115,10 @@ def chute_par_anciennete(
 ) -> pd.DataFrame:
     """Taux de chute par bloc d'ancienneté × exercice — graphe 10.
 
-    Découpe l'univers de chute (même filtre que chute_par_clause) par année de
+    Découpe l'univers de chute (même filtre que chute_par_type_compte) par année de
     survenance relative à l'inventaire : N / N-1 / N-2 et antérieur — la méthode
     d'inventaire diffère selon l'année (revue tête par tête sur N-1). Comme
-    chute_par_clause : deux blocs EXERCICE (« Inventaire courant » = stats
+    chute_par_type_compte : deux blocs EXERCICE (« Inventaire courant » = stats
     globales / « Récupérés N+1 » = analyse séparée) ; dans chaque bloc, Σ des
     lignes redonne le taux correspondant et les poids PM se lisent par ligne.
     """
@@ -172,14 +178,14 @@ def anomalies_cpt_only(
 
 
 # ============================================================================
-# CONSIGNES PAR CLAUSE (tableau de bord Power BI)
+# CONSIGNES PAR TYPE DE COMPTE (tableau de bord Power BI)
 # ============================================================================
 
 # Ordre d'affichage des consignes (aligné sur l'écran Power BI).
 _CONSIGNE_ORDRE = {"KEEP": 0, "ADD": 1, "STUDY": 2, "DELETE": 3}
 
 
-def _finalise_consignes_par_clause(pdf: pd.DataFrame) -> pd.DataFrame:
+def _finalise_consignes_par_type_compte(pdf: pd.DataFrame) -> pd.DataFrame:
     """PCT_SUIVI + libellé CONSIGNE (sans préfixe MRM_) + tri — pure pandas."""
     pdf = pdf.copy()
     pdf["CONSIGNE"] = pdf["MRM_ACTION"].str.replace("MRM_", "", regex=False)
@@ -187,20 +193,20 @@ def _finalise_consignes_par_clause(pdf: pd.DataFrame) -> pd.DataFrame:
     tot = pdf["NB_SUIVIES"] + pdf["NB_NON_SUIVIES"]
     pdf["PCT_SUIVI"] = (pdf["NB_SUIVIES"] / tot * 100).where(tot != 0, 0.0).round(1)
     pdf = pdf.sort_values(
-        ["TYPE_COMPTE", "CLAUSE", "CONSIGNE"],
+        ["TYPE_COMPTE", "CONSIGNE"],
         key=lambda s: s.map(_CONSIGNE_ORDRE) if s.name == "CONSIGNE" else s,
         na_position="last",
     ).reset_index(drop=True)
-    return pdf[["TYPE_COMPTE", "CLAUSE", "CONSIGNE", "NB_DOSSIERS",
+    return pdf[["TYPE_COMPTE", "CONSIGNE", "NB_DOSSIERS",
                 "NB_SUIVIES", "NB_NON_SUIVIES", "PCT_SUIVI",
                 "PM_MRM", "PM_CPT", "NB_NON_REMONTE_DF"]]
 
 
-def consignes_par_clause(df_result: DataFrame) -> pd.DataFrame:
-    """Suivi opérationnel des consignes par TYPE_COMPTE × CLAUSE × CONSIGNE.
+def consignes_par_type_compte(df_result: DataFrame) -> pd.DataFrame:
+    """Suivi opérationnel des consignes par TYPE_COMPTE × CONSIGNE.
 
     Alimente le « tableau de bord des consignes » Power BI : les cartes par
-    périmètre (PB / autres) et le tableau filtrable se calculent en DAX par
+    périmètre (PB / HPB / …) et le tableau filtrable se calculent en DAX par
     simple filtre sur cette table — aucun second run du moteur.
 
     Exercice courant pur, mêmes règles que la table `consignes` globale :
@@ -229,7 +235,7 @@ def consignes_par_clause(df_result: DataFrame) -> pd.DataFrame:
     non_suivie = F.when(is_delete, matched).otherwise(missing)
 
     pdf = (
-        univers.groupBy("TYPE_COMPTE", "CLAUSE", "MRM_ACTION")
+        univers.groupBy("TYPE_COMPTE", "MRM_ACTION")
         .agg(
             F.sum(F.when(~recup_non, 1).otherwise(0)).alias("NB_DOSSIERS"),
             F.sum(F.when(~recup_non & suivie, 1).otherwise(0)).alias("NB_SUIVIES"),
@@ -241,11 +247,11 @@ def consignes_par_clause(df_result: DataFrame) -> pd.DataFrame:
         .toPandas()
     )
     if pdf.empty:
-        return pd.DataFrame(columns=["TYPE_COMPTE", "CLAUSE", "CONSIGNE",
+        return pd.DataFrame(columns=["TYPE_COMPTE", "CONSIGNE",
                                      "NB_DOSSIERS", "NB_SUIVIES", "NB_NON_SUIVIES",
                                      "PCT_SUIVI", "PM_MRM", "PM_CPT",
                                      "NB_NON_REMONTE_DF"])
-    return _finalise_consignes_par_clause(pdf)
+    return _finalise_consignes_par_type_compte(pdf)
 
 
 # ============================================================================
@@ -270,13 +276,24 @@ def _orphelins(df: DataFrame) -> DataFrame:
     return df.filter(F.col("TYPE_RECONCILIATION") == F.lit(_ORPHAN_LABEL))
 
 
-def _finalise_orphelins(pdf: pd.DataFrame, with_rang: bool = False) -> pd.DataFrame:
-    """Ajoute les poids (nb, PM) — pure pandas. with_rang : tri nb décroissant +
-    RANG (1 = compte/modalité le plus représentatif)."""
+def _finalise_orphelins(
+    pdf      : pd.DataFrame,
+    with_rang: bool = False,
+    tot_nb   : Optional[int] = None,
+    tot_pm   : Optional[float] = None,
+) -> pd.DataFrame:
+    """Ajoute les poids (nb, PM) — pure pandas.
+
+    with_rang : tri nb décroissant + RANG (1 = modalité la plus représentative).
+    tot_nb / tot_pm : dénominateurs des poids. Par défaut les totaux de `pdf`
+    (la ventilation partitionne les orphelins) ; à fournir explicitement quand
+    la table ne couvre qu'un SOUS-ENSEMBLE des orphelins — les poids restent
+    alors lisibles en part du total, pas du sous-ensemble.
+    """
     pdf = pdf.copy()
     pdf["PM_CPT"] = pdf["PM_CPT"].round(2)
-    tot_nb = pdf["NB_DOSSIERS"].sum() or 1
-    tot_pm = pdf["PM_CPT"].sum() or 1.0
+    tot_nb = (pdf["NB_DOSSIERS"].sum() if tot_nb is None else tot_nb) or 1
+    tot_pm = (pdf["PM_CPT"].sum() if tot_pm is None else tot_pm) or 1.0
     pdf["POIDS_NB_PCT"] = (pdf["NB_DOSSIERS"] / tot_nb * 100).round(2)
     pdf["POIDS_PM_PCT"] = (pdf["PM_CPT"] / tot_pm * 100).round(2)
     if with_rang:
@@ -285,11 +302,39 @@ def _finalise_orphelins(pdf: pd.DataFrame, with_rang: bool = False) -> pd.DataFr
     return pdf
 
 
-def orphelins_par_clause(df_result: DataFrame) -> pd.DataFrame:
-    """Orphelins CPT_ONLY par clause (compte PB) × type — graphe 11.
+def orphelins_par_type_compte(df_result: DataFrame) -> pd.DataFrame:
+    """Orphelins CPT_ONLY par type de compte (PB / HPB / …) — graphe 11.
 
-    RANG 1 = compte PB le plus représentatif : à investiguer avec le souscripteur
-    (comment ces listes ont-elles été remontées sans apparaître dans MRM ?).
+    Ventilation PRINCIPALE des orphelins : elle partitionne tous les CPT_ONLY
+    (Σ NB_DOSSIERS = def_nb), quel que soit le type de compte. RANG 1 = le type
+    qui en concentre le plus.
+    """
+    pdf = (
+        _orphelins(derive_clause_column(df_result))
+        .groupBy("TYPE_COMPTE")
+        .agg(
+            F.count("*").alias("NB_DOSSIERS"),
+            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("PM_CPT"),
+        )
+        .toPandas()
+    )
+    return _finalise_orphelins(pdf, with_rang=True)[
+        ["RANG", "TYPE_COMPTE", "NB_DOSSIERS", "PM_CPT",
+         "POIDS_NB_PCT", "POIDS_PM_PCT"]
+    ]
+
+
+def orphelins_par_clause(df_result: DataFrame) -> pd.DataFrame:
+    """Orphelins CPT_ONLY par clause — table de DÉTAIL, investigation.
+
+    Seules les lignes PORTANT une clause y figurent : la clause n'existe pas sur
+    tous les types de compte (elle sert de substitut au RPP dans la clé, côté
+    PB). Cette table ne partitionne donc PAS les orphelins — pour un total, voir
+    `orphelins_par_type_compte`. Les poids restent calculés sur l'ensemble des
+    orphelins, pour se lire en part du total et non du sous-ensemble.
+
+    RANG 1 = le compte le plus représentatif : à investiguer avec le souscripteur
+    (comment ces dossiers ont-ils été remontés sans apparaître dans MRM ?).
     """
     pdf = (
         _orphelins(derive_clause_column(df_result))
@@ -300,7 +345,16 @@ def orphelins_par_clause(df_result: DataFrame) -> pd.DataFrame:
         )
         .toPandas()
     )
-    return _finalise_orphelins(pdf, with_rang=True)[
+    # Dénominateurs AVANT filtre : tous les orphelins, porteurs de clause ou non.
+    tot_nb = int(pdf["NB_DOSSIERS"].sum()) if len(pdf) else 0
+    tot_pm = float(pdf["PM_CPT"].sum()) if len(pdf) else 0.0
+
+    clause = pdf["CLAUSE"]
+    pdf    = pdf[clause.notna() & (clause.astype(str).str.strip() != "")]
+    if pdf.empty:
+        return pd.DataFrame(columns=["RANG", "CLAUSE", "TYPE_COMPTE", "NB_DOSSIERS",
+                                     "PM_CPT", "POIDS_NB_PCT", "POIDS_PM_PCT"])
+    return _finalise_orphelins(pdf, with_rang=True, tot_nb=tot_nb, tot_pm=tot_pm)[
         ["RANG", "CLAUSE", "TYPE_COMPTE", "NB_DOSSIERS", "PM_CPT",
          "POIDS_NB_PCT", "POIDS_PM_PCT"]
     ]

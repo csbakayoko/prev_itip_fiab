@@ -3,16 +3,20 @@
 # MAGIC # ITIP-FIAB — Run de production → Power BI
 # MAGIC
 # MAGIC Notebook **final** : données + config en entrée, tables métriques en sortie.
+# MAGIC C'est **le seul notebook qui écrit** — les autres (smoke, comparaison,
+# MAGIC key_audit) passent par `build_df_result` et ne touchent à rien.
 # MAGIC
 # MAGIC Déroulé :
 # MAGIC 1. **Setup** — session Spark + paramètres du run (widgets = paramètres du Job,
 # MAGIC    défauts `config/profile.py`)
-# MAGIC 2. **Pipeline** — chargement → nettoyage → matching → récupérations (N+1, statut NON) → tags
+# MAGIC 2. **Pipeline** — chargement → nettoyage → matching (11 étapes) → états
+# MAGIC    terminaux (`MRM_DELETE`, orphelins) → récupérations (N+1, statut NON) → tags
 # MAGIC 3. **Synthèse** — contrôles de cohérence console (`chute_coherente`, lignes classées)
-# MAGIC 4. **Export Power BI** — les 21 tables métriques écrites en Delta (+ fichiers DBFS),
-# MAGIC    puis contrôles inter-tables BLOQUANTS (les onglets doivent se recouper)
+# MAGIC 4. **Export** — les 22 tables métriques en Delta dans le metastore (la sortie
+# MAGIC    de **référence**, celle que Power BI interroge) + fichiers DBFS en
+# MAGIC    secondaire, puis contrôles inter-tables BLOQUANTS
 # MAGIC 5. **Détail du run** — `df_result` écrit en table Delta `resultat_backtest`,
-# MAGIC    historisée par date d'inventaire (2023 et 2024 coexistent)
+# MAGIC    historisée par `DATE_INVENTAIRE × PERIMETRE` (2023 et 2024 coexistent)
 # MAGIC
 # MAGIC Tables produites (tidy, une table par question métier) :
 # MAGIC
@@ -26,11 +30,21 @@
 # MAGIC | `consignes` | conformité + PM + chute (exercice courant pur), 1 ligne / consigne |
 # MAGIC | `compte_justification` | décomposition du compte (retrouvés, N+1, repêchés, clos, anomalies) |
 # MAGIC | `couverture_mrm` | part de la revue retrouvée au compte + non retrouvés par consigne |
-# MAGIC | `chute_par_clause` | taux de chute par CLAUSE × TYPE_CLAUSE × EXERCICE (inventaire courant / N+1 séparé) |
+# MAGIC | `chute_par_type_compte` | taux de chute par TYPE_COMPTE (PB / HPB / …) × EXERCICE (inventaire courant / N+1 séparé) |
+# MAGIC | `chute_par_anciennete` | taux de chute par année de survenance (N / N-1 / N-2 et antérieur) × EXERCICE |
+# MAGIC | `consignes_par_type_compte` | tableau de bord : suivi des consignes par TYPE_COMPTE × CONSIGNE |
 # MAGIC | `chute_par_consigne` / `pm_par_consigne` | chute et PM par consigne pertinente |
 # MAGIC | `conformite_consignes` / `conformite_globale` | application des consignes (détail + segments) |
 # MAGIC | `anomalies_cpt_only` | anomalies par mois de survenance (effet fin d'année) |
+# MAGIC | `orphelins_par_type_compte` | orphelins compte par TYPE_COMPTE — ventilation complète |
+# MAGIC | `orphelins_par_clause` | **détail** : orphelins des comptes porteurs d'une clause, RANG 1 = à investiguer |
+# MAGIC | `orphelins_par_garantie` / `_par_anciennete` / `_cles_nulles` | investigation des orphelins |
 # MAGIC | `controles_coherence` | recoupements inter-tables (attendu / obtenu / OK) — onglet « fiabilité » |
+# MAGIC
+# MAGIC > **Axe d'analyse** : les métriques se ventilent par `TYPE_COMPTE`, le
+# MAGIC > périmètre métier. La clause n'est pas un axe (elle ne sert qu'à remplacer
+# MAGIC > un RPP nul dans la clé de matching, et tous les comptes n'en portent pas) :
+# MAGIC > elle ne subsiste que dans la table de détail `orphelins_par_clause`.
 
 # COMMAND ----------
 
@@ -47,7 +61,7 @@
 
 from config import (
     ANNEE_INVENTAIRE, CLIENT_NAME, CLIENT_TYPE_CLAUSES, EXPORT_DELTA_SCHEMA,
-    INVENTAIRES,
+    EXPORT_FORMATS, INVENTAIRES,
 )
 from core.io.save_result import save_result_delta
 from core.runtime import configurer_run, get_spark
@@ -90,13 +104,19 @@ profil  = configurer_run(
 print(f"Run inventaire {_annee} :", profil)
 
 # ── Cible de l'export Power BI ───────────────────────────────────────────────
-# Delta (recommandé) : Power BI se connecte au SQL Warehouse Databricks et lit
-# les tables <schema>.metrique_<nom> (noms stables ; le run est porté par les
-# colonnes DATE_INVENTAIRE × PERIMETRE). Sans schéma, les fichiers
-# parquet/csv sous DBFS restent disponibles (connecteur fichier / import).
-# Excel TOUJOURS produit (classeur propre multi-onglets, import fichier Power BI).
+# RÉFÉRENCE = les tables Delta du metastore : Power BI se connecte au SQL
+# Warehouse et lit <schema>.metrique_<nom> (noms stables ; le run est porté par
+# les colonnes DATE_INVENTAIRE × PERIMETRE). Les fichiers DBFS (Excel/parquet/
+# csv) sont la sortie SECONDAIRE : import fichier quand le Warehouse n'est pas
+# disponible, dépannage, partage ponctuel.
+# Les formats viennent de la config (EXPORT_FORMATS) — une seule source de
+# vérité. Widget delta_schema vide = pas de Delta : on retire ce format et il ne
+# reste que les fichiers.
 DELTA_SCHEMA = _param("delta_schema", "") or None
-FORMATS      = ("excel", "delta", "parquet", "csv") if DELTA_SCHEMA else ("excel", "parquet", "csv")
+FORMATS      = (
+    tuple(EXPORT_FORMATS) if DELTA_SCHEMA
+    else tuple(f for f in EXPORT_FORMATS if f.lower() != "delta")
+)
 
 print("Périmètre :", CLIENT_NAME)
 print("Formats   :", FORMATS, "| schéma Delta :", DELTA_SCHEMA or "—")
@@ -142,7 +162,7 @@ assert d["chute_coherente"], (
 # MAGIC %md
 # MAGIC ## 4. Export Power BI
 # MAGIC
-# MAGIC Une passe : les 21 tables métriques écrites en Delta + parquet/csv sur DBFS.
+# MAGIC Une passe : les 22 tables métriques écrites en Delta + parquet/csv sur DBFS.
 
 # COMMAND ----------
 

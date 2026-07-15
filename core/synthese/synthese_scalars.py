@@ -146,7 +146,9 @@ def _scalars_from_rows(rows: list, date_inventaire: str) -> SyntheseScalars:
         by_action = lambda r: A(r) == action
         if action == "MRM_DELETE":
             univ = lambda r: by_action(r) and (T(r) in match or T(r) == "MRM_DELETE")
-            conf = lambda r: univ(r) and T(r) == "MRM_DELETE"   # conforme = écarté
+            # conforme = retrouvé par AUCUNE clé ⇒ le dossier a bien disparu
+            # du compte (MRM_DELETE est l'état terminal, cf. waterfall).
+            conf = lambda r: univ(r) and T(r) == "MRM_DELETE"
         else:
             univ = lambda r: by_action(r) and (T(r) in match or T(r) == "MRM_MISSING")
             conf = lambda r: univ(r) and T(r) in match          # conforme = retrouvé

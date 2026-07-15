@@ -1,17 +1,16 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ITIP-FIAB — Smoke test (tout le pipeline, sans export)
+# MAGIC # ITIP-FIAB — Smoke test (tout le pipeline, sans aucune écriture)
 # MAGIC
 # MAGIC But : vérifier de bout en bout que tout tourne après une mise à jour du
-# MAGIC code — pipeline → synthèse → 20 tables métriques → recoupements → 11
+# MAGIC code — pipeline → synthèse → 21 tables métriques → recoupements → 11
 # MAGIC graphiques. Si toutes les cellules passent, le pipeline est bon : lancer
 # MAGIC ensuite `itip_fiab_powerbi` pour l'export réel.
 # MAGIC
-# MAGIC **Aucune table Delta, aucun fichier de métriques** n'est écrit
-# MAGIC (`EXPORT_ANALYSES = False`). Seule réserve : `EXPORT_GRAPHS = True` étant
-# MAGIC le défaut, l'étape 1 dépose les 11 PNG dans le dossier graphiques sur
-# MAGIC DBFS. Pour un run vraiment sans aucune écriture, poser
-# MAGIC `EXPORT_GRAPHS = False` dans `config/profile.py`.
+# MAGIC **Aucune écriture** : ni table Delta, ni fichier DBFS, ni PNG. Ce
+# MAGIC notebook n'appelle donc PAS `main.run` (qui, lui, exporte : le Hive est
+# MAGIC la sortie de référence du pipeline) mais `main.build_df_result`, le cœur
+# MAGIC métier seul — puis il rejoue la restitution en mémoire.
 # MAGIC
 # MAGIC ⚠ Avant de lancer : mettre le Repo à jour + `dbutils.library.restartPython()`.
 
@@ -20,39 +19,40 @@
 from core.runtime import get_spark
 from core import metrics
 from core.metrics.viz import restituer_graphiques
-from main import run
+from core.synthese.kpi_export import print_synthese
+from main import build_df_result
 
 spark = get_spark()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Pipeline complet (main.run : load → matching → récupérations → synthèse)
+# MAGIC ## 1. Pipeline (build_df_result : load → matching → récupérations → tags)
 # MAGIC
-# MAGIC Ce que `run` écrit est piloté par `config/profile.py` : `EXPORT_ANALYSES`
-# MAGIC (défaut False → aucune table ni fichier de métriques) et `EXPORT_GRAPHS`
-# MAGIC (défaut True → les 11 PNG sur DBFS).
+# MAGIC Le cœur métier seul, sans restitution ni export — rien n'est écrit.
 
 # COMMAND ----------
 
-df_result = run(spark)
+df_result = build_df_result(spark).persist()
+print("df_result :", df_result.count(), "lignes")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Contrôles bloquants : synthèse, 20 tables, recoupements inter-tables
+# MAGIC ## 2. Contrôles bloquants : synthèse, 21 tables, recoupements inter-tables
+# MAGIC
+# MAGIC `print_synthese` renvoie `d` (une seule passe Spark, réutilisée ensuite).
+# MAGIC `toutes_metriques` calcule les tables **en mémoire**, sans les exporter.
 
 # COMMAND ----------
 
-from core.synthese.kpi_export import compute_synthese
-
-d = compute_synthese(df_result)
+d = print_synthese(df_result)
 assert d["coherent"], f"Lignes non classées : {d['labels_inconnus']}"
 assert d["chute_coherente"], "Taux de chute ≠ Σ consignes + hors consigne (voir logs)"
 
 tables = metrics.toutes_metriques(df_result, d)
 for name, pdf in tables.items():
-    print(f"  ✓ {name:<22} {len(pdf):>4} ligne(s)")
+    print(f"  ✓ {name:<28} {len(pdf):>4} ligne(s)")
 
 ctrl = tables["controles_coherence"]
 assert ctrl["OK"].all(), f"{int((~ctrl['OK']).sum())} recoupement(s) inter-tables KO :\n{ctrl[~ctrl['OK']]}"
@@ -64,6 +64,8 @@ display(tables["bilan_cas"])
 
 # MAGIC %md
 # MAGIC ## 3. Les 11 graphiques (affichés, non écrits)
+# MAGIC
+# MAGIC `save_dir=None` : rendu en mémoire, aucun PNG déposé sur DBFS.
 
 # COMMAND ----------
 
@@ -72,5 +74,6 @@ print(f"✔ {len(figs)} graphiques rendus")
 
 # COMMAND ----------
 
-print("✅ SMOKE TEST OK — pipeline, synthèse, 20 tables, recoupements et 11 graphiques.")
+print("✅ SMOKE TEST OK — pipeline, synthèse, 21 tables, recoupements et 11 graphiques.")
+print("   Aucune écriture. Pour exporter : lancer itip_fiab_powerbi.")
 df_result.unpersist()

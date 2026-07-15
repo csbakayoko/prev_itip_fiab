@@ -49,7 +49,7 @@ via la colonne `TYPE_RECONCILIATION`. Les catégories :
 | Matchés **clé clause** | `MATCH_CLAUSE`, `MATCH_CLAUSE_WINDOW`, `MATCH_CLAUSE_TRONC`, `MATCH_CLAUSE_TRONC_WINDOW` | clé de secours : n° de clause à la place du RPP (RPP compte nul / mal renseigné) |
 | Récupérés **N+1** | `CPT_LATE` | orphelin CPT retrouvé dans l'inventaire suivant |
 | Orphelins MRM | `MRM_MISSING` | dossier MRM sans contrepartie compte |
-| Consigne à supprimer | `MRM_DELETE` | MRM marqué « à supprimer » |
+| Consigne à supprimer | `MRM_DELETE` | MRM « à supprimer » retrouvé par AUCUNE clé ⇒ suppression effective (état terminal, cf. §5.3). Un « à supprimer » qui matche reste un `MATCH_*` : c'est un « encore au compte » |
 | Orphelins compte | `CPT_ONLY` | dossier compte sans contrepartie MRM |
 | Obs. tardives IT | `CPT_OBS_TARDIVE` | sinistre clos avant l'inventaire N+1 |
 | Récupérés via NON | `CPT_RECUP_NON` | CPT_ONLY repêché sur un MRM statut NON (PM MRM=0) |
@@ -203,7 +203,7 @@ extrêmes par dossier (on n'agrège jamais une moyenne de ratios).
    Accompagné de son propre **suivi des consignes N+1** (`n1_consignes` :
    KEEP/ADD/STUDY = conformes, DELETE = encore au compte). Ses métriques se
    lisent dans les blocs dédiés (`chute_n1_*`, tables `chute_par_exercice` /
-   `suivi_n1`, bloc N+1 de `chute_par_clause`).
+   `suivi_n1`, bloc N+1 de `chute_par_type_compte`).
 
 Les autres exclus gardent leur **analyse à part** : « à supprimer »
 retrouvées → conformité (« encore au compte ») + taux de suppression
@@ -229,20 +229,20 @@ taux_chute_n1         = écart_N+1 / PM_MRM_N+1          (analyse séparée)
 > `n1_sans_consigne` (N+1) ; les deux exercices dans `metrics_*` /
 > `chute_n1_*` (table `chute_par_exercice`).
 
-La ventilation **par clause** (`chute_par_clause`, graphe 3) porte la même
-séparation : deux blocs `EXERCICE` (« Inventaire courant » = stats globales /
-« Récupérés N+1 » = analyse séparée). Dans chaque bloc, Σ clauses (Σ écart /
-Σ PM MRM) == le taux correspondant du §4.2, et les poids PM se lisent dans
-le bloc. Le graphe 3 ne trace que le bloc inventaire.
+La ventilation **par type de compte** (`chute_par_type_compte`, graphe 3) porte
+la même séparation : deux blocs `EXERCICE` (« Inventaire courant » = stats
+globales / « Récupérés N+1 » = analyse séparée). Dans chaque bloc, Σ types de
+compte (Σ écart / Σ PM MRM) == le taux correspondant du §4.2, et les poids PM
+se lisent dans le bloc. Le graphe 3 ne trace que le bloc inventaire.
 
 La ventilation **par ancienneté** (`chute_par_anciennete`, graphe 10) découpe
 le même univers par **année de survenance** relative à l'inventaire :
 **N / N-1 / N-2 et antérieur** (bloc `Indéterminée` si la survenance est nulle
 ou l'inventaire non daté). Le découpage est métier : **la méthode d'inventaire
 diffère selon l'année** (revue tête par tête sur N-1). Même structure que par
-clause (deux blocs `EXERCICE`, taux/poids dans le bloc, Σ bloc inventaire ==
-taux principal) ; année dérivée de `year(CPT_D_SURVENANCE)`, référence
-`d["date_inventaire"]`.
+type de compte (deux blocs `EXERCICE`, taux/poids dans le bloc, Σ bloc
+inventaire == taux principal) ; année dérivée de `year(CPT_D_SURVENANCE)`,
+référence `d["date_inventaire"]`.
 
 ### 4.3 Périmètre des consignes
 - **KEEP / ADD / STUDY** : chute pertinente (la PM doit être justifiée au
@@ -326,22 +326,49 @@ taux principal) ; année dérivée de `year(CPT_D_SURVENANCE)`, référence
 - **Univers** : `MRM_DELETE ∩ MATCHÉS`.
 - **Sorties** : volumétrie + PM par tranche ; *taux de suppression effective* =
   `nb(DELETE orphelins) / nb(DELETE total)`.
+- **Comment le verdict est établi** : les dossiers « à supprimer » traversent
+  **toutes** les étapes du waterfall, comme les autres consignes. Le filtrage
+  `MRM_DELETE` est un **état terminal**, appliqué au niveau des orphelins :
+  n'est déclaré « supprimé » (conforme) qu'un dossier retrouvé par **aucune**
+  clé. C'est ce qui rend le taux comparable à la conformité KEEP/ADD/STUDY —
+  écarter les DELETE avant la fin de la cascade les priverait des clés de
+  secours (IP, rechute, clause) et surestimerait la suppression, tout en
+  transformant leurs contreparties compte en fausses `CPT_ONLY`.
 
 ---
 
 ## 6. Tables métriques exportées (core/metrics/__init__.py — toutes_metriques)
 
-Les 21 tables pandas tidy écrites par `export_metriques` (CSV / JSON /
-Parquet / Excel / Delta) :
+Les 22 tables pandas tidy écrites par `export_metriques`.
 
+> **Cible de référence : le metastore Hive.** Chaque table est écrite en Delta
+> dans `EXPORT_DELTA_SCHEMA` (défaut `hive_metastore.itip_fiab`) sous le nom
+> `metrique_<nom>` — c'est la source que Power BI interroge via le SQL
+> Warehouse, et la seule historisée. Les fichiers **Excel / parquet / CSV /
+> JSON** sur DBFS sont une sortie **secondaire** (import sans Warehouse,
+> dépannage, partage ponctuel) : ils ne sont pas historisés et sont écrasés à
+> chaque run. Formats pilotés par `EXPORT_FORMATS` ; retirer `"delta"` ou vider
+> `EXPORT_DELTA_SCHEMA` coupe l'écriture Hive.
+>
 > **Schéma standard des exports** : chaque table porte les colonnes de run
 > `DATE_INVENTAIRE`, `PERIMETRE` (libellé de périmètre — `MULTI` ou la clause
 > si le run est filtré sur une seule) et `LIBELLE_RUN` ; en Delta, chaque
 > table est **historisée par run** (`replaceWhere` sur `DATE_INVENTAIRE ×
 > PERIMETRE` : rejouer un run remplace SES lignes, les autres inventaires /
-> périmètres coexistent). Les lignes ventilées portent `TYPE_COMPTE` (PB /
-> HPB / préfixe brut si type non mappé — jamais null muet) et `CLAUSE`
-> (nullable : un compte sans n° de clause est une donnée légitime).
+> périmètres coexistent). L'historisation **exige** une `DATE_INVENTAIRE`
+> résoluble (`dd/MM/yyyy`) : une date `"auto"` / `"n/d"` fait échouer l'export
+> Delta plutôt que d'historiser à l'aveugle. Les lignes ventilées portent
+> `TYPE_COMPTE` (PB / HPB / préfixe brut si type non mappé — jamais null muet).
+>
+> **Axe d'analyse : `TYPE_COMPTE`, jamais la clause.** Le périmètre métier est
+> le type de compte (PB / HPB / …). La **clause n'est pas un axe d'analyse** :
+> c'est un substitut du RPP dans la clé de matching, utilisé quand le RPP du
+> compte est nul ou non fiable (côté PB) — et tous les types de compte n'en
+> portent pas, un HPB n'a pas de clause. Ventiler par clause casserait donc dès
+> l'entrée du HPB dans le périmètre. La clause ne subsiste que dans
+> `orphelins_par_clause`, table de **détail d'investigation** (sous-ensemble :
+> uniquement les dossiers porteurs d'une clause), et comme composante auditée
+> dans `orphelins_cles_nulles`.
 >
 > **Nomenclature (contrat)** : les tables Delta sont nommées
 > `metrique_<nom>` (nom stable, snake_case — le périmètre est une colonne,
@@ -367,15 +394,16 @@ Parquet / Excel / Delta) :
 | `chute_par_exercice` | 1 ligne / exercice : inventaire courant (stats globales), N+1 (analyse séparée) | univers de chute, par exercice |
 | `suivi_n1` | consignes des récupérés N+1 (analyse séparée) | `CPT_LATE` hors statut NON |
 | `consignes` | conformité + PM + chute par consigne, exercice courant pur | conformité : matchés + missing ; PM/chute : matchés inventaire courant |
-| `consignes_par_clause` | tableau de bord : suivi des consignes par TYPE_COMPTE × CLAUSE × CONSIGNE (nb, suivies/non suivies, PM, `NB_NON_REMONTE_DF`) | mêmes règles que `consignes`, ventilées ; repêchés statut NON comptés à part, hors conformité |
+| `consignes_par_type_compte` | tableau de bord : suivi des consignes par TYPE_COMPTE × CONSIGNE (nb, suivies/non suivies, PM, `NB_NON_REMONTE_DF`) | mêmes règles que `consignes`, ventilées ; repêchés statut NON comptés à part, hors conformité |
 | `compte_justification` | décomposition du compte (retrouvés, N+1, repêchés, clos, anomalies) | compte entier |
 | `couverture_mrm` | part de la revue retrouvée + non retrouvés par consigne | `MATCHÉS + MRM_MISSING` (+ DELETE retrouvées) |
-| `chute_par_clause` | chute par clause × exercice (2 blocs : inventaire courant = stats globales / N+1 = analyse séparée — Σ clauses d'un bloc = taux du bloc, cf. §4.2). Colonnes : `EXERCICE`, `CLAUSE`, `TYPE_COMPTE`, `NB_DOSSIERS`, `NB_SOUS_PROVISION`, `NB_SUR_PROVISION`, `NB_ECART_NUL`, `PM_MRM`, `PM_CPT`, `ECART`, `TAUX_CHUTE_PCT`, `POIDS_PM_PCT` | univers de chute, par exercice |
-| `chute_par_anciennete` | chute par année de survenance × exercice (N / N-1 / N-2 et antérieur — Σ bloc inventaire = taux principal, cf. §4.2). Colonnes : `EXERCICE`, `BLOC_ANCIENNETE` + les mêmes mesures que `chute_par_clause` | univers de chute, par exercice |
+| `chute_par_type_compte` | chute par type de compte × exercice (2 blocs : inventaire courant = stats globales / N+1 = analyse séparée — Σ types d'un bloc = taux du bloc, cf. §4.2). Colonnes : `EXERCICE`, `TYPE_COMPTE`, `NB_DOSSIERS`, `NB_SOUS_PROVISION`, `NB_SUR_PROVISION`, `NB_ECART_NUL`, `PM_MRM`, `PM_CPT`, `ECART`, `TAUX_CHUTE_PCT`, `POIDS_PM_PCT` | univers de chute, par exercice |
+| `chute_par_anciennete` | chute par année de survenance × exercice (N / N-1 / N-2 et antérieur — Σ bloc inventaire = taux principal, cf. §4.2). Colonnes : `EXERCICE`, `BLOC_ANCIENNETE` + les mêmes mesures que `chute_par_type_compte` | univers de chute, par exercice |
 | `chute_par_consigne` / `pm_par_consigne` | chute et PM par consigne pertinente (vues de `consignes`) | matchés inventaire courant, KEEP/ADD/STUDY |
 | `conformite_consignes` / `conformite_globale` | application des consignes (détail + segments) | exercice courant (§5) |
 | `anomalies_cpt_only` | anomalies par mois de survenance (effet fin d'année) | `CPT_ONLY` |
-| `orphelins_par_clause` | orphelins compte par clause / compte PB + type, nb + PM + poids + RANG (1 = le plus représentatif, à investiguer avec le souscripteur) — graphe 11 | `CPT_ONLY` |
+| `orphelins_par_type_compte` | orphelins compte par TYPE_COMPTE, nb + PM + poids + RANG — **ventilation complète** (Σ nb = `def_nb`) | `CPT_ONLY` |
+| `orphelins_par_clause` | **détail d'investigation** : orphelins des comptes PORTEURS d'une clause, nb + PM + poids + RANG (1 = le plus représentatif, à investiguer avec le souscripteur) — graphe 11. Ne partitionne PAS les orphelins (Σ nb ≤ `def_nb`) ; les poids sont calculés sur l'ensemble des orphelins pour rester lisibles en part du total | `CPT_ONLY` porteurs d'une clause |
 | `orphelins_par_garantie` | orphelins compte par garantie (IT 60 / IP 64 / autre / non renseignée) | `CPT_ONLY` |
 | `orphelins_par_anciennete` | orphelins compte par année de survenance (N / N-1 / N-2 et antérieur) | `CPT_ONLY` |
 | `orphelins_cles_nulles` | nullité des colonnes constitutives de la clé (RPP, naissance, survenance, garantie, nom, clause) — explique l'orphelinage | `CPT_ONLY` |
@@ -391,39 +419,50 @@ Parquet / Excel / Delta) :
   chute** : leur chute et leur suivi de consignes sont une analyse séparée
   (`chute_n1_*`, `n1_consignes`, cf. §4.2). Aucun calcul global ne doit les
   réintégrer (sinon incohérence chute ↔ consigne).
-- **Additivité par clause** : les tables par clause portent
-  `(CLAUSE, TYPE_COMPTE)` ; les % sont calculés **dans le scope de chaque
-  clause** (et de chaque exercice pour `chute_par_clause`). La somme des
-  numérateurs/dénominateurs par clause = total → on peut agréger plusieurs
-  clauses/bases sans recompter.
+- **Additivité par type de compte** : les tables ventilées portent
+  `TYPE_COMPTE` ; les % sont calculés **dans le scope de chaque type de
+  compte** (et de chaque exercice pour `chute_par_type_compte`). La somme des
+  numérateurs/dénominateurs par type = total → on peut agréger plusieurs
+  périmètres sans recompter.
 - **Invariant de cohérence** : `compute_synthese` vérifie que toute ligne tombe
   dans exactement une catégorie connue (`classified_rows == total_rows`) ; sinon
   un `TYPE_RECONCILIATION` inattendu est signalé.
 - **Recoupements inter-tables** : `metrics.controles_coherence` vérifie à
   chaque export que les grandeurs partagées se recoupent d'une table à
-  l'autre (Σ blocs de `chute_par_clause` / `chute_par_anciennete` == base
+  l'autre (Σ blocs de `chute_par_type_compte` / `chute_par_anciennete` == base
   chute / bloc N+1, Σ `anomalies_cpt_only` == CPT_ONLY, Σ des ventilations
-  d'orphelins (`orphelins_par_clause` / `_par_garantie` / `_par_anciennete`,
-  total de `orphelins_cles_nulles`) == CPT_ONLY, Σ consignes + hors consigne
-  == base chute, totaux de `bilan_cas`, etc.) — condition pour que les
-  onglets Power BI de l'étude racontent une seule histoire. Table exportée,
-  **assert bloquant** dans `notebooks/itip_fiab_powerbi.py`.
+  d'orphelins (`orphelins_par_type_compte` / `_par_garantie` /
+  `_par_anciennete`, total de `orphelins_cles_nulles`) == CPT_ONLY, Σ consignes
+  + hors consigne == base chute, totaux de `bilan_cas`, etc.) — condition pour
+  que les onglets Power BI de l'étude racontent une seule histoire. Table
+  exportée, **assert bloquant** dans `notebooks/itip_fiab_powerbi.py`.
+  `orphelins_par_clause` est volontairement HORS de ces recoupements : table de
+  détail, elle ne couvre qu'un sous-ensemble — son garde-fou vérifie
+  seulement qu'elle ne dépasse jamais `def_nb`.
 
 ---
 
 ## 8. Sorties
 
 ### 8.1 Formats
+
+Défaut : `EXPORT_FORMATS = ("delta", "excel", "parquet", "csv")`.
+
+**Sortie de référence** — c'est elle qui fait foi :
+- **Delta / metastore Hive** : une table par métrique, historisée par run,
+  interrogée par Power BI via le SQL Warehouse.
+
+**Sorties secondaires** — pratiques, mais non historisées (écrasées à chaque
+run) :
 - **Excel** (présentation) : un classeur multi-onglets, un onglet par table +
-  un onglet « synthèse » lisible (indicateurs cadrés).
-- **CSV** / **Parquet** : une table par fichier (rejeu / dataviz).
-- **JSON** : une ligne par enregistrement, par table (`export_json`). ✅
-- **Base de données** : table Delta metastore (une par analyse).
+  un onglet « Sommaire » lisible ;
+- **CSV** / **Parquet** : une table par fichier (rejeu / dataviz) ;
+- **JSON** : une ligne par enregistrement, par table.
 
 ### 8.2 Ce qui va en base — nomenclature
 - **Schéma unique** de l'application : `hive_metastore.itip_fiab`
   (`EXPORT_DELTA_SCHEMA`, créé au premier export).
-- Les 21 tables du §6, une table Delta par métrique : `<schema>.metrique_<nom>`
+- Les 22 tables du §6, une table Delta par métrique : `<schema>.metrique_<nom>`
   (connexion Power BI via SQL Warehouse). Les noms de tables sont **stables** :
   le périmètre est une **colonne** (`PERIMETRE`), pas un suffixe de nom — une
   connexion Power BI ne casse jamais quand la config de périmètre change.

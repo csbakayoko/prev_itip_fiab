@@ -15,7 +15,7 @@
   (volumétrie faible : tables agrégées ; le refresh suit le Job).
   `resultat_backtest` (détail tête par tête) peut rester en DirectQuery si
   la volumétrie grossit.
-- **Tables** : les 21 `metrique_*` + `resultat_backtest`. Noms **stables** —
+- **Tables** : les 22 `metrique_*` + `resultat_backtest`. Noms **stables** —
   le run est porté par les colonnes, jamais par le nom de table.
 - **Clé de run** : chaque table porte `DATE_INVENTAIRE` / `PERIMETRE` /
   `LIBELLE_RUN`. Modèle en étoile minimal : une table de dates
@@ -65,15 +65,15 @@ Chaque page = une question, ses visuels, sa table source. Segments globaux
 ### P2 — Taux de chute
 - Cartes : taux inventaire + composantes PM (`metrique_taux_chute`), taux
   N+1 en regard, clairement séparé (« analyse séparée »).
-- Barres par clause (`metrique_chute_par_clause`, bloc EXERCICE =
+- Barres par type de compte (`metrique_chute_par_type_compte`, bloc EXERCICE =
   « Inventaire courant » seul) ; barres par ancienneté
   (`metrique_chute_par_anciennete` : N / N-1 / N-2 et antérieur) ; barres
   par consigne (`metrique_chute_par_consigne`).
 - Axe couleur : signe de la chute (rouge sous-provisionné / vert marge).
 
 ### P3 — Suivi des consignes (le tableau de bord)
-- **Matrice** `metrique_consignes_par_clause` : TYPE_COMPTE × CLAUSE ×
-  CONSIGNE — nb, suivies / non suivies, PM, `NB_NON_REMONTE_DF`.
+- **Matrice** `metrique_consignes_par_type_compte` : TYPE_COMPTE × CONSIGNE —
+  nb, suivies / non suivies, PM, `NB_NON_REMONTE_DF`.
 - Barres 100 % par consigne (`metrique_consignes`) : conforme / non
   retrouvé / encore au compte ; cartes conformité globale
   (`metrique_conformite_globale`).
@@ -85,10 +85,14 @@ Chaque page = une question, ses visuels, sa table source. Segments globaux
   c'est LE tableau de restitution — chaque ligne a sa phrase d'explication.
 
 ### P5 — Orphelins compte (investigation)
-- `metrique_orphelins_par_clause` trié par `RANG` (1 = à investiguer en
-  premier avec le souscripteur) ; ventilations garantie / ancienneté ;
-  `metrique_orphelins_cles_nulles` (pourquoi ça n'a pas matché) ;
-  `metrique_anomalies_cpt_only` par mois (effet fin d'année).
+- `metrique_orphelins_par_type_compte` : la ventilation complète (le total des
+  orphelins s'y lit) ; `metrique_orphelins_par_clause` trié par `RANG`
+  (1 = à investiguer en premier avec le souscripteur) — **table de détail**,
+  elle ne couvre que les comptes porteurs d'une clause, son total est donc
+  inférieur : ne pas s'en servir pour un cumul.
+- Ventilations garantie / ancienneté ; `metrique_orphelins_cles_nulles`
+  (pourquoi ça n'a pas matché) ; `metrique_anomalies_cpt_only` par mois
+  (effet fin d'année).
 
 ### P6 — Analyses séparées : N+1 et statut NON
 - `metrique_chute_par_exercice` (inventaire courant vs récupérés N+1),

@@ -8,6 +8,16 @@ Le calcul des indicateurs vit dans core.metrics (des fonctions qui
 reshapent le dict de la synthèse — une passe Spark — en tables pandas),
 leur mise en forme dans core.metrics.viz (11 graphiques-messages).
 
+SORTIES — `run` écrit par défaut (EXPORT_ANALYSES = True) :
+    - les 22 tables métriques et le détail `resultat_backtest` dans le
+      metastore Hive (tables Delta historisées par DATE_INVENTAIRE × PERIMETRE)
+      — c'est la cible de RÉFÉRENCE, celle que Power BI interroge ;
+    - les fichiers DBFS (Excel / parquet / csv) et les PNG des graphiques, en
+      sortie SECONDAIRE.
+Tout est piloté par config/profile.py (EXPORT_ANALYSES, EXPORT_FORMATS,
+EXPORT_DELTA_SCHEMA, EXPORT_GRAPHS) : aucune écriture n'est en dur ici.
+`build_df_result` n'écrit JAMAIS rien — c'est le cœur métier seul.
+
 Périmètre piloté par config/profile.py (par défaut : toutes les clauses). Lancement :
     spark-submit main.py        (ou exécution dans un notebook Databricks)
 """
@@ -20,6 +30,7 @@ from config import (
     EXPORT_ANALYSES, EXPORT_FORMATS, EXPORT_DELTA_SCHEMA, EXPORT_GRAPHS,
     RECUP_NON_LABEL, CHECKPOINT_DIR,
 )
+from core.io.save_result import save_result_delta
 from core.io.load_data import load_cpt_raw, load_mrm_raw
 from core.prep.transform import clean_cpt, clean_mrm
 from core.match.matching import (
@@ -116,7 +127,12 @@ def build_df_result(spark: SparkSession) -> DataFrame:
 
 
 def run(spark: SparkSession) -> DataFrame:
-    """Exécute le pipeline complet et affiche la synthèse client."""
+    """Exécute le pipeline complet, affiche la synthèse et écrit les sorties.
+
+    Écriture pilotée par la config (cf. docstring du module) : tables Delta du
+    metastore en référence, fichiers DBFS et PNG en secondaire. Pour le cœur
+    métier sans aucune écriture, appeler `build_df_result`.
+    """
     with timed("PIPELINE TOTAL"):
         df_result = build_df_result(spark)
 
@@ -136,12 +152,25 @@ def run(spark: SparkSession) -> DataFrame:
         with timed("ÉTAPE 0 synthèse"):
             d = print_synthese(df_result)
 
-        # ÉTAPE 1 — export des métriques (tables pandas sérialisées
-        # CSV/JSON/Parquet/Excel/Delta sur DBFS).
+        # ÉTAPE 1 — export des métriques. Cible de RÉFÉRENCE : les tables Delta
+        # du metastore (<schema>.metrique_*), historisées par run. Les fichiers
+        # DBFS (Excel / parquet / csv) suivent en sortie secondaire. Le contenu
+        # exact est piloté par EXPORT_FORMATS / EXPORT_DELTA_SCHEMA.
         if EXPORT_ANALYSES:
             with timed("ÉTAPE 1 export métriques"):
                 export_metriques(df_result, d, formats=EXPORT_FORMATS,
                                  delta_schema=EXPORT_DELTA_SCHEMA)
+
+            # Détail dossier par dossier (<schema>.resultat_backtest) : la
+            # contrepartie fine des métriques agrégées, même historisation
+            # (DATE_INVENTAIRE × PERIMETRE). Sans schéma Delta, il n'y a pas de
+            # cible — les métriques restent écrites en fichiers.
+            if EXPORT_DELTA_SCHEMA and "delta" in {f.lower() for f in EXPORT_FORMATS}:
+                with timed("ÉTAPE 1b détail Delta"):
+                    table = save_result_delta(
+                        df_result, EXPORT_DELTA_SCHEMA, d["date_inventaire"],
+                    )
+                    print(f"  ✓ [DELTA]   {table}  (détail du run)")
 
         # ÉTAPE 2 — graphiques de restitution (titres-messages : justification
         # du compte, couverture des listes d'arrêts, chute par clause/consigne,

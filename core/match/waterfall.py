@@ -4,10 +4,16 @@ Cascade principale de réconciliation CPT/MRM + consignes métier.
 Flux (matching_waterfall) :
     CPT + MRM
         ├─ Pre-filter   : MATCH_EXACT / WINDOW / TRONC / TRONC_WINDOW
-        ├─ Filtrage MRM : MRM_DELETE → écarté
         ├─ Post-filter  : MATCH_IP / RECHUTE / RECHUTE_TRONC
         ├─ Clé clause   : MATCH_CLAUSE[_WINDOW/_TRONC/_TRONC_WINDOW] (secours RPP nul)
-        └─ Orphelins    : CPT_ONLY / MRM_MISSING → union finale
+        └─ États terminaux : MRM_DELETE, puis CPT_ONLY / MRM_MISSING → union finale
+
+TOUT le MRM traverse TOUTES les étapes de matching, « à supprimer » compris :
+la consigne DELETE se juge sur la présence au compte, donc le dossier doit être
+cherché avec la même cascade que les autres. Ce n'est qu'ensuite, au niveau des
+orphelins, que le résidu DELETE est étiqueté MRM_DELETE (= suppression
+effective). Un DELETE qui a matché reste un MATCH_* : c'est un « encore au
+compte », le KO de cette consigne.
 
 Pour ajouter une étape : copier 3-5 lignes dans la zone correspondante avec
 la nouvelle clé (et `extra_cond=...` si une condition supplémentaire est requise).
@@ -34,12 +40,13 @@ def categorize_mrm_conclusion(col: Column) -> Column:
     """
     Catégorise la conclusion MRM selon les consignes métier.
 
-    Retient :
         MRM_KEEP             → PM MRM à conserver
         MRM_ADD / MRM_STUDY  → PM à ajouter / à étudier
-
-    Écarte :
         MRM_DELETE           → PM MRM à supprimer
+        None                 → aucune consigne reconnue
+
+    Purement descriptif : aucune de ces valeurs n'écarte le dossier du matching
+    (cf. filter_mrm_by_action, appliqué seulement en fin de cascade).
     """
     text = F.lower(F.trim(col))
     return (
@@ -58,10 +65,16 @@ def filter_mrm_by_action(
     conclusion_col: str = "MRM_CONCLUSION",
 ) -> Tuple[DataFrame, DataFrame]:
     """
-    Sépare les MRM selon leur consigne métier.
+    Sépare le RÉSIDU MRM non matché selon la consigne métier.
 
         MRM_DELETE                       → df_to_remove (TYPE_RECONCILIATION=MRM_DELETE)
-        MRM_KEEP / STUDY / ADD / None    → df_to_process
+        MRM_KEEP / STUDY / ADD / None    → df_to_process (→ MRM_MISSING)
+
+    À n'appeler qu'en FIN de cascade, au niveau des orphelins : appliquée en
+    amont, elle priverait les « à supprimer » des étapes de matching restantes
+    et fausserait leur conformité (cf. docstring du module). Sur le résidu, le
+    sens est net : un DELETE qui n'a été retrouvé par AUCUNE clé a bien
+    disparu du compte — la consigne est suivie.
     """
     if conclusion_col not in df_mrm.columns:
         raise ValueError(f"Colonne '{conclusion_col}' absente du DataFrame MRM.")
@@ -153,11 +166,6 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     )
     results.append(matched)
 
-    # === Filtrage MRM_DELETE ===
-    print("[matching] -- filtrage MRM_DELETE --")
-    mrm_removed, mrm_rem = filter_mrm_by_action(mrm_rem)
-    results.append(mrm_removed)
-
     # === Post-filter ===
     print("[matching] -- phase post-filter --")
 
@@ -214,8 +222,24 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     )
     results.append(matched)
 
-    # === Orphelins finaux ===
-    print("[matching] -- orphelins --")
+    # === États terminaux : MRM_DELETE puis orphelins ===
+    # Le filtrage MRM_DELETE est fait ICI, APRÈS toutes les étapes de matching,
+    # au même niveau que les orphelins : « à supprimer » est un état TERMINAL
+    # (le dossier n'a été retrouvé nulle part), pas une exclusion en amont.
+    #
+    # POURQUOI À LA FIN. La consigne « à supprimer » se juge par la PRÉSENCE au
+    # compte : conforme = absent (suppression effective) ; KO = « encore au
+    # compte ». Ce verdict n'a de sens que si le dossier a été cherché avec la
+    # MÊME cascade que les autres consignes. Filtrer plus tôt privait le DELETE
+    # des clés de secours (IP, rechute, clause) et produisait deux erreurs
+    # symétriques : un dossier toujours au compte, mais atteignable seulement
+    # par une clé lâche, était déclaré « supprimé » (faux conforme) — et sa
+    # ligne CPT, privée de contrepartie, remontait en CPT_ONLY, une FAUSSE
+    # ANOMALIE envoyée à l'investigation.
+    print("[matching] -- états terminaux : filtrage MRM_DELETE + orphelins --")
+    mrm_removed, mrm_rem = filter_mrm_by_action(mrm_rem)
+    results.append(mrm_removed)
+
     cpt_orphans, mrm_critiques = tag_orphans(cpt_rem, mrm_rem)
     results.extend([cpt_orphans, mrm_critiques])
 

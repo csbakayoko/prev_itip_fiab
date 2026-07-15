@@ -82,7 +82,7 @@ def _mois_label_expr(date_col: str) -> F.Column:
     return expr
 
 
-# Libellés des deux EXERCICES de chute (chute_par_exercice, chute_par_clause) :
+# Libellés des deux EXERCICES de chute (chute_par_exercice, chute_par_type_compte) :
 # inventaire courant = les stats globales ; N+1 = analyse séparée.
 EXERCICE_INV    = "Inventaire courant"
 EXERCICE_N1     = "Récupérés N+1"

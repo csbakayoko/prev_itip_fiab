@@ -9,8 +9,8 @@ problématique de fiabilisation (direction financière et engagements) :
     1. compte_justification   — le compte client est-il justifié par la revue ?
     2. couverture_mrm         — challenge des listes d'arrêts de travail :
                                 quelle part de la revue MRM est au compte ?
-    3. chute_par_clause       — challenge du provisionnement : quelles clauses
-                                portent l'écart ? (inventaire courant)
+    3. chute_par_type_compte  — challenge du provisionnement : quels types de
+                                compte portent l'écart ? (inventaire courant)
     4. chute_par_consigne     — l'écart de provision selon la consigne de la revue
     5. conformite_consignes   — les consignes de la revue sont-elles appliquées ?
     6. anomalies_cpt_only     — les anomalies résiduelles : volume, PM, saisonnalité
@@ -39,7 +39,7 @@ from pyspark.sql import DataFrame
 
 from core.synthese.kpi_export import compute_synthese, kas_totaux
 from core.metrics import (
-    chute_par_clause, chute_par_anciennete, anomalies_cpt_only,
+    chute_par_type_compte, chute_par_anciennete, anomalies_cpt_only,
     orphelins_par_clause, output_dir, _to_local,
     EXERCICE_INV, _annee_inventaire,
 )
@@ -185,14 +185,14 @@ def graph_couverture_mrm(d: dict):
 # 3. TAUX DE CHUTE PAR CLAUSE (challenge du provisionnement)
 # ============================================================================
 
-def graph_chute_par_clause(pdf_clauses, d: dict):
-    """Quelles clauses portent l'écart de provisionnement ?
+def graph_chute_par_type_compte(pdf_types, d: dict):
+    """Quels types de compte portent l'écart de provisionnement ?
 
-    pdf_clauses = metrics.chute_par_clause(df_result, top=N), ventilée par
+    pdf_types = metrics.chute_par_type_compte(df_result), ventilée par
     EXERCICE. Barres = bloc « Inventaire courant » (les stats globales) ;
     les récupérés N+1 restent une analyse séparée (bloc dédié de la table)."""
-    pdf = pdf_clauses[pdf_clauses["EXERCICE"] == EXERCICE_INV][::-1]
-    labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_COMPTE"])]
+    pdf = pdf_types[pdf_types["EXERCICE"] == EXERCICE_INV][::-1]
+    labels = list(pdf["TYPE_COMPTE"].fillna("Type non renseigné"))
     colors = [C_SIENNE if v > 0 else C_OCEAN for v in pdf["TAUX_CHUTE_PCT"]]
 
     h = 0.6 * len(pdf) + 3.2
@@ -214,9 +214,9 @@ def graph_chute_par_clause(pdf_clauses, d: dict):
     _style(ax, xlabel="Taux de chute (%) — positif = sous-provisionné (risque), négatif = sur-provisionné")
     _title(
         fig,
-        f"Provisionnement par clause : taux de chute {_pct(d['taux_chute_inventaire'])} "
+        f"Provisionnement par type de compte : taux de chute {_pct(d['taux_chute_inventaire'])} "
         f"(écart {_meur(d['metrics_pm_ecart'])})",
-        f"Top {len(pdf)} clauses par PM MRM — matchés de l'inventaire courant, hors "
+        f"{len(pdf)} type(s) de compte par PM MRM — matchés de l'inventaire courant, hors "
         f"« à supprimer » / statut NON ; N+1 : {_pct(d['taux_chute_n1'])} (analyse séparée)",
     )
     fig.subplots_adjust(top=max(0.80, 1 - 1.3 / h), bottom=1.1 / h, left=0.18, right=0.97)
@@ -542,10 +542,12 @@ def graph_chute_par_anciennete(pdf_anc, d: dict):
 # ============================================================================
 
 def graph_orphelins_par_compte(pdf_orph, d: dict, top: int = 12):
-    """Quel compte PB concentre le plus d'orphelins ? (à investiguer avec le
-    souscripteur). pdf_orph = metrics.orphelins_par_clause(df_result)."""
+    """Quel compte concentre le plus d'orphelins ? (à investiguer avec le
+    souscripteur). pdf_orph = metrics.orphelins_par_clause(df_result) — table de
+    détail : seuls les comptes portant une clause y figurent, les poids se
+    lisent en part de TOUS les orphelins."""
     if pdf_orph.empty:
-        return _empty_fig("Orphelins par compte PB : aucun orphelin")
+        return _empty_fig("Orphelins par compte : aucun orphelin porteur de clause")
     pdf = pdf_orph.head(top)[::-1]                       # plus gros volume en haut
     labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_COMPTE"])]
     colors = [C_ROUGE if r == 1 else C_OCEAN for r in pdf["RANG"]]
@@ -563,7 +565,7 @@ def graph_orphelins_par_compte(pdf_orph, d: dict, top: int = 12):
     top1 = pdf_orph.iloc[0]
     _title(
         fig,
-        f"Orphelins par compte PB : le compte {top1['CLAUSE']} en concentre "
+        f"Orphelins par compte : le compte {top1['CLAUSE']} en concentre "
         f"{_n(top1['NB_DOSSIERS'])} ({_pct(top1['POIDS_NB_PCT'])})",
         f"Compte préposé le plus représentatif (RANG 1, en rouge) à investiguer "
         f"avec le souscripteur — {_n(d['def_nb'])} orphelins au total ({_meur(d['def_pm'])})",
@@ -599,7 +601,7 @@ def restituer_graphiques(
     figs = {
         "1_compte_justification"   : graph_compte_justification(d),
         "2_couverture_mrm"         : graph_couverture_mrm(d),
-        "3_chute_par_clause"       : graph_chute_par_clause(chute_par_clause(df_result, top=top), d),
+        "3_chute_par_type_compte"  : graph_chute_par_type_compte(chute_par_type_compte(df_result), d),
         "4_chute_par_consigne"     : graph_chute_par_consigne(d),
         "5_conformite_consignes"   : graph_conformite_consignes(d),
         "6_anomalies_cpt_only"     : graph_anomalies_cpt_only(anomalies_cpt_only(df_result), d),

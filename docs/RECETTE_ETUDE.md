@@ -3,7 +3,7 @@
 > Ce document décrit **comment l'étude est fabriquée**, de la donnée brute à la
 > restitution Power BI : les ingrédients (sources), la préparation (nettoyage,
 > clés), la cuisson (waterfall de matching + récupérations), le dressage
-> (synthèse, 21 tables, 11 graphiques) et les garde-fous (contrôles de
+> (synthèse, 22 tables, 11 graphiques) et les garde-fous (contrôles de
 > cohérence). Chaque étape renvoie au module qui la porte.
 >
 > 📐 **Le contrat formel des métriques** (formules, univers, limites) →
@@ -28,7 +28,7 @@ CPT (table Lab)          MRM (CSV ou Excel sur DBFS)
       │                     │        │
       └────────┬────────────┘        │ (réservé au repêchage)
                ▼                     │
-      matching_waterfall             │           ← §4 cascade (13 étapes)
+      matching_waterfall             │           ← §4 cascade (14 étapes)
                │                     │
    récupération N+1 (CPT_LATE)       │           ← §5.1 déclarations tardives
                │                     │
@@ -40,7 +40,7 @@ CPT (table Lab)          MRM (CSV ou Excel sur DBFS)
                │
       ┌────────┼──────────────┐
       ▼        ▼              ▼
-  synthèse  21 tables     11 graphiques          ← §7 restitution
+  synthèse  22 tables     11 graphiques          ← §7 restitution
   console   métriques     (titres-messages)
             (Delta/Excel/CSV/Parquet/JSON)
                │
@@ -178,7 +178,7 @@ optionnel, puis **anti-join** — les lignes matchées sortent, les restantes
 descendent à l'étape suivante. Chaque étape est matérialisée (checkpoint
 DBFS) : la lignée Spark reste plate, le run survit à l'autoscaling.
 
-Les 13 étapes, **dans l'ordre** :
+Les 14 étapes, **dans l’ordre** :
 
 | # | Étape | `TYPE_RECONCILIATION` | Clé | Condition supplémentaire |
 |---|---|---|---|---|
@@ -186,20 +186,29 @@ Les 13 étapes, **dans l'ordre** :
 | 2 | Fenêtre ±14 j | `MATCH_WINDOW` | `key_no_date` | \|Δ survenance\| ≤ 14 j |
 | 3 | Tronquée exacte | `MATCH_TRONC` | `key_strict_tronc` | — |
 | 4 | Tronquée + fenêtre | `MATCH_TRONC_WINDOW` | `key_no_date_tronc` | \|Δ survenance\| ≤ 14 j |
-| — | **Filtrage consignes** | `MRM_DELETE` écarté | — | consigne « PM MRM à supprimer » (`categorize_mrm_conclusion`) |
 | 5 | Passage IT → IP | `MATCH_IP` | `key_no_garantie` | \|garantie CPT − MRM\| == 4 (60 → 64) |
 | 6 | Rechute IT | `MATCH_RECHUTE` | `key_no_date` | même garantie, 0 < \|Δ\| ≤ 30 j |
 | 7 | Rechute (tronquée) | `MATCH_RECHUTE_TRONC` | `key_no_date_tronc` | idem |
 | 8–11 | Clé clause (secours) | `MATCH_CLAUSE[_WINDOW/_TRONC/_TRONC_WINDOW]` | `key_clause_*` | mêmes variantes que 1–4 |
-| 12 | Orphelins compte | `CPT_ONLY` | résiduel CPT | — |
-| 13 | Orphelins revue | `MRM_MISSING` | résiduel MRM | — |
+| 12 | **Suppression conforme** | `MRM_DELETE` | résiduel MRM « à supprimer » | consigne « PM MRM à supprimer » (`categorize_mrm_conclusion`) |
+| 13 | Orphelins compte | `CPT_ONLY` | résiduel CPT | — |
+| 14 | Orphelins revue | `MRM_MISSING` | résiduel MRM | — |
 
 Points de recette :
 
-- Le **filtrage `MRM_DELETE` arrive APRÈS le pré-filtre** (étapes 1–4) : une
-  « à supprimer » retrouvée au compte est un **match** (suppression non
-  suivie, `ENCORE_AU_COMPTE`) ; seules les DELETE **non matchées** sont
-  écartées en `MRM_DELETE` (suppression conforme).
+- **Tout le MRM traverse TOUTES les étapes de matching**, « à supprimer »
+  compris. `MRM_DELETE` est un **état terminal**, étiqueté au même niveau que
+  les orphelins (étape 12) : le dossier n'a été retrouvé par **aucune** clé,
+  donc il a bien disparu du compte — la consigne est suivie. Une « à
+  supprimer » retrouvée reste un **match** (`ENCORE_AU_COMPTE`, suppression non
+  suivie).
+- **Pourquoi à la fin.** Le verdict DELETE se juge sur la présence au compte :
+  il n'est comparable aux autres consignes que si le dossier a été cherché avec
+  la **même cascade**. Écarter les DELETE plus tôt les privait des clés de
+  secours (IP, rechute, clause) et produisait deux erreurs : un dossier toujours
+  au compte mais atteignable seulement par une clé lâche passait pour
+  « supprimé » (faux conforme), et sa ligne CPT, privée de contrepartie,
+  remontait en `CPT_ONLY` — une **fausse anomalie** envoyée à l'investigation.
 - L'étape IP valide le rapprochement par l'**offset de garantie** exactement
   égal à 4 (60 = IT → 64 = IP) : sinon faux positif, le dossier reste orphelin.
 - Regroupement pour la restitution (`config/params.py`) : **principale**
@@ -284,19 +293,27 @@ aucune grandeur n'est recalculée deux fois, donc aucune ne peut diverger :
    statut NON — dans le **vocabulaire client à deux couches** (*retrouvé /
    non retrouvé* = le fait ; *conforme / encore au compte* = le verdict, cf.
    [`METRIQUES.md`](METRIQUES.md) §0).
-2. **21 tables métriques** (`core/metrics/`, contrat complet →
+2. **22 tables métriques** (`core/metrics/`, contrat complet →
    [`METRIQUES.md`](METRIQUES.md) §6) : `synthese` (tous les KPI en 1 ligne /
    run, historisable), `bilan_cas`, `taux_chute`, `consignes`,
-   `consignes_par_clause` (le tableau de bord TYPE_COMPTE × CLAUSE ×
-   CONSIGNE), ventilations par clause / ancienneté / garantie, analyses
-   d'orphelins, `controles_coherence`… Sérialisées en **Excel / CSV /
-   Parquet / JSON / Delta** ; en Delta, chaque table est **historisée par
-   `DATE_INVENTAIRE`** (rejouer un inventaire remplace ses lignes, 2023 et
-   2024 coexistent).
+   `consignes_par_type_compte` (le tableau de bord TYPE_COMPTE × CONSIGNE),
+   ventilations par type de compte / ancienneté / garantie, analyses
+   d'orphelins, `controles_coherence`… Écrites **en Delta dans le metastore
+   Hive** — la sortie de **référence**, celle que Power BI interroge : chaque
+   table est **historisée par `DATE_INVENTAIRE × PERIMETRE`** (rejouer un
+   inventaire remplace exactement ses lignes, 2023 et 2024 coexistent). Les
+   fichiers **Excel / parquet / CSV** sur DBFS sont la sortie **secondaire**
+   (import Power BI sans Warehouse, dépannage, partage). Le détail dossier par
+   dossier part dans `resultat_backtest`, même historisation.
 3. **11 graphiques-messages** (`core/metrics/viz.py`) : le titre porte la
    conclusion (justification du compte, couverture de la revue, chute par
-   clause / consigne / ancienneté, conformité, anomalies, orphelins par
-   clause). Affichés en notebook + PNG sur DBFS.
+   type de compte / consigne / ancienneté, conformité, anomalies, orphelins).
+   Affichés en notebook + PNG sur DBFS.
+
+> **Qui écrit ?** `main.run` (donc le Job) — piloté par `EXPORT_ANALYSES`,
+> `EXPORT_FORMATS`, `EXPORT_DELTA_SCHEMA` de `config/profile.py`.
+> `main.build_df_result` n'écrit **jamais** rien : c'est le cœur métier seul,
+> ce qu'utilise le smoke test.
 
 ---
 
@@ -308,7 +325,7 @@ aucune grandeur n'est recalculée deux fois, donc aucune ne peut diverger :
 | `classified_rows == total_rows` | `compute_synthese` | toute ligne tombe dans exactement une catégorie connue | signale un `TYPE_RECONCILIATION` inattendu |
 | `chute_coherente` | synthèse | chute globale == Σ consignes KAS + sans consigne (même univers) | WARNING sinon |
 | `recup_non_pm_mrm_ok` | synthèse | hypothèse « statut NON ⇒ PM MRM = 0 » sur les repêchés | WARNING sinon (l'exclusion ne serait plus neutre) |
-| `controles_coherence` | export métriques | recoupements inter-tables : Σ blocs par clause / ancienneté == base chute, Σ ventilations d'orphelins == `CPT_ONLY`, totaux de `bilan_cas`… | table exportée ; **assert bloquant** dans le run de production |
+| `controles_coherence` | export métriques | recoupements inter-tables : Σ blocs par type de compte / ancienneté == base chute, Σ ventilations d'orphelins == `CPT_ONLY`, totaux de `bilan_cas`… | table exportée ; **assert bloquant** dans le run de production |
 
 Le run de production (`notebooks/itip_fiab_powerbi.py`) est **bloquant** sur
 ces contrôles : un Job vert = des onglets Power BI qui racontent **une seule
@@ -323,10 +340,10 @@ le cœur est `build_df_result` / `run` dans `main.py`.
 
 | Contexte | Entrée | Particularité |
 |---|---|---|
-| **Production** (Databricks Job) | `notebooks/itip_fiab_powerbi` | widgets / base parameters (`annee_inventaire`, `fichier_mrm_n1`, `types_compte`, `delta_schema`…) ; contrôles **bloquants** ; export des 21 tables + `resultat_backtest` |
-| Run interactif | `notebooks/itip_fiab_main` | widgets par année (2023 / 2024), métriques table par table |
+| **Production** (Databricks Job) | `notebooks/itip_fiab_powerbi` | widgets / base parameters (`annee_inventaire`, `fichier_mrm_n1`, `types_compte`, `delta_schema`…) ; contrôles **bloquants** ; export des 22 tables + `resultat_backtest` |
+| Run interactif | `notebooks/itip_fiab_main` | widgets par année (2023 / 2024), métriques table par table ; **la cellule d'export écrit dans le metastore** (viser un schéma de test pour expérimenter) |
 | Comparaison | `notebooks/itip_fiab_comparaison` | 2023 vs 2024 côte à côte (via `configurer_run`, plusieurs inventaires dans une session) |
-| Smoke test | `notebooks/itip_fiab_smoke` | tout le pipeline après mise à jour du code, **sans export** |
+| Smoke test | `notebooks/itip_fiab_smoke` | tout le pipeline après mise à jour du code via `build_df_result`, **aucune écriture** (ni Delta, ni fichier, ni PNG) |
 | Diagnostic clé | `notebooks/itip_fiab_key_audit` | solidité de la clé de matching (read-only) |
 
 Surcharges d'environnement (conf cluster / Job, sans toucher au code) :

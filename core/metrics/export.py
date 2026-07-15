@@ -25,10 +25,10 @@ from core.metrics.scalaires import (
     chute_par_consigne, pm_par_consigne, conformite_consignes,
 )
 from core.metrics.agregats import (
-    chute_par_clause, chute_par_anciennete, anomalies_cpt_only,
-    consignes_par_clause,
-    orphelins_par_clause, orphelins_par_garantie, orphelins_par_anciennete,
-    orphelins_cles_nulles,
+    chute_par_type_compte, chute_par_anciennete, anomalies_cpt_only,
+    consignes_par_type_compte,
+    orphelins_par_type_compte, orphelins_par_clause, orphelins_par_garantie,
+    orphelins_par_anciennete, orphelins_cles_nulles,
 )
 from core.metrics.coherence import controles_coherence
 
@@ -51,17 +51,18 @@ def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) 
         "taux_chute"           : taux_chute(d),
         "chute_par_exercice"   : chute_par_exercice(d),
         "suivi_n1"             : suivi_n1(d),
-        "consignes"            : consignes(d),
-        "consignes_par_clause" : consignes_par_clause(df_result),
+        "consignes"                : consignes(d),
+        "consignes_par_type_compte": consignes_par_type_compte(df_result),
         "compte_justification" : compte_justification(d),
         "couverture_mrm"       : couverture_mrm(d),
-        "chute_par_clause"     : chute_par_clause(df_result),
+        "chute_par_type_compte": chute_par_type_compte(df_result),
         "chute_par_anciennete" : chute_par_anciennete(df_result, annee),
         "chute_par_consigne"   : chute_par_consigne(d),
         "conformite_consignes" : conformite_consignes(d),
         "anomalies_cpt_only"   : anomalies_cpt_only(df_result),
         # Investigation des orphelins CPT_ONLY (compte préposé).
-        "orphelins_par_clause"    : orphelins_par_clause(df_result),
+        "orphelins_par_type_compte": orphelins_par_type_compte(df_result),
+        "orphelins_par_clause"     : orphelins_par_clause(df_result),
         "orphelins_par_garantie"  : orphelins_par_garantie(df_result),
         "orphelins_par_anciennete": orphelins_par_anciennete(df_result, annee),
         "orphelins_cles_nulles"   : orphelins_cles_nulles(df_result),

@@ -6,11 +6,12 @@ FAÇADE du paquet : ré-exporte l'API des modules thématiques, pour que
 (main, notebooks, viz, tests) sans connaître le découpage interne :
 
     base.py       — helpers partagés (exercices, blocs d'ancienneté,
-                    dérivation CLAUSE, univers de chute, chemins DBFS)
+                    dimensions CLAUSE / TYPE_COMPTE, univers de chute,
+                    chemins DBFS)
     scalaires.py  — les métriques depuis `d` (dict de compute_synthese) :
                     synthese, bilan_cas, taux_chute, consignes, …
-    agregats.py   — les ré-agrégations Spark de df_result : chute par
-                    clause / ancienneté, anomalies, orphelins CPT_ONLY
+    agregats.py   — les ré-agrégations Spark de df_result : chute par type de
+                    compte / ancienneté, anomalies, orphelins CPT_ONLY
     coherence.py  — controles_coherence (recoupements inter-tables)
     export.py     — toutes_metriques + export_metriques (multi-format)
     viz.py        — les 11 graphiques matplotlib (import séparé)
@@ -22,7 +23,7 @@ restitution. Contrat des métriques : docs/METRIQUES.md.
 Correspondance avec les 11 graphiques (core.metrics.viz) :
     1. compte_justification   → compte_justification(d)
     2. couverture_mrm         → couverture_mrm(d)
-    3. chute_par_clause       → chute_par_clause(df_result)  [× exercice]
+    3. chute_par_type_compte  → chute_par_type_compte(df_result)  [× exercice]
     4. chute_par_consigne     → chute_par_consigne(d)
     5. conformite_consignes   → conformite_consignes(d)
     6. anomalies_cpt_only     → anomalies_cpt_only(df_result)
@@ -32,12 +33,18 @@ Correspondance avec les 11 graphiques (core.metrics.viz) :
    10. chute_par_anciennete   → chute_par_anciennete(df_result, annee)  [× exercice]
    11. orphelins_par_compte   → orphelins_par_clause(df_result)
 
+AXE D'ANALYSE : les métriques se ventilent par TYPE_COMPTE (PB / HPB / …), le
+périmètre métier. La CLAUSE n'est PAS un axe : c'est un substitut du RPP dans
+la clé de matching, et tous les types de compte n'en portent pas. Elle ne
+subsiste que dans `orphelins_par_clause`, table de DÉTAIL d'investigation
+(sous-ensemble : uniquement les dossiers porteurs d'une clause).
+
 Usage (main / notebook) :
     from core import metrics
 
     d = print_synthese(df_result)              # la passe Spark
     metrics.bilan_cas(d)                       # le bilan cas par cas
-    metrics.chute_par_clause(df_result)        # ré-agrégation Spark → pandas
+    metrics.chute_par_type_compte(df_result)   # ré-agrégation Spark → pandas
     metrics.export_metriques(df_result, d)     # tout sur DBFS
 """
 
@@ -69,17 +76,18 @@ from core.metrics.scalaires import (
     conformite_consignes,
 )
 from core.metrics.agregats import (
-    chute_par_clause,
+    chute_par_type_compte,
     chute_par_anciennete,
     anomalies_cpt_only,
-    consignes_par_clause,
+    consignes_par_type_compte,
+    orphelins_par_type_compte,
     orphelins_par_clause,
     orphelins_par_garantie,
     orphelins_par_anciennete,
     orphelins_cles_nulles,
-    _finalise_chute_par_clause,
+    _finalise_chute_par_type_compte,
     _finalise_chute_par_anciennete,
-    _finalise_consignes_par_clause,
+    _finalise_consignes_par_type_compte,
     _finalise_orphelins,
 )
 from core.metrics.coherence import controles_coherence

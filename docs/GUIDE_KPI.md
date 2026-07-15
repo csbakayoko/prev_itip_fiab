@@ -58,9 +58,9 @@ l'écart entre ce qui est provisionné et ce qui devrait l'être. C'est ce qui
 justifie un ajustement de provision.
 
 **Limites.**
-- Mesure une **moyenne pondérée** : un taux de 10 % peut cacher des clauses très
-  sous-provisionnées et d'autres sur-provisionnées qui se compensent → toujours
-  lire en regard de `chute_par_clause` / `chute_par_consigne`.
+- Mesure une **moyenne pondérée** : un taux de 10 % peut cacher des segments très
+  sous-provisionnés et d'autres sur-provisionnés qui se compensent → toujours
+  lire en regard de `chute_par_type_compte` / `chute_par_consigne`.
 - Ne porte que sur les **retrouvés** : un dossier non retrouvé (`MRM_MISSING`) ne
   pèse pas dans la chute (il pèse dans la *couverture*).
 - Exclut « à supprimer » (cf. §11) et statut NON (cf. §13, piège 6).
@@ -93,30 +93,38 @@ conformité de la revue courante. D'où deux blocs `EXERCICE` distincts partout.
 
 ---
 
-## 3. Taux de chute par consigne / par clause / par ancienneté
+## 3. Taux de chute par consigne / par type de compte / par ancienneté
 
 **Définition.** Le même taux de chute, **ventilé** par consigne (KEEP/ADD/STUDY),
-par clause × exercice, ou par **ancienneté** × exercice (année de survenance
-relative à l'inventaire : **N / N-1 / N-2 et antérieur** — bloc `Indéterminée`
-si la survenance est nulle ou l'inventaire non daté).
+par **type de compte** × exercice (PB / HPB / … — le périmètre métier), ou par
+**ancienneté** × exercice (année de survenance relative à l'inventaire :
+**N / N-1 / N-2 et antérieur** — bloc `Indéterminée` si la survenance est nulle
+ou l'inventaire non daté).
 
 **Exemple fil rouge (consigne « à conserver »).** base 50 matchés, PM MRM
 600 000, PM CPT 540 000 → chute = 60 000 / 600 000 = **10 %**.
 
 **À dire à l'oral.** « Le sous-provisionnement vient surtout de la consigne *à
-conserver* / de la clause X / des survenances N-1 — c'est là qu'il faut ajuster. »
+conserver* / du périmètre PB / des survenances N-1 — c'est là qu'il faut
+ajuster. »
 
-**Intérêt.** Localise l'écart : **quelles consignes / quelles clauses / quelles
+**Intérêt.** Localise l'écart : **quelles consignes / quels périmètres / quelles
 années de survenance portent le risque**. C'est l'angle « action » de l'étude.
 Le découpage par ancienneté est **métier** : la méthode d'inventaire diffère
 selon l'année (revue tête par tête sur N-1) — un écart concentré sur un bloc
 interroge la méthode de ce bloc, pas la revue entière.
 
-**Cohérence garantie.** Dans chaque exercice, **Σ des lignes = le taux global**
-(Σécarts / ΣPM par clause redonne `taux_chute_inventaire`). Vérifié à chaque run
-par `controles_coherence`.
+**Pourquoi pas par clause ?** La clause n'est pas un axe d'analyse : elle sert
+à remplacer un RPP nul dans la clé de matching, et tous les types de compte
+n'en portent pas (un HPB n'en a pas). Ventiler par clause casserait à l'entrée
+du HPB dans le périmètre. Pour cibler un contrat précis, il reste la table de
+détail `orphelins_par_clause`.
 
-**Limite.** Une clause à faible PM peut afficher un taux spectaculaire sans enjeu
+**Cohérence garantie.** Dans chaque exercice, **Σ des lignes = le taux global**
+(Σécarts / ΣPM par type de compte redonne `taux_chute_inventaire`). Vérifié à
+chaque run par `controles_coherence`.
+
+**Limite.** Une ligne à faible PM peut afficher un taux spectaculaire sans enjeu
 financier → toujours lire le **poids PM** à côté du taux.
 
 ---
@@ -241,7 +249,7 @@ dossier conforme peut être fortement sous-provisionné (c'est la chute qui le d
 Les deux lectures (conformité vs provisionnement) sont **complémentaires**, jamais
 interchangeables.
 
-**Déclinaison opérationnelle.** La table `consignes_par_clause` applique la même
+**Déclinaison opérationnelle.** La table `consignes_par_type_compte` applique la même
 règle ventilée par **TYPE_COMPTE × CLAUSE × consigne** (nb, suivies / non
 suivies, PM) : c'est le « tableau de bord des consignes » Power BI — les cartes
 par périmètre (PB / autres) et le tableau filtrable s'en déduisent par simple
@@ -298,7 +306,8 @@ pas des KPI :
 
 | Table | Découpage | Ce qu'elle révèle |
 |---|---|---|
-| `orphelins_par_clause` | clause (compte PB) × type, avec **RANG** | RANG 1 = le compte le plus représentatif → **à investiguer avec le souscripteur** (graphe 11) |
+| `orphelins_par_type_compte` | type de compte (PB / HPB / …), avec **RANG** | la ventilation complète : c'est ici que se lit le total des orphelins |
+| `orphelins_par_clause` | clause × type, avec **RANG** — **détail** | RANG 1 = le compte le plus représentatif → **à investiguer avec le souscripteur** (graphe 11). Ne couvre que les comptes porteurs d'une clause : son total est inférieur au total des orphelins, ne pas s'en servir pour un cumul |
 | `orphelins_par_garantie` | IT (60) / IP (64) / autre / non renseignée | une garantie sur-représentée oriente la recherche de cause |
 | `orphelins_par_anciennete` | N / N-1 / N-2 et antérieur | stock ancien (récurrent) vs flux récent (ponctuel) |
 | `orphelins_cles_nulles` | % de nullité de chaque composante de la clé (RPP, naissance, survenance, garantie, nom, clause) | une composante souvent vide **explique mécaniquement l'orphelinage** (pas de rapprochement possible) |

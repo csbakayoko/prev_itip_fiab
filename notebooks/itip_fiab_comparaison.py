@@ -7,11 +7,16 @@
 # MAGIC - les **KPI de tête** (taux de chute, couverture, conformité, récupération) ;
 # MAGIC - le **taux de chute par ancienneté** (N / N-1 / N-2+) — la méthode
 # MAGIC   d'inventaire diffère selon l'année de survenance ;
-# MAGIC - l'**investigation des orphelins** (par compte PB, garantie, nullité de clé).
+# MAGIC - l'**investigation des orphelins** (par type de compte, par compte,
+# MAGIC   garantie, nullité de clé).
 # MAGIC
 # MAGIC Mécanique : `core.runtime.configurer_run` surcharge, pour chaque année, la
 # MAGIC date d'inventaire, la vision CPT et les fichiers MRM (valeurs liées par
 # MAGIC valeur dans les modules) ; `main.build_df_result` construit `df_result`.
+# MAGIC
+# MAGIC **Aucune écriture** : ce notebook passe par `build_df_result` et calcule les
+# MAGIC tables en mémoire. Il n'appelle ni `main.run` ni `export_metriques` — rien
+# MAGIC ne part dans le metastore.
 # MAGIC
 # MAGIC ⚠ Avant de lancer : **renseigner les chemins MRM 2024** (widgets) — la vision
 # MAGIC 2024 est CC2024.
@@ -138,7 +143,21 @@ display(pivot_taux.reset_index())
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Compte PB le plus représentatif (RANG 1) par année
+# MAGIC ### Orphelins par type de compte (ventilation complète) par année
+
+# COMMAND ----------
+
+def _orph_type(annee: str) -> pd.DataFrame:
+    t = resultats[annee]["tables"]["orphelins_par_type_compte"].copy()
+    t.insert(0, "ANNEE", annee)
+    return t
+
+display(pd.concat([_orph_type(an) for an in ANNEES], ignore_index=True))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Compte le plus représentatif (RANG 1) par année — détail par clause
 
 # COMMAND ----------
 

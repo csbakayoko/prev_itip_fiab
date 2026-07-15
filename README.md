@@ -3,7 +3,7 @@
 Backtesting entre la **revue d'inventaire MRM** (fichier Excel ou CSV déposé
 sur DBFS) et le **compte CPT** (table du Lab Databricks) : contrôles qualité,
 matching en cascade, calcul des KPI (chute, couverture, conformité), puis
-restitution — 21 tables métriques (Delta / Excel / CSV / Parquet / JSON)
+restitution — 22 tables métriques (Delta / Excel / CSV / Parquet / JSON)
 consommées par Power BI, et 11 graphiques.
 
 ## Chaîne
@@ -12,7 +12,8 @@ consommées par Power BI, et 11 graphiques.
 fichier MRM déposé sur DBFS + tables Lab
     → Databricks Job
     → contrôles qualité → mapping → matching → KPI
-    → tables Delta + exports (Excel / CSV / JSON)
+    → tables Delta du metastore Hive        (sortie de RÉFÉRENCE)
+      + fichiers DBFS (Excel / parquet / CSV)  (sortie secondaire)
     → Power BI (SQL Warehouse)
 ```
 
@@ -30,7 +31,7 @@ l'un ni l'autre n'est actif aujourd'hui.
 | `core/prep/` | Contrôles qualité, nettoyage, dédoublonnage, clés de matching |
 | `core/match/` | Waterfall de matching, récupérations (N+1, statut NON), audit de clé |
 | `core/synthese/` | Synthèse : passe Spark unique (`compute_synthese`), contrat typé, rendu console |
-| `core/metrics/` | Les 21 tables métriques + contrôles de cohérence inter-tables ; `viz.py` = 11 graphiques |
+| `core/metrics/` | Les 22 tables métriques + contrôles de cohérence inter-tables ; `viz.py` = 11 graphiques |
 | `notebooks/` | Orchestration uniquement — aucune logique métier |
 | `tests/` | Tests unitaires (pytest) — lancés en CI |
 | `docs/` | `RECETTE_ETUDE.md` (fabrication de l'étude de bout en bout) · `METRIQUES.md` (contrat formel des métriques) · `GUIDE_KPI.md` (interprétation, exemples chiffrés) · `POWERBI_MAQUETTE.md` (maquette du rapport, branchement SQL Warehouse) |
@@ -39,7 +40,7 @@ l'un ni l'autre n'est actif aujourd'hui.
 
 | Notebook | Usage |
 |---|---|
-| `itip_fiab_powerbi` | **Production** : pipeline → contrôles bloquants → export des 21 tables (Delta + fichiers) |
+| `itip_fiab_powerbi` | **Production** : pipeline → contrôles bloquants → export des 22 tables (Delta + fichiers) |
 | `itip_fiab_main` | Run interactif par année d'inventaire (widgets 2023/2024), métriques affichées table par table |
 | `itip_fiab_comparaison` | Comparaison côte à côte des inventaires 2023 vs 2024 |
 | `itip_fiab_smoke` | Smoke test après mise à jour du code : tout le pipeline, **sans export** |
@@ -60,15 +61,27 @@ Un run paramétré (widgets notebook, paramètres de Job) passe par
 `core.runtime.configurer_run`, qui surcharge date, vision et fichiers MRM —
 et permet aussi de rejouer plusieurs inventaires dans une même session.
 
-**Qui écrit quoi — `main.py` n'écrit rien par défaut.** L'écriture est une
-décision du Job, pas du code : `EXPORT_ANALYSES = False` et `EXPORT_FORMATS`
-sans `delta` (`config/profile.py`) font qu'un `spark-submit main.py` calcule
-le pipeline et affiche la synthèse **sans produire ni fichier ni table Hive**.
-C'est volontaire — aucun run local ou de debug ne peut toucher au metastore.
-Seul le notebook `itip_fiab_powerbi` (le Job) écrit : il ajoute `delta` aux
-formats dès que le widget `delta_schema` est renseigné. Pour un export depuis
-`main.py`, passer explicitement `formats=` / `delta_schema=` à
-`export_metriques` plutôt que de changer les défauts.
+**Qui écrit quoi — le Hive est la sortie de référence.** `EXPORT_ANALYSES = True`
+et `EXPORT_FORMATS = ("delta", "excel", "parquet", "csv")` (`config/profile.py`) :
+`main.run` — donc le Job comme un `spark-submit main.py` — écrit les 22 tables
+métriques **et** le détail `resultat_backtest` dans `EXPORT_DELTA_SCHEMA`
+(défaut `hive_metastore.itip_fiab`), puis les fichiers DBFS et les PNG en
+sortie **secondaire**.
+
+| Je veux… | Comment |
+|---|---|
+| Le cœur métier sans aucune écriture | appeler `main.build_df_result` (jamais `run`) — c'est ce que fait `itip_fiab_smoke` |
+| Couper le Hive, garder les fichiers | retirer `"delta"` de `EXPORT_FORMATS`, ou `ITIP_DELTA_SCHEMA=""`, ou widget `delta_schema` vide |
+| Écrire ailleurs (test) | `ITIP_DELTA_SCHEMA=hive_metastore.itip_fiab_test`, ou le widget du Job |
+| Ne rien écrire du tout | `EXPORT_ANALYSES = False` et `EXPORT_GRAPHS = False` |
+
+⚠ **L'écriture Delta remplace la partition du run** (`replaceWhere` sur
+`DATE_INVENTAIRE × PERIMETRE`). Rejouer une année remplace exactement ses
+lignes — mais un run lancé avec des sources modifiées sous une date officielle
+écrase la partition officielle. Pour expérimenter, viser un schéma de test.
+L'export Delta **exige** une `DATE_INVENTAIRE` résoluble (`dd/MM/yyyy`) : c'est
+la clé d'historisation, une date `"auto"` / `"n/d"` fait échouer le run plutôt
+que d'historiser à l'aveugle.
 
 **Source MRM : dépôt manuel (SharePoint désactivé).** Le fichier d'inventaire
 MRM est déposé à la main sur DBFS, puis référencé par son chemin `dbfs:/` dans
@@ -100,15 +113,22 @@ paramètres sont des widgets, surchargeables en « base parameters » du Job :
 Le run est **bloquant** sur les contrôles (lignes toutes classées, taux de
 chute cohérent, recoupements inter-tables) : un Job vert = des onglets
 Power BI fiables. En sortie : les tables métriques (`<schema>.metrique_*`,
-dont `metrique_consignes_par_clause` — le tableau de bord par type de compte
-× clause) et le détail dossier par dossier (`<schema>.resultat_backtest`).
+dont `metrique_consignes_par_type_compte` — le tableau de bord des consignes)
+et le détail dossier par dossier (`<schema>.resultat_backtest`).
 Les noms de tables sont **stables** (le périmètre est la colonne `PERIMETRE`,
 pas un suffixe de nom) et **toutes les tables Delta sont historisées par run**
 (`replaceWhere` sur `DATE_INVENTAIRE × PERIMETRE` : rejouer un run remplace
 ses lignes, 2023 et 2024 coexistent) ; colonnes de run `DATE_INVENTAIRE` /
-`PERIMETRE` / `LIBELLE_RUN`, lignes ventilées avec `TYPE_COMPTE` (PB/HPB/…)
-et `CLAUSE` (nullable). Power BI se connecte au SQL Warehouse, ou importe le
-classeur Excel écrit sous `EXPORT_BASE_PATH`.
+`PERIMETRE` / `LIBELLE_RUN`. Power BI se connecte au SQL Warehouse, ou importe
+le classeur Excel écrit sous `EXPORT_BASE_PATH`.
+
+**Axe d'analyse : `TYPE_COMPTE`, pas la clause.** Les métriques se ventilent
+par type de compte (`PB` / `HPB` / …), le périmètre métier. La clause n'est
+**pas** un axe d'analyse : elle sert uniquement à remplacer un RPP nul dans la
+clé de matching (côté PB), et tous les types de compte n'en portent pas. Elle
+ne subsiste que dans `metrique_orphelins_par_clause`, table de **détail**
+d'investigation qui ne couvre que les dossiers porteurs d'une clause — pour un
+total d'orphelins, utiliser `metrique_orphelins_par_type_compte`.
 
 ## Développement local
 

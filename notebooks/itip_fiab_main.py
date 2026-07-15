@@ -10,7 +10,7 @@
 # MAGIC 3. Synthèse console (rappel)
 # MAGIC 4. **Métriques** : une fonction par indicateur, affichées en table
 # MAGIC    (dont chute par ancienneté + investigation des orphelins)
-# MAGIC 5. **Export** des métriques (CSV / JSON / Parquet) sur DBFS
+# MAGIC 5. **Export** des métriques — tables Delta (référence) + fichiers DBFS
 # MAGIC 6. Graphiques de restitution *(optionnel)*
 # MAGIC
 # MAGIC L'**année d'inventaire** se choisit via le widget en tête (2023 / 2024) ;
@@ -74,8 +74,14 @@ print(f"Run inventaire {annee} :", profil)
 # MAGIC ## 2. Construction de `df_result`
 # MAGIC
 # MAGIC `main.build_df_result` : chargement → matching → récupération N+1 →
-# MAGIC repêchage statut NON → obs tardives IT → tags. Mêmes étapes que `main.run`,
-# MAGIC sans la restitution (pilotée ici cellule par cellule).
+# MAGIC repêchage statut NON → obs tardives IT → tags. Le cœur métier de
+# MAGIC `main.run`, **sans la restitution ni l'export** (pilotés ici cellule par
+# MAGIC cellule) : cette cellule n'écrit rien.
+# MAGIC
+# MAGIC Tout le MRM traverse toutes les étapes de matching, « à supprimer »
+# MAGIC compris : `MRM_DELETE` est un **état terminal** (retrouvé par aucune clé ⇒
+# MAGIC suppression effective), au même niveau que les orphelins. Un « à
+# MAGIC supprimer » retrouvé reste un `MATCH_*` — c'est un « encore au compte ».
 
 # COMMAND ----------
 
@@ -160,13 +166,19 @@ display(metrics.consignes(d))
 # MAGIC %md
 # MAGIC ### Investigation des orphelins (CPT_ONLY, compte préposé)
 # MAGIC
-# MAGIC `orphelins_par_clause` : RANG 1 = compte PB le plus représentatif (à
-# MAGIC investiguer avec le souscripteur). `orphelins_cles_nulles` : composantes de
-# MAGIC la clé nulles/vides (explique pourquoi ces dossiers n'ont pas matché).
+# MAGIC `orphelins_par_type_compte` : la ventilation complète (Σ = tous les
+# MAGIC orphelins). `orphelins_par_clause` : le détail des comptes porteurs d'une
+# MAGIC clause, RANG 1 = le plus représentatif (à investiguer avec le
+# MAGIC souscripteur). `orphelins_cles_nulles` : composantes de la clé
+# MAGIC nulles/vides (explique pourquoi ces dossiers n'ont pas matché).
 
 # COMMAND ----------
 
-display(metrics.orphelins_par_clause(df_result))      # compte PB le plus représentatif (RANG 1)
+display(metrics.orphelins_par_type_compte(df_result))  # ventilation complète (PB / HPB / …)
+
+# COMMAND ----------
+
+display(metrics.orphelins_par_clause(df_result))      # détail : compte le plus représentatif (RANG 1)
 
 # COMMAND ----------
 
@@ -189,7 +201,7 @@ display(metrics.orphelins_cles_nulles(df_result))     # nullité des colonnes de
 
 display(metrics.compte_justification(d))            # graphe 1
 display(metrics.couverture_mrm(d))                  # graphe 2
-display(metrics.chute_par_clause(df_result, top=12))  # graphe 3 — top 12 par bloc EXERCICE
+display(metrics.chute_par_type_compte(df_result))    # graphe 3 — par bloc EXERCICE
 display(metrics.chute_par_consigne(d))              # graphe 4
 display(metrics.conformite_consignes(d))            # graphe 5
 display(metrics.anomalies_cpt_only(df_result))      # graphe 6
@@ -199,15 +211,28 @@ display(metrics.pm_par_consigne(d))                 # graphe 9
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 5. Export des métriques (CSV / JSON / Parquet) sur DBFS
+# MAGIC ## 5. Export des métriques
 # MAGIC
-# MAGIC Dossier `.../<PERIMETRE>/metrics`. Une métrique = 3 fichiers (un par format).
-# MAGIC ⚠ Le nom d'export n'encode PAS l'année : pour historiser 2023 ET 2024 sans
-# MAGIC écrasement, ajuster `CLIENT_NAME` dans `profile.py` par run.
+# MAGIC Sorties pilotées par `config/profile.py` (`EXPORT_FORMATS`,
+# MAGIC `EXPORT_DELTA_SCHEMA`) — les mêmes que le Job : tables Delta du metastore
+# MAGIC en **référence**, fichiers DBFS (`.../<PERIMETRE>/metrics`) en secondaire.
+# MAGIC
+# MAGIC ⚠ **Cette cellule écrit dans le metastore.** L'historisation se fait par
+# MAGIC `DATE_INVENTAIRE × PERIMETRE` : rejouer une année remplace exactement ses
+# MAGIC lignes (2023 et 2024 coexistent), mais un run avec des **widgets modifiés**
+# MAGIC (autre fichier MRM) sous une date officielle **écrase la partition
+# MAGIC officielle**. Pour explorer sans rien écrire, sauter cette cellule, ou
+# MAGIC forcer une cible de test : `delta_schema="hive_metastore.itip_fiab_test"`.
 
 # COMMAND ----------
 
-_ = metrics.export_metriques(df_result, d, formats=("csv", "json", "parquet"))
+from config import EXPORT_DELTA_SCHEMA, EXPORT_FORMATS
+
+_ = metrics.export_metriques(
+    df_result, d,
+    formats      = EXPORT_FORMATS,
+    delta_schema = EXPORT_DELTA_SCHEMA,
+)
 
 # COMMAND ----------
 
