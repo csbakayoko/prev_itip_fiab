@@ -40,21 +40,21 @@ def controles_coherence(tables: Dict[str, pd.DataFrame], d: SyntheseScalars) -> 
     cl  = tables["chute_par_clause"]
     inv = cl[cl["EXERCICE"] == EXERCICE_INV]
     n1  = cl[cl["EXERCICE"] == EXERCICE_N1]
-    ctrl("chute_par_clause inv. : Σ nb = base chute",     d["metrics_nb"],     int(inv["nb_dossiers"].sum()))
-    ctrl("chute_par_clause inv. : Σ PM MRM = base chute", d["metrics_pm_mrm"], float(inv["pm_mrm"].sum()), tol=1.0)
-    ctrl("chute_par_clause inv. : Σ PM CPT = base chute", d["metrics_pm_cpt"], float(inv["pm_cpt"].sum()), tol=1.0)
-    ctrl("chute_par_clause N+1 : Σ nb = base chute N+1",  d["chute_n1_nb"],    int(n1["nb_dossiers"].sum()))
-    ctrl("chute_par_clause N+1 : Σ PM MRM = base N+1",    d["chute_n1_pm_mrm"], float(n1["pm_mrm"].sum()), tol=1.0)
+    ctrl("chute_par_clause inv. : Σ nb = base chute",     d["metrics_nb"],     int(inv["NB_DOSSIERS"].sum()))
+    ctrl("chute_par_clause inv. : Σ PM MRM = base chute", d["metrics_pm_mrm"], float(inv["PM_MRM"].sum()), tol=1.0)
+    ctrl("chute_par_clause inv. : Σ PM CPT = base chute", d["metrics_pm_cpt"], float(inv["PM_CPT"].sum()), tol=1.0)
+    ctrl("chute_par_clause N+1 : Σ nb = base chute N+1",  d["chute_n1_nb"],    int(n1["NB_DOSSIERS"].sum()))
+    ctrl("chute_par_clause N+1 : Σ PM MRM = base N+1",    d["chute_n1_pm_mrm"], float(n1["PM_MRM"].sum()), tol=1.0)
 
     # chute_par_anciennete (ré-agrégation Spark) vs base chute / bloc N+1 de d :
     # même univers que chute_par_clause, découpé par année de survenance.
     anc     = tables["chute_par_anciennete"]
     anc_inv = anc[anc["EXERCICE"] == EXERCICE_INV]
     anc_n1  = anc[anc["EXERCICE"] == EXERCICE_N1]
-    ctrl("chute_par_anciennete inv. : Σ nb = base chute",     d["metrics_nb"],     int(anc_inv["nb_dossiers"].sum()))
-    ctrl("chute_par_anciennete inv. : Σ PM MRM = base chute", d["metrics_pm_mrm"], float(anc_inv["pm_mrm"].sum()), tol=1.0)
-    ctrl("chute_par_anciennete inv. : Σ PM CPT = base chute", d["metrics_pm_cpt"], float(anc_inv["pm_cpt"].sum()), tol=1.0)
-    ctrl("chute_par_anciennete N+1 : Σ nb = base chute N+1",  d["chute_n1_nb"],    int(anc_n1["nb_dossiers"].sum()))
+    ctrl("chute_par_anciennete inv. : Σ nb = base chute",     d["metrics_nb"],     int(anc_inv["NB_DOSSIERS"].sum()))
+    ctrl("chute_par_anciennete inv. : Σ PM MRM = base chute", d["metrics_pm_mrm"], float(anc_inv["PM_MRM"].sum()), tol=1.0)
+    ctrl("chute_par_anciennete inv. : Σ PM CPT = base chute", d["metrics_pm_cpt"], float(anc_inv["PM_CPT"].sum()), tol=1.0)
+    ctrl("chute_par_anciennete N+1 : Σ nb = base chute N+1",  d["chute_n1_nb"],    int(anc_n1["NB_DOSSIERS"].sum()))
 
     # anomalies_cpt_only (ré-agrégation Spark) vs CPT_ONLY de d.
     anom = tables["anomalies_cpt_only"]

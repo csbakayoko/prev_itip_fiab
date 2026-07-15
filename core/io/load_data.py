@@ -9,9 +9,10 @@ Logique de traduction vers les formats natifs :
     CPT : clause = "CPB_<numéro>"  (préfixe encode le type de compte)
     MRM : n_clause_ratta1 = "<numéro>"  +  TYPE_CLAUSE = "PB" pour PB
 
-Le CSV MRM est lu en mode `inferSchema=false` (fix T-02) — toutes les colonnes
-arrivent en string, puis clean_mrm() applique les casts ciblés (to_date sur les
-dates, regexp_replace+cast double sur les montants au format européen "12,34").
+Le MRM est lu en `inferSchema=false` : toutes les colonnes arrivent en string,
+puis clean_mrm() applique les casts ciblés (to_date sur les dates,
+regexp_replace + cast double sur les montants au format européen "12,34").
+Le fichier peut être un CSV ou un .xlsx — le format est déduit de l'extension.
 """
 
 from functools import reduce
@@ -182,15 +183,16 @@ def load_mrm_raw(
     if not mrm_path:
         raise ValueError(f"RUN_PARAMS['{path_key}'] est absent ou vide.")
 
-    # Chemin "sharepoint:/..." → téléchargement Microsoft Graph vers le staging
-    # DBFS (config SHAREPOINT requise). Les chemins dbfs:/ passent tels quels.
+    # Les chemins dbfs:/ passent tels quels (mode actuel : dépôt manuel du
+    # fichier). Un chemin "sharepoint:/..." est refusé tant que la voie
+    # SharePoint est désactivée dans config/profile.py.
     mrm_path = resolve_source_path(spark, mrm_path, SHAREPOINT, SHAREPOINT_STAGING)
 
-    # Tout est lu EN STRING, casts ciblés dans clean_mrm (to_date pour les dates,
-    # regexp_replace+cast double pour PM/PSAP) — fix T-02. Évite : (1) double-pass
-    # du fichier, (2) types inférés au hasard.
+    # Tout est lu EN STRING ; les casts ciblés sont faits dans clean_mrm (to_date
+    # pour les dates, regexp_replace + cast double pour les montants au format
+    # européen). Évite un double-passage sur le fichier et des types devinés.
     if mrm_path.lower().endswith((".xlsx", ".xlsm")):
-        # Source Excel (SharePoint ou DBFS) : lecture driver-side openpyxl.
+        # Excel : lecture driver-side via openpyxl (Spark ne lit pas le .xlsx).
         df = read_excel_to_spark(spark, mrm_path, as_string=True)
     else:
         df = (

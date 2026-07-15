@@ -1,20 +1,24 @@
 # ITIP-FIAB — Fiabilisation de la réconciliation CPT / MRM
 
-Backtesting entre la **revue d'inventaire MRM** (fichier Excel/CSV, à terme lu
-depuis SharePoint) et le **compte CPT** (table du Lab Databricks) : contrôles
-qualité, matching en cascade, calcul des KPI (chute, couverture, conformité),
-puis restitution — 21 tables métriques (Delta / Excel / CSV / Parquet / JSON)
+Backtesting entre la **revue d'inventaire MRM** (fichier Excel ou CSV déposé
+sur DBFS) et le **compte CPT** (table du Lab Databricks) : contrôles qualité,
+matching en cascade, calcul des KPI (chute, couverture, conformité), puis
+restitution — 21 tables métriques (Delta / Excel / CSV / Parquet / JSON)
 consommées par Power BI, et 11 graphiques.
 
-## Chaîne cible
+## Chaîne
 
 ```
-Power BI → Power Automate → Databricks Job
-    → lecture Excel SharePoint + tables Lab
+fichier MRM déposé sur DBFS + tables Lab
+    → Databricks Job
     → contrôles qualité → mapping → matching → KPI
-    → table Delta + exports (Excel / CSV / JSON)
-    → rafraîchissement Power BI
+    → tables Delta + exports (Excel / CSV / JSON)
+    → Power BI (SQL Warehouse)
 ```
+
+Le déclenchement du Job depuis Power BI via Power Automate, et la lecture
+directe du fichier depuis SharePoint, restent des évolutions possibles : ni
+l'un ni l'autre n'est actif aujourd'hui.
 
 ## Structure du repo
 
@@ -22,7 +26,7 @@ Power BI → Power Automate → Databricks Job
 |---|---|
 | `main.py` | Point d'entrée du pipeline : `build_df_result` (cœur métier) + `run` (avec restitution) |
 | `config/` | Toute la configuration — `profile.py` (périmètre, sources, exports), `mappings.py` (colonnes brutes → canoniques), `params.py` (matching, dédoublonnage) |
-| `core/io/` | Chargement CPT (Hive/parquet) et MRM (CSV, Excel, chemins `sharepoint:` via Microsoft Graph), export Excel Power BI, écriture Delta du détail (`save_result.py`) |
+| `core/io/` | Chargement CPT (Hive / parquet) et MRM (CSV ou Excel sur DBFS ; voie SharePoint présente mais désactivée), export Excel Power BI, écriture Delta du détail (`save_result.py`) |
 | `core/prep/` | Contrôles qualité, nettoyage, dédoublonnage, clés de matching |
 | `core/match/` | Waterfall de matching, récupérations (N+1, statut NON), audit de clé |
 | `core/synthese/` | Synthèse : passe Spark unique (`compute_synthese`), contrat typé, rendu console |
@@ -38,7 +42,7 @@ Power BI → Power Automate → Databricks Job
 | `itip_fiab_powerbi` | **Production** : pipeline → contrôles bloquants → export des 21 tables (Delta + fichiers) |
 | `itip_fiab_main` | Run interactif par année d'inventaire (widgets 2023/2024), métriques affichées table par table |
 | `itip_fiab_comparaison` | Comparaison côte à côte des inventaires 2023 vs 2024 |
-| `itip_fiab_smoke` | Smoke test après `git pull` : tout le pipeline, **aucune écriture** |
+| `itip_fiab_smoke` | Smoke test après mise à jour du code : tout le pipeline, **sans export** |
 | `itip_fiab_key_audit` | Diagnostic : solidité de la clé de matching (read-only) |
 
 ## Configuration
@@ -56,11 +60,29 @@ Un run paramétré (widgets notebook, paramètres de Job) passe par
 `core.runtime.configurer_run`, qui surcharge date, vision et fichiers MRM —
 et permet aussi de rejouer plusieurs inventaires dans une même session.
 
-**SharePoint (prêt à activer)** : un chemin source `sharepoint:/<chemin dans
-la bibliothèque>` déclenche le téléchargement du fichier via Microsoft Graph
-avant lecture (`.xlsx` lu nativement). Activation : remplir `SHAREPOINT` dans
-`config/profile.py` (app registration Azure AD + secret scope Databricks —
-prérequis IT décrits dans `core/io/sources.py`).
+**Qui écrit quoi — `main.py` n'écrit rien par défaut.** L'écriture est une
+décision du Job, pas du code : `EXPORT_ANALYSES = False` et `EXPORT_FORMATS`
+sans `delta` (`config/profile.py`) font qu'un `spark-submit main.py` calcule
+le pipeline et affiche la synthèse **sans produire ni fichier ni table Hive**.
+C'est volontaire — aucun run local ou de debug ne peut toucher au metastore.
+Seul le notebook `itip_fiab_powerbi` (le Job) écrit : il ajoute `delta` aux
+formats dès que le widget `delta_schema` est renseigné. Pour un export depuis
+`main.py`, passer explicitement `formats=` / `delta_schema=` à
+`export_metriques` plutôt que de changer les défauts.
+
+**Source MRM : dépôt manuel (SharePoint désactivé).** Le fichier d'inventaire
+MRM est déposé à la main sur DBFS, puis référencé par son chemin `dbfs:/` dans
+`INVENTAIRES` (`config/profile.py`). Le `.csv` comme le `.xlsx` sont acceptés :
+le format est déduit de l'extension. Ajouter une année = déposer le fichier,
+puis ajouter son entrée dans `INVENTAIRES`.
+
+La voie SharePoint (téléchargement via Microsoft Graph) est **désactivée** —
+`SHAREPOINT["actif"] = False`. Le code reste en place : un chemin
+`sharepoint:/...` est refusé avec un message explicite au lieu d'être tenté
+avec une configuration incomplète. Pour la réactiver quand l'app registration
+Azure AD sera disponible, la marche à suivre est en commentaire au-dessus de
+`SHAREPOINT` dans `config/profile.py` (prérequis IT détaillés dans
+`core/io/sources.py`).
 
 ## Exploitation — Databricks Job (production)
 
@@ -99,11 +121,8 @@ ruff check .              # lint
 pytest                    # tests
 ```
 
-La CI GitHub Actions (`.github/workflows/ci.yml`) rejoue lint + tests sur
-chaque push.
+La CI (`.github/workflows/ci.yml`) rejoue lint + tests automatiquement.
 
-## Git
-
-- `main` : branche de référence livraison (protégée, mise à jour par PR).
-- `feat/*`, `fix/*`, `refactor/*` : branches courtes, une intention par branche.
-- Une livraison = un tag `vX.Y.Z` (version alignée sur `pyproject.toml`).
+Les tests Spark ont besoin d'un JDK (Java) installé localement ; sans lui, ils
+échouent sur `JAVA_GATEWAY_EXITED` — les tests de logique pure (pandas)
+tournent, eux, sans rien de plus.

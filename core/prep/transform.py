@@ -48,7 +48,7 @@ def normalize_name_full(col: F.Column) -> F.Column:
 
     Étapes :
         1. trim
-        2. upper (T-05 — élimine 'Jean Dupont' vs 'JEAN DUPONT')
+        2. upper — 'Jean Dupont' et 'JEAN DUPONT' doivent donner la même clé
         3. suppression des espaces
 
     Note : pas de strip d'accents — Spark/JVM gère les caractères Unicode de façon

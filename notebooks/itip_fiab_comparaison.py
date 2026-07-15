@@ -116,8 +116,8 @@ def _anc_inv(annee: str) -> pd.DataFrame:
     anc = resultats[annee]["tables"]["chute_par_anciennete"]
     inv = anc[anc["EXERCICE"] == metrics.EXERCICE_INV].copy()
     inv.insert(0, "ANNEE", annee)
-    return inv[["ANNEE", "BLOC_ANCIENNETE", "nb_dossiers", "pm_mrm", "pm_cpt",
-               "ecart_signe", "taux_chute_pct", "poids_pm_pct"]]
+    return inv[["ANNEE", "BLOC_ANCIENNETE", "NB_DOSSIERS", "PM_MRM", "PM_CPT",
+               "ECART", "TAUX_CHUTE_PCT", "POIDS_PM_PCT"]]
 
 anc_detail = pd.concat([_anc_inv(an) for an in ANNEES], ignore_index=True)
 display(anc_detail)
@@ -126,7 +126,7 @@ display(anc_detail)
 
 # Pivot : taux de chute (%) par bloc d'ancienneté × année.
 pivot_taux = anc_detail.pivot_table(
-    index="BLOC_ANCIENNETE", columns="ANNEE", values="taux_chute_pct", aggfunc="first",
+    index="BLOC_ANCIENNETE", columns="ANNEE", values="TAUX_CHUTE_PCT", aggfunc="first",
 ).reindex([metrics.BLOC_N, metrics.BLOC_N1, metrics.BLOC_N2_PLUS, metrics.BLOC_INDET]).dropna(how="all")
 display(pivot_taux.reset_index())
 

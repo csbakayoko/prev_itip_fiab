@@ -1,31 +1,31 @@
 """
-Lecture de sources externes : fichiers Excel & SharePoint (Databricks).
+Lecture de sources externes : fichiers Excel et SharePoint (Databricks).
 
-POURQUOI CE MODULE : Spark NE LIT PAS nativement le .xlsx (contrairement au CSV /
-Parquet). Et un fichier déposé sur SharePoint n'est pas directement accessible
-depuis le cluster. Ce module donne les deux ponts, alignés sur la philosophie du
-pipeline (tout lire en STRING puis caster dans clean_* — cf. load_data, fix T-02).
+POURQUOI CE MODULE : Spark ne lit pas nativement le .xlsx (contrairement au CSV
+et au Parquet), et un fichier posé sur SharePoint n'est pas accessible depuis le
+cluster. Ce module fournit les deux ponts, en lisant TOUT EN STRING — les casts
+ciblés sont faits ensuite dans clean_* (cf. load_data), pour ne jamais dépendre
+de types devinés à la lecture.
 
-╔══════════════════════════════════════════════════════════════════════════════╗
-║ LIRE UN EXCEL DANS DATABRICKS — deux voies                                     ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║ 1. pandas + openpyxl  (read_excel_to_spark)                                    ║
-║    Simple, driver-side. Idéal < ~1M cellules (un inventaire MRM tient large).  ║
-║    Aucune install : openpyxl est dans le Databricks Runtime.                   ║
-║                                                                                ║
-║ 2. spark-excel  (read_excel_spark_native)                                      ║
-║    Lecture DISTRIBUÉE pour les très gros classeurs. Nécessite la lib Maven     ║
-║    com.crealytics:spark-excel_2.12:<ver> installée sur le cluster              ║
-║    (Cluster ▸ Libraries ▸ Install ▸ Maven). Sinon → voie 1.                    ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+LIRE UN EXCEL — deux voies :
+  1. pandas + openpyxl (read_excel_to_spark) — driver-side, suffisant jusqu'à
+     ~1M cellules (un inventaire MRM tient large). openpyxl est déjà dans le
+     Databricks Runtime : rien à installer. C'est la voie utilisée par défaut.
+  2. spark-excel (read_excel_spark_native) — lecture distribuée, réservée aux
+     très gros classeurs. Exige la lib Maven com.crealytics:spark-excel_2.12
+     sur le cluster (Cluster ▸ Libraries ▸ Install ▸ Maven).
 
-SHAREPOINT : pas de montage direct fiable. La voie robuste = Microsoft Graph API
-(app registration Azure AD + client credentials) : on récupère le fichier en
-bytes, on l'écrit sur DBFS, puis on le lit comme un Excel local.
-Prérequis (à faire une fois côté Azure/IT) :
-    - App registration Azure AD → client_id + client_secret + tenant_id ;
-    - permission application Microsoft Graph « Sites.Read.All » (consentement admin) ;
-    - STOCKER les secrets dans un Databricks secret scope, JAMAIS en dur :
+SHAREPOINT — voie DÉSACTIVÉE aujourd'hui (SHAREPOINT["actif"] = False dans
+config/profile.py) : le fichier MRM est déposé à la main sur DBFS. Le code
+ci-dessous reste en place pour une réactivation ultérieure.
+
+Il n'existe pas de montage SharePoint fiable depuis le cluster ; la voie robuste
+est l'API Microsoft Graph (client credentials) : on récupère le fichier en
+octets, on l'écrit sur DBFS, puis on le lit comme un Excel local.
+Prérequis IT, à faire une fois côté Azure :
+    - app registration Azure AD → tenant_id, client_id, client_secret ;
+    - permission application Graph « Sites.Read.All » (consentement admin) ;
+    - secret d'app dans un secret scope Databricks, JAMAIS en dur dans le code :
         dbutils.secrets.get("itip", "sp_client_secret").
 """
 
@@ -65,22 +65,35 @@ def resolve_source_path(
     Graph vers <staging_dir>/<nom du fichier> (DBFS) ; tout autre chemin
     (dbfs:/, abfss:/, local) est renvoyé tel quel.
 
+    La voie SharePoint n'est empruntée que si SHAREPOINT["actif"] est True.
+    Désactivée (mode actuel : dépôt manuel du fichier sur DBFS), un chemin
+    "sharepoint:/..." est refusé explicitement — mieux vaut un run rouge
+    qu'une source silencieusement absente.
+
     Args:
         spark       : SparkSession active (résolution du secret via dbutils).
         path        : chemin source (INVENTAIRES / widget fichier_mrm*).
-        sp_cfg      : config SHAREPOINT (tenant_id, client_id, hostname, site,
-                      client_secret OU secret_scope+secret_key).
+        sp_cfg      : config SHAREPOINT (actif, tenant_id, client_id, hostname,
+                      site, client_secret OU secret_scope+secret_key).
         staging_dir : dossier DBFS de dépôt des téléchargements.
 
     Returns:
         Chemin Spark (dbfs:/...) du fichier téléchargé, ou `path` inchangé.
 
     Raises:
-        ValueError si le chemin est SharePoint mais la config est incomplète
-        (app registration Azure AD pas encore fournie — cf. config/profile.py).
+        ValueError si le chemin est SharePoint alors que la voie est désactivée,
+        ou si elle est active mais la config incomplète.
     """
     if not is_sharepoint_path(path):
         return path
+
+    if not sp_cfg.get("actif"):
+        raise ValueError(
+            f"Chemin SharePoint '{path}' alors que la voie SharePoint est "
+            "désactivée (SHAREPOINT['actif'] = False dans config/profile.py). "
+            "Déposer le fichier à la main sur DBFS et pointer INVENTAIRES sur "
+            "son chemin dbfs:/ — ou réactiver la voie (cf. config/profile.py)."
+        )
 
     manquants = [k for k in ("tenant_id", "client_id", "hostname", "site")
                  if not sp_cfg.get(k)]

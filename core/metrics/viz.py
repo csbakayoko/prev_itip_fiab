@@ -193,13 +193,13 @@ def graph_chute_par_clause(pdf_clauses, d: dict):
     les récupérés N+1 restent une analyse séparée (bloc dédié de la table)."""
     pdf = pdf_clauses[pdf_clauses["EXERCICE"] == EXERCICE_INV][::-1]
     labels = [f"{c} ({t})" for c, t in zip(pdf["CLAUSE"], pdf["TYPE_COMPTE"])]
-    colors = [C_SIENNE if v > 0 else C_OCEAN for v in pdf["taux_chute_pct"]]
+    colors = [C_SIENNE if v > 0 else C_OCEAN for v in pdf["TAUX_CHUTE_PCT"]]
 
     h = 0.6 * len(pdf) + 3.2
     fig, ax = plt.subplots(figsize=(12, h))
-    ax.barh(labels, pdf["taux_chute_pct"], color=colors, height=0.55)
-    for i, (v, e, p) in enumerate(zip(pdf["taux_chute_pct"], pdf["ecart_signe"],
-                                      pdf["poids_pm_pct"])):
+    ax.barh(labels, pdf["TAUX_CHUTE_PCT"], color=colors, height=0.55)
+    for i, (v, e, p) in enumerate(zip(pdf["TAUX_CHUTE_PCT"], pdf["ECART"],
+                                      pdf["POIDS_PM_PCT"])):
         ax.text(v + (0.5 if v >= 0 else -0.5), i,
                 f"{_pct(v)}   (écart {_meur(e)}, poids {_pct(p)})",
                 va="center", ha="left" if v >= 0 else "right", fontsize=F_TXT - 1)
@@ -208,8 +208,8 @@ def graph_chute_par_clause(pdf_clauses, d: dict):
                zorder=0.5,
                label=f"taux de chute : {_pct(d['taux_chute_inventaire'])}")
     ax.legend(loc="lower right", fontsize=F_LEG, frameon=False)
-    lo = min(float(pdf["taux_chute_pct"].min()), 0)
-    hi = max(float(pdf["taux_chute_pct"].max()), 0)
+    lo = min(float(pdf["TAUX_CHUTE_PCT"].min()), 0)
+    hi = max(float(pdf["TAUX_CHUTE_PCT"].max()), 0)
     ax.set_xlim(lo - (hi - lo) * 0.65 - 2, hi + (hi - lo) * 0.65 + 2)
     _style(ax, xlabel="Taux de chute (%) — positif = sous-provisionné (risque), négatif = sur-provisionné")
     _title(
@@ -507,7 +507,7 @@ def graph_chute_par_anciennete(pdf_anc, d: dict):
     if pdf.empty:
         return _empty_fig("Taux de chute par ancienneté : aucune donnée")
     labels = list(pdf["BLOC_ANCIENNETE"])
-    taux   = list(pdf["taux_chute_pct"])
+    taux   = list(pdf["TAUX_CHUTE_PCT"])
     colors = [C_SIENNE if t > 0 else C_OCEAN for t in taux]
 
     fig, ax = plt.subplots(figsize=(11, 5.6))
@@ -516,8 +516,8 @@ def graph_chute_par_anciennete(pdf_anc, d: dict):
     for i, (_, r) in enumerate(pdf.iterrows()):
         au_dessus = taux[i] >= 0
         ax.text(i, taux[i] + (span * 0.06 if au_dessus else -span * 0.06),
-                f"{_pct(r['taux_chute_pct'])} — écart {_meur(r['ecart_signe'])}, "
-                f"poids {_pct(r['poids_pm_pct'])}",
+                f"{_pct(r['TAUX_CHUTE_PCT'])} — écart {_meur(r['ECART'])}, "
+                f"poids {_pct(r['POIDS_PM_PCT'])}",
                 ha="center", va="bottom" if au_dessus else "top", fontsize=F_TXT - 1)
     ax.axhline(0, color="#333333", linewidth=0.8, zorder=0.5)
     ax.axhline(d["taux_chute_inventaire"], color=C_GRIS, linewidth=1.4, linestyle="--",

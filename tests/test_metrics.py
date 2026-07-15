@@ -16,16 +16,18 @@ from core.metrics import (
 def _ligne(clause, pm_mrm, pm_cpt, ecart):
     return {
         "EXERCICE": EXERCICE_INV, "CLAUSE": clause, "TYPE_COMPTE": "PB",
-        "nb_dossiers": 10, "nb_sous": 1, "nb_sur": 0, "nb_conforme": 9,
-        "pm_mrm": pm_mrm, "pm_cpt": pm_cpt, "ecart_signe": ecart,
+        "NB_DOSSIERS": 10, "NB_SOUS_PROVISION": 1, "NB_SUR_PROVISION": 0,
+        "NB_ECART_NUL": 9,
+        "PM_MRM": pm_mrm, "PM_CPT": pm_cpt, "ECART": ecart,
     }
 
 
 def _ligne_anc(bloc, exercice, pm_mrm, pm_cpt, ecart):
     return {
         "EXERCICE": exercice, "BLOC_ANCIENNETE": bloc,
-        "nb_dossiers": 5, "nb_sous": 1, "nb_sur": 0, "nb_conforme": 4,
-        "pm_mrm": pm_mrm, "pm_cpt": pm_cpt, "ecart_signe": ecart,
+        "NB_DOSSIERS": 5, "NB_SOUS_PROVISION": 1, "NB_SUR_PROVISION": 0,
+        "NB_ECART_NUL": 4,
+        "PM_MRM": pm_mrm, "PM_CPT": pm_cpt, "ECART": ecart,
     }
 
 
@@ -36,14 +38,14 @@ def test_taux_chute_et_poids_pm_par_exercice():
     ])
     out = _finalise_chute_par_clause(pdf)
     rowA = out[out["CLAUSE"] == "A"].iloc[0]
-    assert rowA["taux_chute_pct"] == 20.0          # 20 / 100 * 100
-    assert rowA["poids_pm_pct"] == 50.0            # 100 / (100+100) * 100
+    assert rowA["TAUX_CHUTE_PCT"] == 20.0          # 20 / 100 * 100
+    assert rowA["POIDS_PM_PCT"] == 50.0            # 100 / (100+100) * 100
 
 
 def test_pm_mrm_nulle_donne_taux_zero():
     pdf = pd.DataFrame([_ligne("C", 0.0, 0.0, 0.0)])
     out = _finalise_chute_par_clause(pdf)
-    assert out.iloc[0]["taux_chute_pct"] == 0.0    # pas de division par zéro
+    assert out.iloc[0]["TAUX_CHUTE_PCT"] == 0.0    # pas de division par zéro
 
 
 def test_top_limite_par_exercice():
@@ -54,7 +56,7 @@ def test_top_limite_par_exercice():
     ])
     out = _finalise_chute_par_clause(pdf, top=2)
     assert len(out) == 2
-    # trié par pm_mrm desc → garde A puis B
+    # trié par PM_MRM desc → garde A puis B
     assert list(out["CLAUSE"]) == ["A", "B"]
 
 
@@ -70,8 +72,8 @@ def test_anciennete_ordre_blocs_et_taux():
     out = _finalise_chute_par_anciennete(pdf)
     assert list(out["BLOC_ANCIENNETE"]) == [BLOC_N, BLOC_N1, BLOC_N2_PLUS]
     rowN = out[out["BLOC_ANCIENNETE"] == BLOC_N].iloc[0]
-    assert rowN["taux_chute_pct"] == 20.0          # 20 / 100 * 100
-    assert rowN["poids_pm_pct"] == round(100 / 300 * 100, 2)
+    assert rowN["TAUX_CHUTE_PCT"] == 20.0          # 20 / 100 * 100
+    assert rowN["POIDS_PM_PCT"] == round(100 / 300 * 100, 2)
 
 
 def test_anciennete_poids_par_exercice():
@@ -83,7 +85,7 @@ def test_anciennete_poids_par_exercice():
     ])
     out = _finalise_chute_par_anciennete(pdf)
     n1_row = out[(out["EXERCICE"] == EXERCICE_N1)].iloc[0]
-    assert n1_row["poids_pm_pct"] == 100.0         # seule ligne de son exercice
+    assert n1_row["POIDS_PM_PCT"] == 100.0         # seule ligne de son exercice
 
 
 # ── _finalise_orphelins : poids + RANG ───────────────────────────────────────

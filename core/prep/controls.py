@@ -63,8 +63,8 @@ def controle_colonnes(
                           (MAPPING_CPT.keys() / MAPPING_MRM.keys()). SEULES ces
                           colonnes sont contrôlées (pas tout le schéma brut).
         check_full_null : si True, détecte les colonnes (utilisées) entièrement
-                          nulles — coût = UNE action Spark, désormais limitée aux
-                          colonnes du mapping (≈ 15-20, pas tout le schéma).
+                          nulles — coût = UNE action Spark, limitée aux colonnes
+                          du mapping (≈ 15-20, pas tout le schéma brut).
 
     Returns:
         Le DataFrame inchangé (le run continue toujours).

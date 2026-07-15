@@ -21,11 +21,20 @@ def test_resolve_source_path_laisse_passer_les_chemins_non_sharepoint():
     assert resolve_source_path(None, path, {}, "dbfs:/tmp/staging") == path
 
 
+def test_resolve_source_path_refuse_si_sharepoint_desactive():
+    # Voie coupée (mode actuel : dépôt manuel) → refus explicite, pas de réseau.
+    with pytest.raises(ValueError, match="désactivée"):
+        resolve_source_path(
+            None, "sharepoint:/MRM/f.xlsx", {"actif": False}, "dbfs:/tmp/staging",
+        )
+
+
 def test_resolve_source_path_refuse_config_incomplete():
-    # Chemin SharePoint sans app registration → erreur explicite, pas d'appel réseau.
+    # Voie active mais app registration absente → erreur explicite, pas de réseau.
     with pytest.raises(ValueError, match="SHAREPOINT incomplète"):
         resolve_source_path(
-            None, "sharepoint:/MRM/f.xlsx", {"tenant_id": "t"}, "dbfs:/tmp/staging",
+            None, "sharepoint:/MRM/f.xlsx", {"actif": True, "tenant_id": "t"},
+            "dbfs:/tmp/staging",
         )
 
 

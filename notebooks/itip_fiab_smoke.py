@@ -1,13 +1,19 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ITIP-FIAB — Smoke test (tout le pipeline, rien d'écrit)
+# MAGIC # ITIP-FIAB — Smoke test (tout le pipeline, sans export)
 # MAGIC
-# MAGIC But : vérifier de bout en bout que tout tourne après un `git pull` —
-# MAGIC pipeline → synthèse → 20 tables métriques → recoupements → 11 graphiques.
-# MAGIC **Aucune écriture** (ni DBFS, ni Delta) : si toutes les cellules passent,
-# MAGIC le pipeline est bon, lancer ensuite `itip_fiab_powerbi` pour l'export.
+# MAGIC But : vérifier de bout en bout que tout tourne après une mise à jour du
+# MAGIC code — pipeline → synthèse → 20 tables métriques → recoupements → 11
+# MAGIC graphiques. Si toutes les cellules passent, le pipeline est bon : lancer
+# MAGIC ensuite `itip_fiab_powerbi` pour l'export réel.
 # MAGIC
-# MAGIC ⚠ Avant de lancer : git pull du Repo + `dbutils.library.restartPython()`.
+# MAGIC **Aucune table Delta, aucun fichier de métriques** n'est écrit
+# MAGIC (`EXPORT_ANALYSES = False`). Seule réserve : `EXPORT_GRAPHS = True` étant
+# MAGIC le défaut, l'étape 1 dépose les 11 PNG dans le dossier graphiques sur
+# MAGIC DBFS. Pour un run vraiment sans aucune écriture, poser
+# MAGIC `EXPORT_GRAPHS = False` dans `config/profile.py`.
+# MAGIC
+# MAGIC ⚠ Avant de lancer : mettre le Repo à jour + `dbutils.library.restartPython()`.
 
 # COMMAND ----------
 
@@ -23,8 +29,9 @@ spark = get_spark()
 # MAGIC %md
 # MAGIC ## 1. Pipeline complet (main.run : load → matching → récupérations → synthèse)
 # MAGIC
-# MAGIC Les exports/graphiques de `run` restent pilotés par `config/profile.py`
-# MAGIC (EXPORT_ANALYSES / EXPORT_GRAPHS, défaut False) : ici rien n'est écrit.
+# MAGIC Ce que `run` écrit est piloté par `config/profile.py` : `EXPORT_ANALYSES`
+# MAGIC (défaut False → aucune table ni fichier de métriques) et `EXPORT_GRAPHS`
+# MAGIC (défaut True → les 11 PNG sur DBFS).
 
 # COMMAND ----------
 

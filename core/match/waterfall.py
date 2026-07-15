@@ -167,10 +167,9 @@ def matching_waterfall(df_cpt_clean: DataFrame, df_mrm_clean: DataFrame) -> Data
     )
     results.append(matched)
 
-    # MATCH_RECHUTE : même clé que MATCH_WINDOW (rpp+dob+garantie+nom) — la
-    # contrainte garantie est désormais portée par la clé. _rechute_cond ne
-    # filtre plus que sur la fenêtre de jours (la check garantie reste mais
-    # devient redondante, inoffensive).
+    # MATCH_RECHUTE : même clé que MATCH_WINDOW (rpp+dob+garantie+nom). La
+    # contrainte de garantie étant portée par la clé, _rechute_cond ne filtre
+    # en pratique que sur la fenêtre de jours.
     matched, cpt_rem, mrm_rem = execute_matching_step(
         cpt_rem, mrm_rem, "key_no_date", "MATCH_RECHUTE",
         extra_cond=_rechute_cond(RELAPSE_WINDOW_DAYS),

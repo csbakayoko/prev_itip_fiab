@@ -22,7 +22,7 @@
 # MAGIC %md
 # MAGIC ## 1. Setup — session Spark + widgets de run
 # MAGIC
-# MAGIC Le notebook vit dans le repo (dossier Git Databricks) : la racine du repo est
+# MAGIC Le notebook vit dans un dossier Repos Databricks : la racine du repo est
 # MAGIC **automatiquement** sur `sys.path`, aucun chemin à ajouter.
 
 # COMMAND ----------

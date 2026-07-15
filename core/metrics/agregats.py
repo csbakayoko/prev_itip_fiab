@@ -46,13 +46,13 @@ def chute_par_clause(df_result: DataFrame, top: Optional[int] = None) -> pd.Data
     pdf = (
         df.groupBy("EXERCICE", "CLAUSE", "TYPE_COMPTE")
         .agg(
-            F.count("*").alias("nb_dossiers"),
-            F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("nb_sous"),
-            F.sum(F.when(F.col("_ecart") < 0, 1).otherwise(0)).alias("nb_sur"),
-            F.sum(F.when(F.col("_ecart") == 0, 1).otherwise(0)).alias("nb_conforme"),
-            F.coalesce(F.sum("MRM_PM"), F.lit(0.0)).alias("pm_mrm"),
-            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("pm_cpt"),
-            F.sum("_ecart").alias("ecart_signe"),
+            F.count("*").alias("NB_DOSSIERS"),
+            F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("NB_SOUS_PROVISION"),
+            F.sum(F.when(F.col("_ecart") < 0, 1).otherwise(0)).alias("NB_SUR_PROVISION"),
+            F.sum(F.when(F.col("_ecart") == 0, 1).otherwise(0)).alias("NB_ECART_NUL"),
+            F.coalesce(F.sum("MRM_PM"), F.lit(0.0)).alias("PM_MRM"),
+            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("PM_CPT"),
+            F.sum("_ecart").alias("ECART"),
         )
         .toPandas()
     )
@@ -67,12 +67,12 @@ def _taux_poids_par_exercice(pdf: pd.DataFrame) -> pd.DataFrame:
     (le taux du bloc est la moyenne PONDÉRÉE des taux par ligne, pas leur somme).
     """
     pdf = pdf.copy()
-    pdf[["pm_mrm", "pm_cpt", "ecart_signe"]] = pdf[["pm_mrm", "pm_cpt", "ecart_signe"]].round(2)
-    pdf["taux_chute_pct"] = (
-        (pdf["ecart_signe"] / pdf["pm_mrm"] * 100).where(pdf["pm_mrm"] != 0, 0.0).round(2)
+    pdf[["PM_MRM", "PM_CPT", "ECART"]] = pdf[["PM_MRM", "PM_CPT", "ECART"]].round(2)
+    pdf["TAUX_CHUTE_PCT"] = (
+        (pdf["ECART"] / pdf["PM_MRM"] * 100).where(pdf["PM_MRM"] != 0, 0.0).round(2)
     )
-    tot = pdf.groupby("EXERCICE")["pm_mrm"].transform("sum")
-    pdf["poids_pm_pct"] = (pdf["pm_mrm"] / tot * 100).where(tot != 0, 0.0).round(2)
+    tot = pdf.groupby("EXERCICE")["PM_MRM"].transform("sum")
+    pdf["POIDS_PM_PCT"] = (pdf["PM_MRM"] / tot * 100).where(tot != 0, 0.0).round(2)
     return pdf
 
 
@@ -80,7 +80,7 @@ def _finalise_chute_par_clause(pdf: pd.DataFrame, top: Optional[int] = None) -> 
     """Taux et poids PM par clause × exercice, triés par PM MRM décroissante."""
     pdf = _taux_poids_par_exercice(pdf)
     pdf = (
-        pdf.sort_values(["EXERCICE", "pm_mrm"], ascending=[True, False],
+        pdf.sort_values(["EXERCICE", "PM_MRM"], ascending=[True, False],
                         key=lambda s: s.map(_EXERCICE_ORDRE) if s.name == "EXERCICE" else s)
         .reset_index(drop=True)
     )
@@ -128,13 +128,13 @@ def chute_par_anciennete(
     pdf = (
         df.groupBy("EXERCICE", "BLOC_ANCIENNETE")
         .agg(
-            F.count("*").alias("nb_dossiers"),
-            F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("nb_sous"),
-            F.sum(F.when(F.col("_ecart") < 0, 1).otherwise(0)).alias("nb_sur"),
-            F.sum(F.when(F.col("_ecart") == 0, 1).otherwise(0)).alias("nb_conforme"),
-            F.coalesce(F.sum("MRM_PM"), F.lit(0.0)).alias("pm_mrm"),
-            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("pm_cpt"),
-            F.sum("_ecart").alias("ecart_signe"),
+            F.count("*").alias("NB_DOSSIERS"),
+            F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("NB_SOUS_PROVISION"),
+            F.sum(F.when(F.col("_ecart") < 0, 1).otherwise(0)).alias("NB_SUR_PROVISION"),
+            F.sum(F.when(F.col("_ecart") == 0, 1).otherwise(0)).alias("NB_ECART_NUL"),
+            F.coalesce(F.sum("MRM_PM"), F.lit(0.0)).alias("PM_MRM"),
+            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("PM_CPT"),
+            F.sum("_ecart").alias("ECART"),
         )
         .toPandas()
     )

@@ -37,7 +37,7 @@
 # MAGIC %md
 # MAGIC ## 1. Setup — session Spark + paramètres du run
 # MAGIC
-# MAGIC Le notebook vit dans le repo (dossier Git Databricks) : la racine est sur `sys.path`.
+# MAGIC Le notebook vit dans un dossier Repos Databricks : la racine du repo est sur `sys.path`.
 # MAGIC
 # MAGIC **Tous les paramètres sont des widgets** (= « base parameters » du Job
 # MAGIC Databricks) : le Job surcharge n'importe lequel sans toucher au code.

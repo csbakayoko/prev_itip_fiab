@@ -1,10 +1,10 @@
 """
-Profil de run — périmètre traité.
+Profil de run — périmètre traité, sources, exports.
 
-v2.0 : tout le périmètre est chargé sans filtre clause ; les métriques restent
-ventilées par CLAUSE × TYPE_CLAUSE (portées par les données). SODEXO (clause
-121981, type PB) était le use case d'origine, désormais généralisé : pour le
-rejouer seul, remettre CLIENT_CLAUSES = ["121981"] / CLIENT_TYPE_CLAUSES = ["PB"].
+Tout le périmètre est chargé sans filtre de clause ; les métriques restent
+ventilées par CLAUSE × TYPE_COMPTE, dimensions portées par les données.
+Pour restreindre le run à une seule clause (ex. SODEXO), poser
+CLIENT_CLAUSES = ["121981"] et CLIENT_TYPE_CLAUSES = ["PB"].
 """
 
 import os
@@ -22,6 +22,9 @@ _DBFS_HOME = os.environ.get(
 # ("" = pas de N+1, pas de récupération tardive). Consommé par :
 #   - l'inventaire ACTIF ci-dessous (run direct main.py / itip_fiab_powerbi) ;
 #   - les widgets des notebooks (itip_fiab_main, itip_fiab_comparaison).
+# Les fichiers MRM sont déposés à la main sur DBFS (cf. SHAREPOINT plus bas) :
+# une nouvelle année = déposer le fichier, puis ajouter son entrée ici.
+# Le .csv comme le .xlsx sont acceptés — le format est déduit de l'extension.
 INVENTAIRES = {
     "2023": {
         "date"  : "31/12/2023",
@@ -36,7 +39,7 @@ INVENTAIRES = {
         "mrm_n1": "",
     },
 }
-ANNEE_INVENTAIRE = "2023"          # inventaire ACTIF (DEV) — les valeurs en dérivent
+ANNEE_INVENTAIRE = "2023"          # inventaire ACTIF par défaut — les valeurs ci-dessous en dérivent
 _inv = INVENTAIRES[ANNEE_INVENTAIRE]
 
 # ── Identité du run ─────────────────────────────────────────────────────────
@@ -69,15 +72,25 @@ PERIMETRE_LABEL = CLIENT_CLAUSES[0] if (CLIENT_CLAUSES and len(CLIENT_CLAUSES) =
 FICHIER_MRM    = _inv["mrm"]
 FICHIER_MRM_N1 = _inv["mrm_n1"] or None
 
-# ── Source SharePoint (PRÊT À ACTIVER — en attente app registration Azure AD) ─
-# Un chemin source "sharepoint:/<chemin dans la bibliothèque>" (INVENTAIRES ou
-# widget fichier_mrm*) déclenche le téléchargement Microsoft Graph vers
-# SHAREPOINT_STAGING avant lecture (.xlsx lu nativement). Tant que ces champs
-# sont vides, seuls les chemins dbfs:/ sont utilisés (comportement actuel).
-# Prérequis IT (cf. core/io/sources.py) : app registration Azure AD (tenant_id,
-# client_id), permission Graph Sites.Read.All, secret d'app stocké dans un
-# secret scope Databricks — JAMAIS en dur ici.
+# ── Source SharePoint — DÉSACTIVÉE ───────────────────────────────────────────
+# Mode de travail actuel : le fichier MRM est déposé À LA MAIN sur DBFS, et
+# INVENTAIRES pointe sur ce chemin dbfs:/ (.csv ou .xlsx, les deux sont lus).
+# Aucun appel réseau, aucun secret nécessaire.
+#
+# "actif": False coupe la voie SharePoint. Un chemin "sharepoint:/..." est
+# alors REFUSÉ avec un message explicite plutôt que tenté à moitié — on ne
+# télécharge pas silencieusement avec une config incomplète.
+#
+# Pour réactiver, quand l'app registration Azure AD sera fournie par l'IT :
+#   1. renseigner hostname + site (et tenant_id / client_id par variables
+#      d'environnement, ou en dur ici si le contexte le permet) ;
+#   2. déposer le secret d'app dans le secret scope Databricks — JAMAIS ici ;
+#   3. passer "actif" à True ;
+#   4. pointer INVENTAIRES sur "sharepoint:/<chemin dans la bibliothèque>".
+# Le téléchargement Microsoft Graph vers SHAREPOINT_STAGING reprend alors
+# automatiquement avant lecture. Détail des prérequis : core/io/sources.py.
 SHAREPOINT = {
+    "actif"        : False,              # False = voie SharePoint coupée (dépôt manuel)
     "tenant_id"    : os.environ.get("ITIP_SP_TENANT_ID", ""),
     "client_id"    : os.environ.get("ITIP_SP_CLIENT_ID", ""),
     "client_secret": "",                 # laisser vide : résolu via le secret scope

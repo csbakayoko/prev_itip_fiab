@@ -67,8 +67,8 @@ def _scalars_from_rows(rows: list, date_inventaire: str) -> SyntheseScalars:
     nb_miss,  pm_miss       = mrm(lambda r: T(r) == "MRM_MISSING")
     nb_def,   pm_def        = cpt(lambda r: T(r) == "CPT_ONLY")
     # CPT_LATE = uniquement les dossiers RÉELLEMENT retrouvés dans un inventaire
-    # ultérieur (N+1). Les observations tardives IT portent désormais un label
-    # distinct (OBS_TARDIVE_LABEL) → sorties des CPT_LATE et de l'univers métriques.
+    # ultérieur (N+1). Les observations tardives IT portent un label distinct
+    # (OBS_TARDIVE_LABEL) : hors CPT_LATE et hors univers métriques.
     nb_late,  pm_late_cpt   = cpt(lambda r: T(r) == "CPT_LATE")
     pm_late_mrm             = agg("pm_mrm", lambda r: T(r) == "CPT_LATE")
 

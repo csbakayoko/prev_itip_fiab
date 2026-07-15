@@ -302,8 +302,8 @@ taux principal) ; année dérivée de `year(CPT_D_SURVENANCE)`, référence
   leur suivi est SÉPARÉ (`n1_consignes`, table `suivi_n1` — KEEP/ADD/STUDY
   conformes, DELETE encore au compte).
 - **Formule** : `pct_conformite = nb(conformes) / nb(univers consigne)`.
-- **Colonnes dédiées** (`consignes`, `NATURE_KO`) : `nb_conformes`, `nb_ko` —
-  avec `nb_total = nb_conformes + nb_ko`.
+- **Colonnes dédiées** (`consignes`, `NATURE_KO`) : `NB_CONFORMES`, `NB_KO` —
+  avec `NB_TOTAL = NB_CONFORMES + NB_KO`.
 - **Deux lectures, même exercice.** La restitution sépare explicitement les
   deux lectures au lieu de les mélanger sur une ligne — toutes deux sur
   l'**inventaire courant pur** :
@@ -342,6 +342,22 @@ Parquet / Excel / Delta) :
 > périmètres coexistent). Les lignes ventilées portent `TYPE_COMPTE` (PB /
 > HPB / préfixe brut si type non mappé — jamais null muet) et `CLAUSE`
 > (nullable : un compte sans n° de clause est une donnée légitime).
+>
+> **Nomenclature (contrat)** : les tables Delta sont nommées
+> `metrique_<nom>` (nom stable, snake_case — le périmètre est une colonne,
+> jamais un suffixe) et **toutes les colonnes exportées sont en
+> `UPPER_SNAKE_CASE`**, sans exception : une table consommée par Power BI ne
+> mélange pas les casses. Les noms en minuscules que l'on croise dans le code
+> (`pm_mrm`, `taux_chute`, …) sont les clés du dict interne de
+> `compute_synthese` (`SyntheseScalars`) — ils ne sortent jamais tels quels.
+>
+> **Vocabulaire des colonnes partagées** — une même grandeur porte le même nom
+> partout : `NB_DOSSIERS` (volumétrie), `PM_MRM` / `PM_CPT` (provisions
+> mathématiques revue / compte), `ECART` (= `PM_MRM - PM_CPT`, signé),
+> `TAUX_CHUTE_PCT` (= `ECART / PM_MRM × 100`), `POIDS_PM_PCT` (part de la PM
+> MRM du bloc `EXERCICE`). Attention : « conforme » est réservé au **verdict
+> de consigne** (§0) — un écart de PM nul se dit `NB_ECART_NUL`, jamais
+> « conforme ».
 
 | Table | Problématique | Univers |
 |---|---|---|
@@ -354,8 +370,8 @@ Parquet / Excel / Delta) :
 | `consignes_par_clause` | tableau de bord : suivi des consignes par TYPE_COMPTE × CLAUSE × CONSIGNE (nb, suivies/non suivies, PM, `NB_NON_REMONTE_DF`) | mêmes règles que `consignes`, ventilées ; repêchés statut NON comptés à part, hors conformité |
 | `compte_justification` | décomposition du compte (retrouvés, N+1, repêchés, clos, anomalies) | compte entier |
 | `couverture_mrm` | part de la revue retrouvée + non retrouvés par consigne | `MATCHÉS + MRM_MISSING` (+ DELETE retrouvées) |
-| `chute_par_clause` | chute par clause × exercice (2 blocs : inventaire courant = stats globales / N+1 = analyse séparée — Σ clauses d'un bloc = taux du bloc, cf. §4.2) | univers de chute, par exercice |
-| `chute_par_anciennete` | chute par année de survenance × exercice (N / N-1 / N-2 et antérieur — Σ bloc inventaire = taux principal, cf. §4.2) | univers de chute, par exercice |
+| `chute_par_clause` | chute par clause × exercice (2 blocs : inventaire courant = stats globales / N+1 = analyse séparée — Σ clauses d'un bloc = taux du bloc, cf. §4.2). Colonnes : `EXERCICE`, `CLAUSE`, `TYPE_COMPTE`, `NB_DOSSIERS`, `NB_SOUS_PROVISION`, `NB_SUR_PROVISION`, `NB_ECART_NUL`, `PM_MRM`, `PM_CPT`, `ECART`, `TAUX_CHUTE_PCT`, `POIDS_PM_PCT` | univers de chute, par exercice |
+| `chute_par_anciennete` | chute par année de survenance × exercice (N / N-1 / N-2 et antérieur — Σ bloc inventaire = taux principal, cf. §4.2). Colonnes : `EXERCICE`, `BLOC_ANCIENNETE` + les mêmes mesures que `chute_par_clause` | univers de chute, par exercice |
 | `chute_par_consigne` / `pm_par_consigne` | chute et PM par consigne pertinente (vues de `consignes`) | matchés inventaire courant, KEEP/ADD/STUDY |
 | `conformite_consignes` / `conformite_globale` | application des consignes (détail + segments) | exercice courant (§5) |
 | `anomalies_cpt_only` | anomalies par mois de survenance (effet fin d'année) | `CPT_ONLY` |
@@ -376,7 +392,7 @@ Parquet / Excel / Delta) :
   (`chute_n1_*`, `n1_consignes`, cf. §4.2). Aucun calcul global ne doit les
   réintégrer (sinon incohérence chute ↔ consigne).
 - **Additivité par clause** : les tables par clause portent
-  `(CLAUSE, TYPE_CLAUSE)` ; les % sont calculés **dans le scope de chaque
+  `(CLAUSE, TYPE_COMPTE)` ; les % sont calculés **dans le scope de chaque
   clause** (et de chaque exercice pour `chute_par_clause`). La somme des
   numérateurs/dénominateurs par clause = total → on peut agréger plusieurs
   clauses/bases sans recompter.

@@ -8,7 +8,7 @@
 # MAGIC **Aucune écriture** : pur diagnostic. Lance les fonctions de `core.match.key_audit`
 # MAGIC sur les DataFrames nettoyés (mêmes loaders / clean que le pipeline prod).
 # MAGIC
-# MAGIC ⚠ Avant de lancer : git pull du Repo + `dbutils.library.restartPython()`.
+# MAGIC ⚠ Avant de lancer : mettre le Repo à jour + `dbutils.library.restartPython()`.
 
 # COMMAND ----------
 

@@ -19,7 +19,7 @@ devrait être provisionné) avec le **compte CPT / CORECO** (le *réel* : ce qui
 est effectivement provisionné). Le pipeline (`main.py`) :
 
 ```
-CPT (table Lab)          MRM (CSV / Excel / SharePoint)
+CPT (table Lab)          MRM (CSV ou Excel sur DBFS)
       │                          │
       ▼                          ▼
  clean_cpt                  clean_mrm            ← §2 préparation
@@ -68,13 +68,13 @@ Deux principes traversent toute la recette :
 | Ingrédient | Source | Chargement |
 |---|---|---|
 | **CPT** (compte) | table Hive `compteclient.tetepartete_itip` (ou export parquet prioritaire `CPT_PARQUET_PATH`) | `core/io/load_data.py` — filtré sur la **vision comptable** (`CC2023`, …) et les **types de compte** (`PB` par défaut) |
-| **MRM courant** (revue) | CSV `;` sur DBFS — à terme `sharepoint:/…` via Microsoft Graph | `core/io/sources.py` — l'inventaire de référence de l'exercice audité |
+| **MRM courant** (revue) | CSV `;` ou `.xlsx` déposé à la main sur DBFS | `core/io/sources.py` — l'inventaire de référence de l'exercice audité |
 | **MRM N+1** (facultatif) | même format, inventaire suivant (ex. 30/06/2024 pour l'exercice 2023) | sert **uniquement** à la récupération des déclarations tardives (§5.1) ; absent → pas de `CPT_LATE` |
 
 Le périmètre est **entièrement piloté par `config/profile.py`** (aucun chemin
 en dur dans `core/`) : le dictionnaire `INVENTAIRES` est la **source unique**
 des dates / visions / chemins MRM par année ; `CLIENT_TYPE_CLAUSES = ["PB"]`
-et `CLIENT_CLAUSES = None` (toutes les clauses) définissent le périmètre v2.0.
+et `CLIENT_CLAUSES = None` (toutes les clauses) définissent le périmètre courant.
 Un run paramétré (widgets notebook, paramètres de Job) passe par
 `core.runtime.configurer_run` qui surcharge date, vision et fichiers sans
 toucher au code.
@@ -326,7 +326,7 @@ le cœur est `build_df_result` / `run` dans `main.py`.
 | **Production** (Databricks Job) | `notebooks/itip_fiab_powerbi` | widgets / base parameters (`annee_inventaire`, `fichier_mrm_n1`, `types_compte`, `delta_schema`…) ; contrôles **bloquants** ; export des 21 tables + `resultat_backtest` |
 | Run interactif | `notebooks/itip_fiab_main` | widgets par année (2023 / 2024), métriques table par table |
 | Comparaison | `notebooks/itip_fiab_comparaison` | 2023 vs 2024 côte à côte (via `configurer_run`, plusieurs inventaires dans une session) |
-| Smoke test | `notebooks/itip_fiab_smoke` | tout le pipeline après `git pull`, **aucune écriture** |
+| Smoke test | `notebooks/itip_fiab_smoke` | tout le pipeline après mise à jour du code, **sans export** |
 | Diagnostic clé | `notebooks/itip_fiab_key_audit` | solidité de la clé de matching (read-only) |
 
 Surcharges d'environnement (conf cluster / Job, sans toucher au code) :
