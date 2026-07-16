@@ -1,11 +1,16 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ITIP-FIAB — Investigation du parquet CPT `tetepartete_re` (read-only)
+# MAGIC # ITIP-FIAB — Investigation d'un parquet CPT (read-only)
 # MAGIC
-# MAGIC But : diagnostiquer les **écarts de noms de colonnes** entre le parquet
-# MAGIC candidat (`CPT_PARQUET_PATH`) et la table Hive de référence
-# MAGIC (`db_cfg.cpt_table`, `compteclient.tetepartete_itip`) — le fallback du
-# MAGIC pipeline suppose *mêmes colonnes brutes*, ce qui n'est pas le cas ici.
+# MAGIC But : diagnostiquer les **écarts de noms de colonnes** entre un parquet
+# MAGIC candidat (par défaut `CPT_PARQUET_PATH`, l'export officiel
+# MAGIC `tetepartete_itip.PARQUET`) et la table Hive de référence
+# MAGIC (`db_cfg.cpt_table`, `compteclient.tetepartete_itip`) — la bascule
+# MAGIC parquet du pipeline suppose *mêmes colonnes brutes*.
+# MAGIC
+# MAGIC ⚠ Piège connu : le fichier voisin `tetepartete_re.PARQUET` (même dossier
+# MAGIC `tetepartete_re/prepare/`) est un **autre flux** aux colonnes différentes —
+# MAGIC ce notebook sert précisément à valider qu'on pointe le bon export.
 # MAGIC
 # MAGIC Le notebook :
 # MAGIC 1. lit les deux sources et affiche leurs schémas ;
@@ -30,14 +35,14 @@
 import difflib
 import unicodedata
 
-from config import db_cfg, tech_cfg, MAPPING_CPT
+from config import db_cfg, tech_cfg, MAPPING_CPT, CPT_PARQUET_PATH
 from core.runtime import get_spark
 
 spark = get_spark()
 
 dbutils.widgets.text(
     "parquet_path",
-    "/mnt/lake/compteclient/data/compteclient/tetepartete_re/prepare/tetepartete_re.PARQUET",
+    CPT_PARQUET_PATH or "",
     "Chemin du parquet CPT candidat",
 )
 PARQUET_PATH = dbutils.widgets.get("parquet_path")

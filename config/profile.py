@@ -106,7 +106,9 @@ SHAREPOINT_STAGING = f"{_DBFS_HOME}/sharepoint_staging"  # cache DBFS des télé
 # Chargé EN PRIORITÉ par load_cpt_raw pour accélérer / fiabiliser le run ;
 # fallback automatique sur la table Hive (db_cfg.cpt_table) si le chemin est
 # absent ou illisible. None = lire directement la table Hive.
-CPT_PARQUET_PATH = None
+# ⚠ Bien pointer tetepartete_itip.PARQUET (l'export de la table compte) — le
+# tetepartete_re.PARQUET voisin est un autre flux (colonnes différentes).
+CPT_PARQUET_PATH = "/mnt/lake/compteclient/data/compteclient/tetepartete_re/prepare/tetepartete_itip.PARQUET"
 
 # ── Mode d'exécution ────────────────────────────────────────────────────────
 # Volumétrie dans les logs : les comptages Spark (.count()) PUREMENT informatifs

@@ -67,7 +67,7 @@ Deux principes traversent toute la recette :
 
 | Ingrédient | Source | Chargement |
 |---|---|---|
-| **CPT** (compte) | table Hive `compteclient.tetepartete_itip` (ou export parquet prioritaire `CPT_PARQUET_PATH`) | `core/io/load_data.py` — filtré sur la **vision comptable** (`CC2023`, …) et les **types de compte** (`PB` par défaut) |
+| **CPT** (compte) | export parquet prioritaire `CPT_PARQUET_PATH` (`/mnt/lake/compteclient/data/compteclient/tetepartete_re/prepare/tetepartete_itip.PARQUET`), repli automatique sur la table Hive `compteclient.tetepartete_itip` | `core/io/load_data.py` — filtré sur la **vision comptable** (`CC2023`, …) et les **types de compte** (`PB` par défaut) |
 | **MRM courant** (revue) | CSV `;` ou `.xlsx` déposé à la main sur DBFS | `core/io/sources.py` — l'inventaire de référence de l'exercice audité |
 | **MRM N+1** (facultatif) | même format, inventaire suivant (ex. 30/06/2024 pour l'exercice 2023) | sert **uniquement** à la récupération des déclarations tardives (§5.1) ; absent → pas de `CPT_LATE` |
 
