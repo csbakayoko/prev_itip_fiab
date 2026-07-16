@@ -144,7 +144,7 @@ EXPORT_FORMATS     = ("delta", "excel", "parquet", "csv")
 # ou widget delta_schema du notebook itip_fiab_powerbi.
 # ⚠ L'export Delta EXIGE une DATE_INVENTAIRE résoluble (dd/MM/yyyy) : c'est la
 # clé d'historisation, on refuse d'écrire à l'aveugle (cf. core/io/save_result).
-EXPORT_DELTA_SCHEMA = os.environ.get("ITIP_DELTA_SCHEMA", "hive_metastore.itip_fiab") or None
+EXPORT_DELTA_SCHEMA = os.environ.get("ITIP_DELTA_SCHEMA", "hive_metastore.itip_backtest") or None
 
 # Table Delta du DÉTAIL df_result (dans EXPORT_DELTA_SCHEMA), historisée par
 # date d'inventaire : rejouer un inventaire remplace ses lignes, 2023 et 2024

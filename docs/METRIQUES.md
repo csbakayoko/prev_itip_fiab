@@ -342,7 +342,7 @@ référence `d["date_inventaire"]`.
 Les 22 tables pandas tidy écrites par `export_metriques`.
 
 > **Cible de référence : le metastore Hive.** Chaque table est écrite en Delta
-> dans `EXPORT_DELTA_SCHEMA` (défaut `hive_metastore.itip_fiab`) sous le nom
+> dans `EXPORT_DELTA_SCHEMA` (défaut `hive_metastore.itip_backtest`) sous le nom
 > `metrique_<nom>` — c'est la source que Power BI interroge via le SQL
 > Warehouse, et la seule historisée. Les fichiers **Excel / parquet / CSV /
 > JSON** sur DBFS sont une sortie **secondaire** (import sans Warehouse,
@@ -460,7 +460,7 @@ run) :
 - **JSON** : une ligne par enregistrement, par table.
 
 ### 8.2 Ce qui va en base — nomenclature
-- **Schéma unique** de l'application : `hive_metastore.itip_fiab`
+- **Schéma unique** de l'application : `hive_metastore.itip_backtest`
   (`EXPORT_DELTA_SCHEMA`, créé au premier export).
 - Les 22 tables du §6, une table Delta par métrique : `<schema>.metrique_<nom>`
   (connexion Power BI via SQL Warehouse). Les noms de tables sont **stables** :

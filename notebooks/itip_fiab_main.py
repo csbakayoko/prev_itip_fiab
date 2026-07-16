@@ -222,7 +222,7 @@ display(metrics.pm_par_consigne(d))                 # graphe 9
 # MAGIC lignes (2023 et 2024 coexistent), mais un run avec des **widgets modifiés**
 # MAGIC (autre fichier MRM) sous une date officielle **écrase la partition
 # MAGIC officielle**. Pour explorer sans rien écrire, sauter cette cellule, ou
-# MAGIC forcer une cible de test : `delta_schema="hive_metastore.itip_fiab_test"`.
+# MAGIC forcer une cible de test : `delta_schema="hive_metastore.itip_backtest_test"`.
 
 # COMMAND ----------
 

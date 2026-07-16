@@ -1,7 +1,8 @@
-# Rapport Power BI — maquette et branchement
+# Rapport Power BI « Backtest Prévoyance ITIP » — maquette et branchement
 
-> Cible de restitution de l'étude : un rapport Power BI branché sur les
-> tables Delta du schéma `hive_metastore.itip_fiab` (SQL Warehouse
+> Cible de restitution de l'étude : le rapport Power BI **« Backtest
+> Prévoyance ITIP »**, branché sur les
+> tables Delta du schéma `hive_metastore.itip_backtest` (SQL Warehouse
 > Databricks). Le rapport **ne calcule rien** : toutes les grandeurs viennent
 > des tables `metrique_*` (contrat : [`METRIQUES.md`](METRIQUES.md) §6/§8) —
 > il tope dedans, filtre, met en forme. Un rafraîchissement = relire les

@@ -15,4 +15,4 @@ def test_refuse_schema_vide():
 def test_refuse_date_invalide():
     # "n/d" (date non résolue) → on refuse d'historiser à l'aveugle.
     with pytest.raises(ValueError, match="date_inventaire invalide"):
-        save_result_delta(None, "hive_metastore.itip_fiab", "n/d")
+        save_result_delta(None, "hive_metastore.itip_backtest", "n/d")

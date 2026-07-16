@@ -55,7 +55,7 @@ sans toucher au code (conf du cluster / du Job) :
 
 - `ITIP_DBFS_HOME` — racine DBFS de travail (sources MRM, checkpoints, exports) ;
 - `ITIP_DELTA_SCHEMA` — schéma des tables métriques Delta
-  (défaut `hive_metastore.itip_fiab`, `""` = pas d'export Delta).
+  (défaut `hive_metastore.itip_backtest`, `""` = pas d'export Delta).
 
 Un run paramétré (widgets notebook, paramètres de Job) passe par
 `core.runtime.configurer_run`, qui surcharge date, vision et fichiers MRM —
@@ -65,14 +65,14 @@ et permet aussi de rejouer plusieurs inventaires dans une même session.
 et `EXPORT_FORMATS = ("delta", "excel", "parquet", "csv")` (`config/profile.py`) :
 `main.run` — donc le Job comme un `spark-submit main.py` — écrit les 22 tables
 métriques **et** le détail `resultat_backtest` dans `EXPORT_DELTA_SCHEMA`
-(défaut `hive_metastore.itip_fiab`), puis les fichiers DBFS et les PNG en
+(défaut `hive_metastore.itip_backtest`), puis les fichiers DBFS et les PNG en
 sortie **secondaire**.
 
 | Je veux… | Comment |
 |---|---|
 | Le cœur métier sans aucune écriture | appeler `main.build_df_result` (jamais `run`) — c'est ce que fait `itip_fiab_smoke` |
 | Couper le Hive, garder les fichiers | retirer `"delta"` de `EXPORT_FORMATS`, ou `ITIP_DELTA_SCHEMA=""`, ou widget `delta_schema` vide |
-| Écrire ailleurs (test) | `ITIP_DELTA_SCHEMA=hive_metastore.itip_fiab_test`, ou le widget du Job |
+| Écrire ailleurs (test) | `ITIP_DELTA_SCHEMA=hive_metastore.itip_backtest_test`, ou le widget du Job |
 | Ne rien écrire du tout | `EXPORT_ANALYSES = False` et `EXPORT_GRAPHS = False` |
 
 ⚠ **L'écriture Delta remplace la partition du run** (`replaceWhere` sur
@@ -108,7 +108,7 @@ paramètres sont des widgets, surchargeables en « base parameters » du Job :
 | `date_inventaire` / `vision_cpt` / `fichier_mrm` | vide = config | surcharges unitaires |
 | `fichier_mrm_n1` | vide = config | chemin MRM N+1 ; `aucun` = run sans récupération tardive |
 | `types_compte` | `PB` | types de compte chargés (`PB,HPB`, … ; `*` = tout le portefeuille) |
-| `delta_schema` | `hive_metastore.itip_fiab` | schéma des tables métriques (créé si absent ; vide = pas de Delta) |
+| `delta_schema` | `hive_metastore.itip_backtest` | schéma des tables métriques (créé si absent ; vide = pas de Delta) |
 
 Le run est **bloquant** sur les contrôles (lignes toutes classées, taux de
 chute cohérent, recoupements inter-tables) : un Job vert = des onglets
