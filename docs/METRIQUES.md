@@ -469,7 +469,14 @@ run) :
 - Le **détail du mapping tête par tête** : `<schema>.resultat_backtest`
   (df_result, une ligne = un dossier avec sa clé gagnante
   `TYPE_RECONCILIATION`, ses PM des deux côtés et ses dimensions), pour les
-  analyses fines au-delà des tables agrégées.
+  analyses fines au-delà des tables agrégées. Elle porte aussi `CPT_TECH_DAY`
+  (jour d'extraction de la ligne compte : fraîcheur de la source) et les
+  colonnes `key_*` (la clé qui a permis — ou non — le rapprochement).
+  ⚠ Son schéma **suit celui de `df_result`** : ajouter une colonne au pipeline
+  (nouveau tag, nouvelle colonne mappée) change le schéma de la table. Comme
+  l'écriture est en `replaceWhere`, Delta **refuse** alors d'écrire
+  (`overwriteSchema` est interdit avec `replaceWhere`) : il faut passer un
+  `DROP TABLE` une fois, la table se recrée au run suivant.
 - Toutes historisées par run (`DATE_INVENTAIRE × PERIMETRE`, cf. §6).
 - La table **`synthese`** ✅ tient lieu d'indicateurs scalaires : taux de
   couverture, récupération, chute (+ N+1 séparé), conformité, niveaux de PM,

@@ -83,6 +83,21 @@ L'export Delta **exige** une `DATE_INVENTAIRE` résoluble (`dd/MM/yyyy`) : c'est
 la clé d'historisation, une date `"auto"` / `"n/d"` fait échouer le run plutôt
 que d'historiser à l'aveugle.
 
+⚠ **Changer les colonnes d'une table = un `DROP TABLE` à passer une fois.**
+`replaceWhere` interdit `overwriteSchema` : dès qu'une table Delta existante n'a
+plus le même schéma que les données (colonne ajoutée au pipeline, colonne
+renommée), le run échoue sur `A schema mismatch detected when writing to the
+Delta table`. Les tables sont **dérivées** — le run les recrée :
+
+```sql
+DROP TABLE hive_metastore.itip_backtest.resultat_backtest;
+```
+
+Seules les partitions d'inventaires que tu ne rejoues pas sont perdues. C'est le
+comportement voulu : un échec bruyant vaut mieux qu'une évolution de schéma
+silencieuse (`mergeSchema` laisserait cohabiter anciennes et nouvelles colonnes,
+à moitié nulles, dans les onglets Power BI).
+
 **Source MRM : dépôt manuel (SharePoint désactivé).** Le fichier d'inventaire
 MRM est déposé à la main sur DBFS, puis référencé par son chemin `dbfs:/` dans
 `INVENTAIRES` (`config/profile.py`). Le `.csv` comme le `.xlsx` sont acceptés :

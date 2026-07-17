@@ -96,11 +96,17 @@ continue » : en Job automatisé, on débogue a posteriori sans casser la prod).
 1. Contrôle qualité des colonnes brutes ;
 2. **Dédoublonnage technique last-write** : par clé métier (`n_rpp`,
    survenance, nom, naissance, date d'arrêt, garantie), on garde la version
-   la plus récente (`tech_day` desc) ;
+   la plus récente (`tech_day` desc) — le tri se fait sur la colonne **brute**,
+   avant le mapping ;
 3. Sélection / renommage vers les colonnes canoniques (`MAPPING_CPT`,
-   `config/mappings.py`) ;
-4. Cast des dates (Hive → `date`) et des montants (`PM`, `PSAP` → double,
-   **NULL → 0** : uniformise les exports, neutre pour les métriques) ;
+   `config/mappings.py`). `tech_day` → `TECH_DAY` y figure : la colonne est
+   **conservée** dans `df_result`, donc dans `resultat_backtest` — la fraîcheur
+   de la source se lit ligne par ligne dans l'export ;
+4. Cast des dates (Hive → `date`, `TECH_DAY` inclus) et des montants (`PM`,
+   `PSAP` → double, **NULL → 0** : uniformise les exports, neutre pour les
+   métriques). Le cast rend le type **déterministe quelle que soit la source**
+   (parquet prioritaire ou repli Hive) — sans lui, un repli changerait le type
+   d'une colonne et l'écriture Delta échouerait sur un conflit de schéma ;
 5. **Imputation garantie IP** : garantie nulle **mais** `D_INVALIDITE`
    renseignée ⇒ `GARANTIE = 64` (IP). Faite **avant** les clés — la clé
    stricte est un `concat_ws` qui ignore les NULL : une garantie nulle

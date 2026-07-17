@@ -422,7 +422,12 @@ def clean_cpt(df_raw: DataFrame, cfg: TechnicalConfig = tech_cfg) -> DataFrame:
     df = select_and_rename(df, MAPPING_CPT)
     # CPT : dates Hive en date/timestamp → cast("date") (tolère les timestamps,
     # ex. "1978-09-16 00:00:00", et renvoie null sans lever d'exception).
-    for date_col in ("D_NAISSANCE", "D_SURVENANCE", "D_INVALIDITE"):
+    # TECH_DAY est casté pour la MÊME raison que les montants ci-dessous : rendre
+    # le type déterministe quelle que soit la source (Hive/Parquet), sinon la
+    # colonne changerait de type au repli Hive et l'écriture Delta de
+    # resultat_backtest échouerait sur un conflit de schéma. Le cast ne touche
+    # pas au dédoublonnage : keep_latest_by_keys trie sur le brut, en amont.
+    for date_col in ("D_NAISSANCE", "D_SURVENANCE", "D_INVALIDITE", "TECH_DAY"):
         if date_col in df.columns:
             df = df.withColumn(date_col, F.col(date_col).cast("date"))
     # Montants compte → double explicite + NULL remplacés par 0 (fill_zero).

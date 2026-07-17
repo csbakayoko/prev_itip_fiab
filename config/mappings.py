@@ -20,6 +20,12 @@ MAPPING_CPT = {
     "date_de_mise_en_invalidite"     : "D_INVALIDITE",
     "categorie_d_invalidite"         : "CATEGORIE_INVALIDITE",
     "etat_de_dossier_a_l_extraction" : "ETAT_DOSSIER",
+    # Jour d'extraction de la ligne compte. Sert DÉJÀ au dédoublonnage
+    # last-write (tech_cfg.cpt_order_col, appliqué sur le brut avant ce
+    # mapping) : ici, on le mappe pour le CONSERVER dans df_result et donc
+    # dans resultat_backtest — la fraîcheur de la source se lit alors ligne
+    # par ligne dans l'export.
+    "tech_day"                       : "TECH_DAY",
 }
 
 # ── MRM (CSV) ───────────────────────────────────────────────────────────────
