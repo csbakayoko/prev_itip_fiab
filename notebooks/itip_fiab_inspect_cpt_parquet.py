@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ITIP-FIAB — Investigation d'un parquet CPT (read-only)
+# MAGIC # 🔍 ITIP-FIAB — Investigation d'un parquet CPT (read-only)
 # MAGIC
 # MAGIC But : diagnostiquer les **écarts de noms de colonnes** entre un parquet
 # MAGIC candidat (par défaut `CPT_PARQUET_PATH`, l'export officiel

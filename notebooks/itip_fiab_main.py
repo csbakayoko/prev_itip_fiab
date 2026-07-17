@@ -1,8 +1,10 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ITIP-FIAB — Notebook principal (run par année d'inventaire)
+# MAGIC # 📓 ITIP-FIAB — Notebook principal (exploration par année d'inventaire)
 # MAGIC
-# MAGIC Pipeline de fiabilisation CPT/MRM, puis **couche métriques** (`core.metrics`).
+# MAGIC Pipeline de fiabilisation CPT/MRM, puis **couche métriques** (`core.metrics`),
+# MAGIC déroulés **cellule par cellule** — l'atelier d'exploration et de recette.
+# MAGIC Le run de production (Job) est 🚀 `itip_fiab_powerbi`.
 # MAGIC
 # MAGIC Déroulé :
 # MAGIC 1. Setup (Spark) + **widgets de run** (année d'inventaire 2023 / 2024)

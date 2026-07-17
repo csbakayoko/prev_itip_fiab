@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ITIP-FIAB — Audit de solidité de la clé (read-only)
+# MAGIC # 🗝️ ITIP-FIAB — Audit de solidité de la clé (read-only)
 # MAGIC
 # MAGIC But : jauger `key_strict` AVANT de s'y fier — résistance aux collisions,
 # MAGIC combinatoire (« combien de clés constructibles »), et expérience de

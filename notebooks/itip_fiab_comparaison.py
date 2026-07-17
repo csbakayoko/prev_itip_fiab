@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ITIP-FIAB — Comparaison des inventaires 2023 vs 2024
+# MAGIC # 🔬 ITIP-FIAB — Comparaison des inventaires 2023 vs 2024 (sans écriture)
 # MAGIC
 # MAGIC Rejoue le pipeline complet **pour les deux années dans une même session**,
 # MAGIC puis compare côte à côte :

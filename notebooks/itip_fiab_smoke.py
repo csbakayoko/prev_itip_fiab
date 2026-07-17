@@ -1,11 +1,11 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # ITIP-FIAB — Smoke test (tout le pipeline, sans aucune écriture)
+# MAGIC # 🧪 ITIP-FIAB — Smoke test (tout le pipeline, sans aucune écriture)
 # MAGIC
 # MAGIC But : vérifier de bout en bout que tout tourne après une mise à jour du
-# MAGIC code — pipeline → synthèse → 21 tables métriques → recoupements → 11
-# MAGIC graphiques. Si toutes les cellules passent, le pipeline est bon : lancer
-# MAGIC ensuite `itip_fiab_powerbi` pour l'export réel.
+# MAGIC code — pipeline → synthèse → 22 tables métriques (contrôles inclus) →
+# MAGIC recoupements → 11 graphiques. Si toutes les cellules passent, le pipeline
+# MAGIC est bon : lancer ensuite 🚀 `itip_fiab_powerbi` pour l'export réel.
 # MAGIC
 # MAGIC **Aucune écriture** : ni table Delta, ni fichier DBFS, ni PNG. Ce
 # MAGIC notebook n'appelle donc PAS `main.run` (qui, lui, exporte : le Hive est
@@ -39,7 +39,7 @@ print("df_result :", df_result.count(), "lignes")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Contrôles bloquants : synthèse, 21 tables, recoupements inter-tables
+# MAGIC ## 2. Contrôles bloquants : synthèse, 22 tables, recoupements inter-tables
 # MAGIC
 # MAGIC `print_synthese` renvoie `d` (une seule passe Spark, réutilisée ensuite).
 # MAGIC `toutes_metriques` calcule les tables **en mémoire**, sans les exporter.
@@ -74,6 +74,6 @@ print(f"✔ {len(figs)} graphiques rendus")
 
 # COMMAND ----------
 
-print("✅ SMOKE TEST OK — pipeline, synthèse, 21 tables, recoupements et 11 graphiques.")
+print("✅ SMOKE TEST OK — pipeline, synthèse, 22 tables, recoupements et 11 graphiques.")
 print("   Aucune écriture. Pour exporter : lancer itip_fiab_powerbi.")
 df_result.unpersist()
