@@ -18,7 +18,10 @@ import pandas as pd
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame
 
-from config import CODE_GARANTIE_IT, CODE_GARANTIE_IP, MATCH_LABELS, RECUP_NON_LABEL
+from config import (
+    CODE_GARANTIE_IT, CODE_GARANTIE_IP, MATCH_LABELS, RECUP_NON_LABEL,
+    SEUILS_ECART_PM,
+)
 from core.synthese.synthese_contract import SyntheseScalars
 from core.metrics.base import (
     EXERCICE_INV, EXERCICE_N1, _EXERCICE_ORDRE, _BLOC_ORDRE,
@@ -29,13 +32,17 @@ from core.metrics.base import (
 
 # Libellés des AXES des tables regroupées `chute` et `orphelins` — un axe = un
 # angle d'analyse, la colonne SEGMENT porte la modalité (PB, N-1, Oct, …).
-AXE_ENSEMBLE    = "Ensemble"                  # chute : le taux officiel de l'exercice
-AXE_TYPE_COMPTE = "Type de compte"
-AXE_ANCIENNETE  = "Ancienneté"
-AXE_GARANTIE    = "Garantie"
-AXE_MOIS        = "Mois de survenance"
-AXE_CLAUSE      = "Clause (détail)"           # sous-ensemble : porteurs de clause
-AXE_CLE_NULLE   = "Composante de clé nulle"   # fréquences de nullité, non additif
+AXE_ENSEMBLE      = "Ensemble"                  # chute : le taux officiel de l'exercice
+AXE_TYPE_COMPTE   = "Type de compte"
+AXE_ANCIENNETE    = "Ancienneté"
+AXE_TRANCHE_ECART = "Tranche d'écart"           # distribution des écarts de PM
+AXE_GARANTIE      = "Garantie"
+AXE_MOIS          = "Mois de survenance"
+AXE_CLAUSE        = "Clause (détail)"           # sous-ensemble : porteurs de clause
+AXE_CLE_NULLE     = "Composante de clé nulle"   # fréquences de nullité, non additif
+
+# Tranche centrale de la distribution des écarts (écart strictement = 0).
+TRANCHE_ECART_NUL = "Écart nul"
 
 
 # ============================================================================
@@ -160,11 +167,132 @@ def chute_par_anciennete(
 
 
 # ============================================================================
+# DISTRIBUTION DES ÉCARTS DE PM (tranches de seuils)
+# ============================================================================
+# Volumétrie des dossiers sur/sous-provisionnés par AMPLEUR d'écart : le taux
+# agrégé dit le solde, la distribution dit combien de dossiers portent un écart
+# et à quel niveau (un taux quasi nul peut cacher de gros écarts compensés).
+
+def _fmt_seuil(seuil: float) -> str:
+    """Seuil lisible : 1 000 → « 1 k€ », 500 → « 500 € »."""
+    return f"{seuil / 1000:g} k€" if seuil >= 1000 else f"{seuil:g} €"
+
+
+def tranches_ecart(seuils=SEUILS_ECART_PM) -> list:
+    """Les tranches de la distribution des écarts — [(ordre, libellé, basse, haute)].
+
+    Découpage SYMÉTRIQUE de l'écart signé (PM_MRM − PM_CPT) autour de zéro,
+    une tranche par seuil de chaque côté : ordre 1 = la plus sur-provisionnée
+    (écart le plus négatif, marge), dernière = la plus sous-provisionnée
+    (risque). Bornes en € : basse EXCLUSIVE, haute INCLUSIVE, None = infini ;
+    la tranche « Écart nul » (0, 0) est prioritaire sur ses voisines.
+    """
+    s = sorted({float(x) for x in seuils})
+    bornes = [(f"≤ −{_fmt_seuil(s[-1])}", None, -s[-1])]
+    bornes += [(f"−{_fmt_seuil(hi)} à −{_fmt_seuil(lo)}", -hi, -lo)
+               for hi, lo in zip(s[::-1], s[-2::-1])]
+    bornes += [
+        (f"−{_fmt_seuil(s[0])} à 0", -s[0], 0.0),
+        (TRANCHE_ECART_NUL, 0.0, 0.0),
+        (f"0 à +{_fmt_seuil(s[0])}", 0.0, s[0]),
+    ]
+    bornes += [(f"+{_fmt_seuil(lo)} à +{_fmt_seuil(hi)}", lo, hi)
+               for lo, hi in zip(s, s[1:])]
+    bornes += [(f"> +{_fmt_seuil(s[-1])}", s[-1], None)]
+    return [(i, lbl, lo, hi) for i, (lbl, lo, hi) in enumerate(bornes, start=1)]
+
+
+def _tranche_ecart_expr(tranches: list) -> F.Column:
+    """Libellé de tranche depuis la colonne _ecart — « Écart nul » d'abord
+    (la borne haute inclusive de la tranche voisine contiendrait le zéro)."""
+    e    = F.col("_ecart")
+    expr = F.when(e == 0, F.lit(TRANCHE_ECART_NUL))
+    for _, libelle, basse, haute in tranches:
+        if libelle == TRANCHE_ECART_NUL:
+            continue
+        cond = F.lit(True)
+        if basse is not None:
+            cond = cond & (e > F.lit(basse))
+        if haute is not None:
+            cond = cond & (e <= F.lit(haute))
+        expr = expr.when(cond, F.lit(libelle))
+    return expr
+
+
+def _finalise_chute_par_tranche_ecart(pdf: pd.DataFrame, tranches: list) -> pd.DataFrame:
+    """Tranches complétées à zéro (axe stable en restitution), taux/poids par
+    bloc EXERCICE, ORDRE de tri (1 = la plus sur-provisionnée) — pure pandas."""
+    libelles = [lbl for _, lbl, _, _ in tranches]
+    ordres   = {lbl: o for o, lbl, _, _ in tranches}
+    nb_cols  = ["NB_DOSSIERS", "NB_SOUS_PROVISION", "NB_SUR_PROVISION", "NB_ECART_NUL"]
+    pm_cols  = ["PM_MRM", "PM_CPT", "ECART"]
+
+    if pdf.empty:
+        return pd.DataFrame(columns=["EXERCICE", "TRANCHE_ECART", "ORDRE",
+                                     *nb_cols, *pm_cols,
+                                     "TAUX_CHUTE_PCT", "POIDS_PM_PCT"])
+    blocs = []
+    for exercice, bloc in pdf.groupby("EXERCICE"):
+        bloc = bloc.set_index("TRANCHE_ECART").reindex(libelles)
+        bloc[nb_cols] = bloc[nb_cols].fillna(0).astype(int)
+        bloc[pm_cols] = bloc[pm_cols].fillna(0.0)
+        bloc["EXERCICE"] = exercice
+        blocs.append(bloc.rename_axis("TRANCHE_ECART").reset_index())
+    out = _taux_poids_par_exercice(pd.concat(blocs, ignore_index=True))
+    out["ORDRE"] = out["TRANCHE_ECART"].map(ordres)
+    return (
+        out.sort_values(["EXERCICE", "ORDRE"],
+                        key=lambda s: s.map(_EXERCICE_ORDRE) if s.name == "EXERCICE" else s)
+        .reset_index(drop=True)
+        [["EXERCICE", "TRANCHE_ECART", "ORDRE", *nb_cols, *pm_cols,
+          "TAUX_CHUTE_PCT", "POIDS_PM_PCT"]]
+    )
+
+
+def chute_par_tranche_ecart(df_result: DataFrame, seuils=SEUILS_ECART_PM) -> pd.DataFrame:
+    """Distribution des écarts de PM par tranche de seuils × exercice — graphe 12.
+
+    Découpe l'univers de chute (même filtre que les autres axes) par NIVEAU
+    d'écart signé (PM_MRM − PM_CPT) : la volumétrie des dossiers
+    sur-provisionnés (écart < 0, marge) et sous-provisionnés (écart > 0,
+    risque) à chaque seuil de `SEUILS_ECART_PM` (config). Les tranches sans
+    dossier sont conservées à zéro (axe stable dans Power BI). Même structure
+    que les autres axes : deux blocs EXERCICE (« Inventaire courant » = stats
+    globales / « Récupérés N+1 » = analyse séparée), et dans chaque bloc
+    Σ des tranches (nb, PM, écart) redonne la ligne « Ensemble ».
+    """
+    tranches = tranches_ecart(seuils)
+    df = (
+        _filter_chute_universe(_with_mrm_action(df_result))
+        .withColumn("EXERCICE",
+            F.when(F.col("TYPE_RECONCILIATION") == "CPT_LATE", F.lit(EXERCICE_N1))
+             .otherwise(F.lit(EXERCICE_INV)))
+        .withColumn("_ecart", F.coalesce(F.col("MRM_PM"), F.lit(0.0))
+                            - F.coalesce(F.col("CPT_PM"), F.lit(0.0)))
+        .withColumn("TRANCHE_ECART", _tranche_ecart_expr(tranches))
+    )
+    pdf = (
+        df.groupBy("EXERCICE", "TRANCHE_ECART")
+        .agg(
+            F.count("*").alias("NB_DOSSIERS"),
+            F.sum(F.when(F.col("_ecart") > 0, 1).otherwise(0)).alias("NB_SOUS_PROVISION"),
+            F.sum(F.when(F.col("_ecart") < 0, 1).otherwise(0)).alias("NB_SUR_PROVISION"),
+            F.sum(F.when(F.col("_ecart") == 0, 1).otherwise(0)).alias("NB_ECART_NUL"),
+            F.coalesce(F.sum("MRM_PM"), F.lit(0.0)).alias("PM_MRM"),
+            F.coalesce(F.sum("CPT_PM"), F.lit(0.0)).alias("PM_CPT"),
+            F.sum("_ecart").alias("ECART"),
+        )
+        .toPandas()
+    )
+    return _finalise_chute_par_tranche_ecart(pdf, tranches)
+
+
+# ============================================================================
 # TABLE REGROUPÉE « CHUTE » — le taux sous tous ses angles
 # ============================================================================
 
 _CHUTE_COLONNES = [
-    "EXERCICE", "AXE", "SEGMENT", "TYPE_COMPTE",
+    "EXERCICE", "AXE", "SEGMENT", "TYPE_COMPTE", "ORDRE",
     "NB_DOSSIERS", "NB_SOUS_PROVISION", "NB_SUR_PROVISION", "NB_ECART_NUL",
     "PM_MRM", "PM_CPT", "ECART", "TAUX_CHUTE_PCT", "POIDS_PM_PCT",
 ]
@@ -185,6 +313,7 @@ def _ensemble_chute(d: SyntheseScalars) -> pd.DataFrame:
         "EXERCICE"          : lbl,
         "AXE"               : AXE_ENSEMBLE,
         "SEGMENT"           : AXE_ENSEMBLE,
+        "ORDRE"             : 0,
         "NB_DOSSIERS"       : nb,
         "NB_SOUS_PROVISION" : None,
         "NB_SUR_PROVISION"  : None,
@@ -205,41 +334,57 @@ def _empiler_axe(pdf: pd.DataFrame, axe: str, segment_col: str) -> pd.DataFrame:
 
 
 def _assemble_chute(
-    ensemble       : pd.DataFrame,
-    par_type_compte: pd.DataFrame,
-    par_anciennete : pd.DataFrame,
+    ensemble         : pd.DataFrame,
+    par_type_compte  : pd.DataFrame,
+    par_anciennete   : pd.DataFrame,
+    par_tranche_ecart: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Empile les trois angles dans le schéma commun — pure pandas.
+    """Empile les quatre angles dans le schéma commun — pure pandas.
 
     L'axe « Type de compte » garde sa colonne TYPE_COMPTE en plus de SEGMENT
     (grain de l'axe — cible des relations Power BI), comme dans `orphelins`.
+    ORDRE = ordre de lecture des SEGMENT dans l'axe (« Trier par colonne »
+    Power BI) — STABLE par SEGMENT, identique dans les deux blocs EXERCICE :
+    0 pour « Ensemble », rang de PM MRM totale par type de compte, ordre
+    N → N-2+ pour l'ancienneté, du plus sur-provisionné au plus
+    sous-provisionné pour les tranches d'écart.
     """
     tc = par_type_compte.copy()
     tc.insert(0, "AXE", AXE_TYPE_COMPTE)
     tc["SEGMENT"] = tc["TYPE_COMPTE"]
+    pm_par_type = tc.groupby("SEGMENT")["PM_MRM"].sum().sort_values(ascending=False)
+    tc["ORDRE"] = tc["SEGMENT"].map({seg: i for i, seg in enumerate(pm_par_type.index, start=1)})
+
+    anc = _empiler_axe(par_anciennete, AXE_ANCIENNETE, "BLOC_ANCIENNETE")
+    anc["ORDRE"] = anc["SEGMENT"].map(_BLOC_ORDRE) + 1
+
     blocs = [
         ensemble,
         tc,
-        _empiler_axe(par_anciennete, AXE_ANCIENNETE, "BLOC_ANCIENNETE"),
+        anc,
+        _empiler_axe(par_tranche_ecart, AXE_TRANCHE_ECART, "TRANCHE_ECART"),
     ]
     return pd.concat(blocs, ignore_index=True).reindex(columns=_CHUTE_COLONNES)
 
 
 def chute(df_result: DataFrame, d: SyntheseScalars) -> pd.DataFrame:
-    """LE taux de chute sous tous ses angles — une seule table (graphes 3, 7, 10).
+    """LE taux de chute sous tous ses angles — une seule table (graphes 3, 7, 10, 12).
 
     Une ligne par EXERCICE × AXE × SEGMENT :
     - AXE « Ensemble » : le taux officiel de l'exercice (stats globales pour
       l'inventaire courant, analyse séparée pour les récupérés N+1) ;
-    - AXE « Type de compte » (PB / HPB / …) et « Ancienneté » (N / N-1 / N-2
-      et antérieur) : les ventilations — dans chaque bloc EXERCICE × AXE,
-      Σ des lignes (Σ écart / Σ PM MRM) redonne le taux « Ensemble » et les
-      poids PM se lisent dans le bloc (garanti par controles_coherence).
+    - AXE « Type de compte » (PB / HPB / …), « Ancienneté » (N / N-1 / N-2
+      et antérieur) et « Tranche d'écart » (distribution des écarts de PM,
+      seuils `SEUILS_ECART_PM`) : les ventilations — dans chaque bloc
+      EXERCICE × AXE, Σ des lignes (Σ écart / Σ PM MRM) redonne le taux
+      « Ensemble » et les poids PM se lisent dans le bloc (garanti par
+      controles_coherence). ORDRE trie les SEGMENT dans chaque axe.
     """
     return _assemble_chute(
         _ensemble_chute(d),
         chute_par_type_compte(df_result),
         chute_par_anciennete(df_result, _annee_inventaire(d)),
+        chute_par_tranche_ecart(df_result),
     )
 
 

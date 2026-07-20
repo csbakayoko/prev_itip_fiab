@@ -7,6 +7,8 @@
 # MAGIC - les **KPI de tête** (taux de chute, couverture, conformité, récupération) ;
 # MAGIC - le **taux de chute par ancienneté** (N / N-1 / N-2+) — la méthode
 # MAGIC   d'inventaire diffère selon l'année de survenance ;
+# MAGIC - la **distribution des écarts de PM** (tranches de seuils : combien de
+# MAGIC   dossiers sur/sous-provisionnés, à quelle ampleur) ;
 # MAGIC - l'**investigation des orphelins** (par type de compte, par compte,
 # MAGIC   garantie, nullité de clé).
 # MAGIC
@@ -141,6 +143,34 @@ pivot_taux = anc_detail.pivot_table(
     index="BLOC_ANCIENNETE", columns="ANNEE", values="TAUX_CHUTE_PCT", aggfunc="first",
 ).reindex([metrics.BLOC_N, metrics.BLOC_N1, metrics.BLOC_N2_PLUS, metrics.BLOC_INDET]).dropna(how="all")
 display(pivot_taux.reset_index())
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 4bis. Distribution des écarts de PM — 2023 vs 2024
+# MAGIC
+# MAGIC Volumétrie des dossiers par tranche d'écart signé (PM revue − PM compte,
+# MAGIC positif = sous-provisionné / négatif = sur-provisionné, seuils
+# MAGIC `SEUILS_ECART_PM`). Un déplacement de la masse entre deux années se lit
+# MAGIC ici avant même de regarder le taux : le solde peut rester stable alors
+# MAGIC que les écarts unitaires grossissent des deux côtés.
+
+# COMMAND ----------
+
+def _tranches_inv(annee: str) -> pd.DataFrame:
+    """Axe « Tranche d'écart » de la table chute, bloc inventaire courant."""
+    ch = resultats[annee]["tables"]["chute"]
+    tr = ch[(ch["AXE"] == metrics.AXE_TRANCHE_ECART)
+            & (ch["EXERCICE"] == metrics.EXERCICE_INV)].copy()
+    return tr.sort_values("ORDRE")
+
+
+pivot_tranches = pd.concat([
+    _tranches_inv(an).set_index("SEGMENT")[["NB_DOSSIERS"]].rename(
+        columns={"NB_DOSSIERS": f"NB_{an}"})
+    for an in ANNEES
+], axis=1)
+display(pivot_tranches.reset_index().rename(columns={"SEGMENT": "TRANCHE_ECART"}))
 
 # COMMAND ----------
 

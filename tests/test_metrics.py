@@ -13,14 +13,15 @@ pd = pytest.importorskip("pandas")
 from core.synthese.synthese_scalars import _scalars_from_rows
 from core.metrics import (
     _finalise_chute_par_type_compte, _finalise_chute_par_anciennete,
+    _finalise_chute_par_tranche_ecart, tranches_ecart,
     _finalise_consignes_par_type_compte,
     _finalise_orphelins, _annee_inventaire, EXERCICE_INV, EXERCICE_N1,
     BLOC_N, BLOC_N1, BLOC_N2_PLUS,
-    consignes, couverture, synthese, bilan_cas,
+    dim_run, consignes, couverture, synthese, bilan_cas,
     _assemble_chute, _assemble_orphelins,
-    AXE_ENSEMBLE, AXE_TYPE_COMPTE, AXE_ANCIENNETE,
+    AXE_ENSEMBLE, AXE_TYPE_COMPTE, AXE_ANCIENNETE, AXE_TRANCHE_ECART,
     AXE_GARANTIE, AXE_MOIS, AXE_CLAUSE, AXE_CLE_NULLE,
-    SANS_CONSIGNE, UNIVERS_COMPTE, UNIVERS_REVUE,
+    SANS_CONSIGNE, TRANCHE_ECART_NUL, UNIVERS_COMPTE, UNIVERS_REVUE,
 )
 from core.metrics.agregats import _ensemble_chute
 from core.metrics.coherence import controles_coherence
@@ -141,6 +142,59 @@ def test_annee_inventaire_parse():
     assert _annee_inventaire({}) is None
 
 
+# ── tranches_ecart : distribution des écarts de PM ───────────────────────────
+
+def test_tranches_ecart_bornes_et_libelles():
+    tr = tranches_ecart((1_000, 5_000, 20_000, 100_000))
+    # 2 × 4 seuils + 3 (bornes infinies + écart nul) = 11 tranches, ordre 1..11.
+    assert len(tr) == 11
+    assert [o for o, *_ in tr] == list(range(1, 12))
+    libelles = [lbl for _, lbl, _, _ in tr]
+    assert libelles[0] == "≤ −100 k€" and libelles[-1] == "> +100 k€"
+    assert libelles[5] == TRANCHE_ECART_NUL           # la tranche centrale
+    # Symétrie : autant de tranches de chaque côté de l'écart nul.
+    assert len(libelles[:5]) == len(libelles[6:])
+    # Bornes : basse exclusive / haute inclusive, None = infini.
+    _, _, basse, haute = tr[0]
+    assert basse is None and haute == -100_000.0
+    _, _, basse, haute = tr[-1]
+    assert basse == 100_000.0 and haute is None
+
+
+def test_finalise_tranches_completees_a_zero():
+    tr  = tranches_ecart()
+    pdf = pd.DataFrame([{
+        "EXERCICE": EXERCICE_INV, "TRANCHE_ECART": "0 à +1 k€",
+        "NB_DOSSIERS": 3, "NB_SOUS_PROVISION": 3, "NB_SUR_PROVISION": 0,
+        "NB_ECART_NUL": 0, "PM_MRM": 100.0, "PM_CPT": 70.0, "ECART": 30.0,
+    }])
+    out = _finalise_chute_par_tranche_ecart(pdf, tr)
+    # Axe stable : TOUTES les tranches présentes, les vides à zéro.
+    assert len(out) == len(tr)
+    assert out["NB_DOSSIERS"].sum() == 3              # rien d'inventé
+    assert list(out["ORDRE"]) == [o for o, *_ in tr]  # tri par ORDRE
+    ligne = out[out["TRANCHE_ECART"] == "0 à +1 k€"].iloc[0]
+    assert ligne["TAUX_CHUTE_PCT"] == 30.0            # 30 / 100 × 100
+    assert ligne["POIDS_PM_PCT"] == 100.0             # seule PM de l'exercice
+
+
+def test_finalise_tranches_vide():
+    out = _finalise_chute_par_tranche_ecart(pd.DataFrame(), tranches_ecart())
+    assert out.empty and "TRANCHE_ECART" in out.columns
+
+
+# ── dim_run : la dimension de run (pivot du modèle en étoile) ────────────────
+
+def test_dim_run_une_ligne_et_attributs():
+    from config import RUN_PARAMS
+    out = dim_run({"date_inventaire": "31/12/2023"})
+    assert len(out) == 1
+    ligne = out.iloc[0]
+    assert ligne["ANNEE_INVENTAIRE"] == 2023
+    assert ligne["VISION_CPT"] == RUN_PARAMS.get("cpt_vision")
+    assert ligne["AVEC_MRM_N1"] == bool(RUN_PARAMS.get("fichier_mrm_n1"))
+
+
 # ── _finalise_consignes_par_type_compte : tableau de bord des consignes ──────
 
 def test_finalise_consignes_par_type_compte():
@@ -251,17 +305,31 @@ def _chute_fixture(d):
          "NB_SOUS_PROVISION": 1, "NB_SUR_PROVISION": 0, "NB_ECART_NUL": 0,
          "PM_MRM": 60.0, "PM_CPT": 55.0, "ECART": 5.0},
     ]))
-    return _assemble_chute(_ensemble_chute(d), tc, anc)
+    # Les écarts (20 € et 5 €) tombent dans la tranche « 0 à +1 k€ ».
+    tr = _finalise_chute_par_tranche_ecart(pd.DataFrame([
+        {"EXERCICE": EXERCICE_INV, "TRANCHE_ECART": "0 à +1 k€", "NB_DOSSIERS": 1,
+         "NB_SOUS_PROVISION": 1, "NB_SUR_PROVISION": 0, "NB_ECART_NUL": 0,
+         "PM_MRM": 100.0, "PM_CPT": 80.0, "ECART": 20.0},
+        {"EXERCICE": EXERCICE_N1, "TRANCHE_ECART": "0 à +1 k€", "NB_DOSSIERS": 1,
+         "NB_SOUS_PROVISION": 1, "NB_SUR_PROVISION": 0, "NB_ECART_NUL": 0,
+         "PM_MRM": 60.0, "PM_CPT": 55.0, "ECART": 5.0},
+    ]), tranches_ecart())
+    return _assemble_chute(_ensemble_chute(d), tc, anc, tr)
 
 
-def test_assemble_chute_trois_axes_et_taux_officiels():
+def test_assemble_chute_quatre_axes_et_taux_officiels():
     d   = _d()
     out = _chute_fixture(d)
-    assert list(out["AXE"].unique()) == [AXE_ENSEMBLE, AXE_TYPE_COMPTE, AXE_ANCIENNETE]
+    assert list(out["AXE"].unique()) == [AXE_ENSEMBLE, AXE_TYPE_COMPTE,
+                                         AXE_ANCIENNETE, AXE_TRANCHE_ECART]
     ens_inv = out[(out["AXE"] == AXE_ENSEMBLE) & (out["EXERCICE"] == EXERCICE_INV)].iloc[0]
     # La ligne « Ensemble » porte le taux OFFICIEL de compute_synthese.
     assert ens_inv["TAUX_CHUTE_PCT"] == d["taux_chute_inventaire"]
     assert ens_inv["SEGMENT"] == AXE_ENSEMBLE and ens_inv["POIDS_PM_PCT"] == 100.0
+    # ORDRE : stable par SEGMENT (« Trier par colonne » Power BI) — un même
+    # SEGMENT porte le même ORDRE dans les deux blocs EXERCICE.
+    assert out["ORDRE"].notna().all()
+    assert (out.groupby("SEGMENT")["ORDRE"].nunique() == 1).all()
 
 
 def _orphelins_fixture():
@@ -301,7 +369,7 @@ def test_assemble_orphelins_six_angles():
 
 
 def test_controles_coherence_de_bout_en_bout():
-    """Les 8 tables construites sur le même scénario → tous les recoupements OK."""
+    """Les 9 tables construites sur le même scénario → tous les recoupements OK."""
     d   = _d()
     cpc = pd.DataFrame([
         {"TYPE_COMPTE": "PB", "CONSIGNE": "KEEP", "NB_DOSSIERS": 2,
@@ -312,6 +380,7 @@ def test_controles_coherence_de_bout_en_bout():
          "PM_MRM": 10.0, "PM_CPT": 0.0, "NB_NON_REMONTE_DF": 0},
     ])
     tables = {
+        "dim_run"                  : dim_run(d),
         "synthese"                 : synthese(d),
         "bilan_cas"                : bilan_cas(d),
         "couverture"               : couverture(d),

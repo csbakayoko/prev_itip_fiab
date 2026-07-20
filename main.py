@@ -6,10 +6,10 @@ Spine essentiel, multi-périmètre :
 
 Le calcul des indicateurs vit dans core.metrics (des fonctions qui
 reshapent le dict de la synthèse — une passe Spark — en tables pandas),
-leur mise en forme dans core.metrics.viz (11 graphiques-messages).
+leur mise en forme dans core.metrics.viz (12 graphiques-messages).
 
 SORTIES — `run` écrit par défaut (EXPORT_ANALYSES = True) :
-    - les 22 tables métriques et le détail `resultat_backtest` dans le
+    - les 9 tables métriques et le détail `resultat_backtest` dans le
       metastore Hive (tables Delta historisées par DATE_INVENTAIRE × PERIMETRE)
       — c'est la cible de RÉFÉRENCE, celle que Power BI interroge ;
     - les fichiers DBFS (Excel / parquet / csv) et les PNG des graphiques, en

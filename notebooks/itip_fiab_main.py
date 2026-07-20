@@ -11,12 +11,15 @@
 # MAGIC 2. Construction de `df_result` (`main.build_df_result`)
 # MAGIC 3. Synthèse console (rappel)
 # MAGIC 4. **Métriques** : une fonction par indicateur, affichées en table
-# MAGIC    (dont chute par ancienneté + investigation des orphelins)
+# MAGIC    (dont chute par ancienneté, distribution des écarts de PM et
+# MAGIC    investigation des orphelins)
 # MAGIC 5. **Export** des métriques — tables Delta (référence) + fichiers DBFS
 # MAGIC 6. Graphiques de restitution *(optionnel)*
 # MAGIC
 # MAGIC L'**année d'inventaire** se choisit via le widget en tête (2023 / 2024) ;
 # MAGIC les fichiers MRM, la vision CPT et la date sont des widgets éditables.
+# MAGIC Pour dérouler UNE vision avec toutes les explications : 📗
+# MAGIC `itip_fiab_vision_cc2023` / 📘 `itip_fiab_vision_cc2024` (sans écriture).
 # MAGIC Pour comparer les deux années côte à côte : `itip_fiab_comparaison`.
 
 # COMMAND ----------
@@ -106,13 +109,14 @@ annee_inv = metrics._annee_inventaire(d)   # année dérivée de d["date_inventa
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Métriques — les 8 tables (une table = un sujet complet)
+# MAGIC ## 4. Métriques — les 9 tables (une table = un sujet complet)
 # MAGIC
 # MAGIC Des fonctions simples (`core.metrics`) : les tables scalaires prennent `d`
-# MAGIC (`synthese`, `bilan_cas`, `consignes`, `couverture`) ; `chute` et
-# MAGIC `orphelins` ré-agrègent `df_result` côté Spark. Les angles d'analyse sont
-# MAGIC des **colonnes** (`EXERCICE`, `AXE`, `SEGMENT`, `UNIVERS`) — mêmes tables
-# MAGIC que l'export Power BI.
+# MAGIC (`dim_run`, `synthese`, `bilan_cas`, `consignes`, `couverture`) ; `chute`
+# MAGIC et `orphelins` ré-agrègent `df_result` côté Spark. Les angles d'analyse
+# MAGIC sont des **colonnes** (`EXERCICE`, `AXE`, `SEGMENT`, `UNIVERS`) — mêmes
+# MAGIC tables que l'export Power BI, reliées entre elles par `CLE_RUN` à l'export
+# MAGIC (modèle en étoile, pivot `dim_run`).
 
 # COMMAND ----------
 
@@ -132,15 +136,31 @@ display(metrics.bilan_cas(d))   # LE bilan cas par cas (avec explications)
 # MAGIC %md
 # MAGIC ### La chute sous tous ses angles — `AXE` × `EXERCICE`
 # MAGIC
-# MAGIC `AXE` = Ensemble (le taux officiel) / Type de compte / Ancienneté ;
-# MAGIC `EXERCICE` sépare l'inventaire courant (stats globales) des récupérés N+1
-# MAGIC (analyse séparée). Dans chaque bloc, Σ des lignes redonne le taux
-# MAGIC « Ensemble » ; l'ancienneté suit la méthode d'inventaire (revue tête par
-# MAGIC tête sur N-1).
+# MAGIC `AXE` = Ensemble (le taux officiel) / Type de compte / Ancienneté /
+# MAGIC Tranche d'écart ; `EXERCICE` sépare l'inventaire courant (stats globales)
+# MAGIC des récupérés N+1 (analyse séparée). Dans chaque bloc, Σ des lignes
+# MAGIC redonne le taux « Ensemble » ; l'ancienneté suit la méthode d'inventaire
+# MAGIC (revue tête par tête sur N-1) ; `ORDRE` trie les segments dans chaque axe.
 
 # COMMAND ----------
 
 display(metrics.chute(df_result, d))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### La distribution des écarts de PM — dossiers sur/sous-provisionnés
+# MAGIC
+# MAGIC Le taux agrégé donne le solde ; la distribution donne le détail : combien
+# MAGIC de dossiers portent un écart, dans quel sens (positif = sous-provisionné,
+# MAGIC risque ; négatif = sur-provisionné, marge) et à quelle ampleur — un taux
+# MAGIC quasi nul peut cacher de gros écarts compensés. Tranches par seuils
+# MAGIC (`SEUILS_ECART_PM`, config) : ±1 k€, ±5 k€, ±20 k€, ±100 k€ ; les vides
+# MAGIC restent à zéro (axe stable).
+
+# COMMAND ----------
+
+display(metrics.chute_par_tranche_ecart(df_result))
 
 # COMMAND ----------
 
@@ -218,8 +238,9 @@ _ = metrics.export_metriques(
 # MAGIC %md
 # MAGIC ## 6. Graphiques de restitution *(optionnel)*
 # MAGIC
-# MAGIC Restitution matplotlib (affichage + PNG DBFS), 11 graphiques (dont chute par
-# MAGIC ancienneté et orphelins par compte). Décommentez pour lancer.
+# MAGIC Restitution matplotlib (affichage + PNG DBFS), 12 graphiques (dont chute
+# MAGIC par ancienneté, distribution des écarts et orphelins par compte).
+# MAGIC Décommentez pour lancer.
 
 # COMMAND ----------
 

@@ -85,6 +85,16 @@ RECUP_NON_LABEL       = "CPT_RECUP_NON"
 ORPHAN_PM_THRESHOLD   = 20_000
 ORPHAN_FIN_ANNEE_MOIS = (11, 12)
 
+# Distribution des écarts de PM (écart signé = PM_MRM − PM_CPT) : les SEUILS, en
+# euros, du découpage en tranches — axe « Tranche d'écart » de la table `chute`
+# (volumétrie des dossiers sur/sous-provisionnés par ampleur d'écart, graphe 12).
+# Tranches SYMÉTRIQUES autour de l'écart nul : pour chaque seuil s, une tranche
+# côté sur-provisionné (écart < 0, marge) et une côté sous-provisionné
+# (écart > 0, risque), plus la tranche « Écart nul » — soit 2×len(seuils)+3
+# tranches. Modifier les seuils ici suffit : bornes, libellés et ordre de tri
+# en dérivent (core.metrics.agregats.tranches_ecart).
+SEUILS_ECART_PM = (1_000, 5_000, 20_000, 100_000)
+
 
 # IMPUTATION GARANTIE (préparation des données) — transform.impute_garantie_ip :
 # une ligne compte dont la garantie est nulle/vide ALORS QUE la date de passage en

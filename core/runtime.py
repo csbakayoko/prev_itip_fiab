@@ -88,7 +88,9 @@ def configurer_run(
             else [t.strip().upper() for t in types_compte.split(",") if t.strip()]
         )
 
-    # RUN_PARAMS est le dict PARTAGÉ lu par load_mrm_raw → mutation in place.
+    # RUN_PARAMS est le dict PARTAGÉ lu par load_mrm_raw (fichiers) et par la
+    # table de dimension dim_run (vision) → mutation in place.
+    RUN_PARAMS["cpt_vision"]  = cpt_vision
     RUN_PARAMS["fichier_mrm"] = fichier_mrm
     if fichier_mrm_n1:
         RUN_PARAMS["fichier_mrm_n1"] = fichier_mrm_n1

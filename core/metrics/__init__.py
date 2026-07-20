@@ -9,23 +9,25 @@ FAÇADE du paquet : ré-exporte l'API des modules thématiques, pour que
                     dimensions CLAUSE / TYPE_COMPTE, univers de chute,
                     chemins DBFS)
     scalaires.py  — les métriques depuis `d` (dict de compute_synthese) :
-                    synthese, bilan_cas, consignes, couverture
+                    dim_run, synthese, bilan_cas, consignes, couverture
     agregats.py   — les ré-agrégations Spark de df_result et les tables
                     regroupées `chute` / `orphelins` (angles empilés par AXE)
     coherence.py  — controles_coherence (recoupements inter-tables)
     export.py     — toutes_metriques + export_metriques (multi-format)
-    viz.py        — les 11 graphiques matplotlib (import séparé)
+    viz.py        — les 12 graphiques matplotlib (import séparé)
 
 Les fonctions renvoient des DONNÉES BRUTES (nombres, pas de chaînes
 formatées) : le formatage (M€, %, séparateurs FR) reste au niveau
 restitution. Contrat des métriques : docs/METRIQUES.md.
 
-LES 8 TABLES EXPORTÉES (toutes_metriques) — une table = un sujet complet,
+LES 9 TABLES EXPORTÉES (toutes_metriques) — une table = un sujet complet,
 les angles d'analyse sont des colonnes (EXERCICE, AXE, SEGMENT, UNIVERS) :
-    synthese, bilan_cas, couverture, chute, consignes,
-    consignes_par_type_compte, orphelins, controles_coherence.
+    dim_run (la dimension de run, pivot du modèle en étoile — reliée à
+    chaque table par la clé CLE_RUN posée à l'export), synthese, bilan_cas,
+    couverture, chute, consignes, consignes_par_type_compte, orphelins,
+    controles_coherence.
 
-Correspondance avec les 11 graphiques (core.metrics.viz) — les graphes se
+Correspondance avec les 12 graphiques (core.metrics.viz) — les graphes se
 nourrissent de `d` et des ré-agrégations par axe (briques des tables) :
     1. compte_justification   → couverture(d), univers Compte
     2. couverture_mrm         → couverture(d), univers Revue MRM
@@ -38,6 +40,7 @@ nourrissent de `d` et des ré-agrégations par axe (briques des tables) :
     9. pm_par_consigne        → consignes(d), exercice courant
    10. chute_par_anciennete   → chute_par_anciennete(df_result, annee)  [× exercice]
    11. orphelins_par_compte   → orphelins_par_clause(df_result)
+   12. distribution_ecarts    → chute_par_tranche_ecart(df_result)  [× exercice]
 
 AXE D'ANALYSE : les métriques se ventilent par TYPE_COMPTE (PB / HPB / …), le
 périmètre métier. La CLAUSE n'est PAS un axe : c'est un substitut du RPP dans
@@ -68,6 +71,7 @@ from core.metrics.base import (
     BLOC_INDET,
 )
 from core.metrics.scalaires import (
+    dim_run,
     synthese,
     bilan_cas,
     consignes,
@@ -81,6 +85,8 @@ from core.metrics.agregats import (
     orphelins,
     chute_par_type_compte,
     chute_par_anciennete,
+    chute_par_tranche_ecart,
+    tranches_ecart,
     anomalies_cpt_only,
     consignes_par_type_compte,
     orphelins_par_type_compte,
@@ -91,14 +97,17 @@ from core.metrics.agregats import (
     AXE_ENSEMBLE,
     AXE_TYPE_COMPTE,
     AXE_ANCIENNETE,
+    AXE_TRANCHE_ECART,
     AXE_GARANTIE,
     AXE_MOIS,
     AXE_CLAUSE,
     AXE_CLE_NULLE,
+    TRANCHE_ECART_NUL,
     _assemble_chute,
     _assemble_orphelins,
     _finalise_chute_par_type_compte,
     _finalise_chute_par_anciennete,
+    _finalise_chute_par_tranche_ecart,
     _finalise_consignes_par_type_compte,
     _finalise_orphelins,
 )

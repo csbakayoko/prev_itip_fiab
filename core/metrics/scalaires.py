@@ -12,8 +12,9 @@ EXERCICE), `couverture` les deux univers (colonne UNIVERS).
 
 import pandas as pd
 
+from config import RUN_PARAMS
 from core.synthese.synthese_contract import SyntheseScalars
-from core.metrics.base import EXERCICE_INV, EXERCICE_N1
+from core.metrics.base import EXERCICE_INV, EXERCICE_N1, _annee_inventaire
 
 # Libellés de lignes/blocs des tables regroupées — un seul vocabulaire.
 SANS_CONSIGNE  = "Sans consigne reconnue"   # matché, MRM_ACTION nulle/inconnue
@@ -24,6 +25,23 @@ UNIVERS_REVUE  = "Revue MRM"                # couverture : la revue est-elle ret
 # ============================================================================
 # MÉTRIQUES SCALAIRES (reshape du dict de compute_synthese)
 # ============================================================================
+
+def dim_run(d: SyntheseScalars) -> pd.DataFrame:
+    """La dimension de run — une ligne par run, pivot du modèle en étoile Power BI.
+
+    Les colonnes de run du schéma standard (CLE_RUN, DATE_INVENTAIRE,
+    PERIMETRE, LIBELLE_RUN) sont posées par export_metriques sur TOUTES les
+    tables, celle-ci comprise ; cette table y ajoute les attributs qui ne
+    vivent qu'au niveau du run : année d'inventaire, vision comptable CPT,
+    présence d'une récupération N+1 (explique un bloc « Récupérés N+1 » vide).
+    Reliée en 1-n à chaque table métrique par CLE_RUN : un seul segment
+    (date d'inventaire / périmètre) pilote tout le rapport.
+    """
+    return pd.DataFrame([{
+        "ANNEE_INVENTAIRE": _annee_inventaire(d),
+        "VISION_CPT"      : RUN_PARAMS.get("cpt_vision"),
+        "AVEC_MRM_N1"     : bool(RUN_PARAMS.get("fichier_mrm_n1")),
+    }])
 
 def synthese(d: SyntheseScalars) -> pd.DataFrame:
     """Tous les indicateurs de tête en une ligne (historisable par run)."""

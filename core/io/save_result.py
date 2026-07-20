@@ -11,8 +11,8 @@ STABLES (le périmètre est une colonne, pas un suffixe de nom) : Power BI
 - save_result_delta      : df_result (une ligne = un dossier du run) →
   <schema>.resultat_backtest, pour les analyses fines au-delà des tables
   métriques agrégées (metrique_*) ;
-- write_delta_historise / to_date_iso : briques réutilisées par l'export des
-  métriques (core.metrics.export).
+- write_delta_historise / to_date_iso / cle_run : briques réutilisées par
+  l'export des métriques (core.metrics.export).
 """
 
 import logging
@@ -25,6 +25,18 @@ from pyspark.sql import DataFrame
 from config import CLIENT_NAME, EXPORT_RESULT_TABLE, PERIMETRE_LABEL
 
 logger = logging.getLogger(__name__)
+
+
+def cle_run(date_inventaire: str, perimetre: str = PERIMETRE_LABEL) -> str:
+    """Clé de liaison du run : « <date>|<périmètre> » (ex. « 2023-12-31|MULTI »).
+
+    Posée sur TOUTES les tables exportées (métriques + resultat_backtest) :
+    c'est la colonne de relation du modèle en étoile Power BI — une seule
+    colonne relie dim_run à chaque table, sans clé composite à fabriquer
+    côté rapport. Même identité que l'historisation Delta (DATE_INVENTAIRE ×
+    PERIMETRE) : une clé = un run.
+    """
+    return f"{date_inventaire}|{perimetre}"
 
 
 def to_date_iso(date_inventaire: str, strict: bool = True) -> Optional[str]:
@@ -84,7 +96,8 @@ def save_result_delta(
 
     Colonnes de run ajoutées (schéma standard) : DATE_INVENTAIRE (date,
     partition), PERIMETRE (clé d'historisation avec la date), LIBELLE_RUN
-    (libellé du run) et TS_RUN (horodatage d'écriture).
+    (libellé du run), CLE_RUN (clé de liaison du modèle en étoile Power BI —
+    la même que sur les tables métriques) et TS_RUN (horodatage d'écriture).
 
     Args:
         df_result       : résultat du pipeline (main.build_df_result).
@@ -110,6 +123,7 @@ def save_result_delta(
         .withColumn("DATE_INVENTAIRE", F.lit(date_iso).cast("date"))
         .withColumn("PERIMETRE",       F.lit(PERIMETRE_LABEL))
         .withColumn("LIBELLE_RUN",     F.lit(CLIENT_NAME))
+        .withColumn("CLE_RUN",         F.lit(cle_run(date_iso)))
         .withColumn("TS_RUN",          F.current_timestamp())
     )
     return write_delta_historise(df, f"{delta_schema}.{table_name}", date_iso)

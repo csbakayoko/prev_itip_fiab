@@ -63,6 +63,7 @@ from .params import (
     RECUP_NON_LABEL,
     ORPHAN_PM_THRESHOLD,
     ORPHAN_FIN_ANNEE_MOIS,
+    SEUILS_ECART_PM,
     CODE_GARANTIE_IT,
     CODE_GARANTIE_IP,
 )
@@ -71,13 +72,14 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# RUN_PARAMS — chemins source du run
+# RUN_PARAMS — chemins source et identité du run
 # ============================================================================
-# Dict PARTAGÉ, lu par load_mrm_raw. Hydraté ici avec les défauts de
-# profile.py (inventaire actif) ; un run paramétré (Job Databricks, widgets
-# notebook) les remplace via core.runtime.configurer_run AVANT le pipeline.
+# Dict PARTAGÉ, lu par load_mrm_raw (fichiers) et par la table de dimension
+# dim_run (vision). Hydraté ici avec les défauts de profile.py (inventaire
+# actif) ; un run paramétré (Job Databricks, widgets notebook) les remplace
+# via core.runtime.configurer_run AVANT le pipeline.
 
-RUN_PARAMS: dict = {}
+RUN_PARAMS: dict = {"cpt_vision": CLIENT_CPT_VISION}
 
 if FICHIER_MRM:
     RUN_PARAMS.setdefault("fichier_mrm", FICHIER_MRM)

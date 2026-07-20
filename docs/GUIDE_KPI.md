@@ -61,10 +61,14 @@ justifie un ajustement de provision.
 - Mesure une **moyenne pondérée** : un taux de 10 % peut cacher des segments très
   sous-provisionnés et d'autres sur-provisionnés qui se compensent → toujours
   lire en regard des ventilations de la table `chute` (type de compte,
-  ancienneté) et du par-consigne de la table `consignes`.
+  ancienneté), de la **distribution des écarts** (§5) et du par-consigne de la
+  table `consignes`.
 - Ne porte que sur les **retrouvés** : un dossier non retrouvé (`MRM_MISSING`) ne
   pèse pas dans la chute (il pèse dans la *couverture*).
-- Exclut « à supprimer » (cf. §11) et statut NON (cf. §13, piège 6).
+- Exclut « à supprimer » (cf. §12) et statut NON (cf. §14, piège 6).
+
+> 📊 **Illustration** : graphe 7 `7_kpi_chute.png` — le taux en gros chiffre
+> avec ses composantes PM (et le N+1 rappelé à part).
 
 > **Pourquoi une formule AGRÉGÉE et non une moyenne de ratios ?** Soit deux
 > dossiers — A : MRM 1 000 000, CPT 950 000 (ratio 5 %) ; B : MRM 1 000, CPT 0
@@ -128,6 +132,10 @@ chaque run par `controles_coherence`.
 **Limite.** Une ligne à faible PM peut afficher un taux spectaculaire sans enjeu
 financier → toujours lire le **poids PM** à côté du taux.
 
+> 📊 **Illustrations** : graphe 3 `3_chute_par_type_compte.png`, graphe 10
+> `10_chute_par_anciennete.png`, graphes 4 `4_chute_par_consigne.png` et 9
+> `9_pm_par_consigne.png`.
+
 ---
 
 ## 4. Niveaux de PM (PM MRM, PM compte, écart)
@@ -148,7 +156,43 @@ n'est pas la PM totale du compte ni de la revue (cf. bulle RETROUVÉS).
 
 ---
 
-## 5. Taux de couverture MRM
+## 5. Distribution des écarts de PM — *combien de dossiers, à quelle ampleur ?*
+
+**Définition.** L'écart signé de **chaque dossier** de la base de chute
+(`PM_MRM − PM_CPT`) classé par **tranche de seuils** (`SEUILS_ECART_PM` :
+±1 k€ / ±5 k€ / ±20 k€ / ±100 k€) — la volumétrie des dossiers
+**sous-provisionnés** (écart > 0, risque) et **sur-provisionnés** (écart < 0,
+marge) par niveau d'écart. C'est l'axe « Tranche d'écart » de la table
+`chute`.
+
+**Exemple fil rouge.** Sur les 77 dossiers de la base : **44 sous-provisionnés**
+(+145 000 € cumulés, dont 2 dossiers au-delà de +20 k€ qui portent à eux seuls
++61 000 €), **27 sur-provisionnés** (−45 000 €), **6 à l'équilibre** — solde
+**+100 000 €** (= l'écart du §4, la distribution recoupe le taux).
+
+**À dire à l'oral.** « Le taux de +10 % n'est pas diffus : **2 dossiers**
+au-delà de +20 k€ portent **61 %** de l'écart net — l'ajustement se joue sur
+une poignée de dossiers identifiés, pas sur toute la base. »
+
+**Intérêt.** Le taux agrégé donne le **solde**, la distribution donne la
+**forme** : écarts concentrés (quelques gros dossiers → instruction ciblée) ou
+diffus (biais systématique → question de méthode) ; et elle **révèle les
+compensations** (un taux quasi nul peut cacher ±100 k€ de chaque côté).
+
+**Limites.**
+- Les tranches donnent l'ampleur **unitaire** : toujours lire `ECART` (l'enjeu
+  en €) à côté de `NB_DOSSIERS` — une tranche fine très peuplée peut peser
+  moins qu'une tranche extrême à 3 dossiers.
+- Les seuils sont **fixés en configuration** (une ligne à changer) : ne pas
+  redécouper dans l'outil de restitution, la cohérence Σ tranches = taux
+  global est garantie par `controles_coherence` sur CES tranches-là.
+
+> 📊 **Illustration** : graphe 12 `12_distribution_ecarts.png` — l'histogramme
+> des tranches, couleur par sens de l'écart.
+
+---
+
+## 6. Taux de couverture MRM
 
 **Définition.** Part de la revue MRM (à comparer) **retrouvée** au compte, en
 nombre de dossiers.
@@ -165,9 +209,12 @@ compte ; les 20 % restants sont à instruire. »
 **Limite.** En **nombre**, pas en montant : ne dit rien sur l'écart de PM (c'est le
 rôle de la chute). 80 % des dossiers peut représenter 99 % de la PM, ou l'inverse.
 
+> 📊 **Illustration** : graphe 2 `2_couverture_mrm.png` — part de la revue
+> retrouvée + non retrouvés par consigne.
+
 ---
 
-## 6. Taux de couverture compte
+## 7. Taux de couverture compte
 
 **Définition.** Part du compte réconciliable **justifiée** par un match à
 l'inventaire courant.
@@ -184,9 +231,12 @@ courante ; le reste est récupéré au N+1 ou reste en anomalie. »
 **Limite.** Les récupérés N+1 sont au **dénominateur** mais pas au numérateur (ils
 n'ont pas matché l'inventaire *courant*) → ce taux est volontairement *sévère*.
 
+> 📊 **Illustration** : graphe 1 `1_compte_justification.png` — la
+> décomposition du compte (retrouvés / N+1 / repêchés / clos / anomalies).
+
 ---
 
-## 7. Taux de récupération tardive
+## 8. Taux de récupération tardive
 
 **Définition.** Parmi les orphelins du compte après l'inventaire, part rattrapée
 dans l'inventaire N+1.
@@ -203,10 +253,12 @@ anomalie** (à instruire).
 
 **Limite.** Dépend de la fourniture du fichier N+1 (`FICHIER_MRM_N1`). **Sans N+1,
 le taux est 0 % — au sens « non mesuré », pas « 0 % de performance ».**
+La colonne `AVEC_MRM_N1` de la table `dim_run` porte cette information : c'est
+elle qu'on lit pour distinguer « non mesuré » de « mesuré à 0 ».
 
 ---
 
-## 8. Taux de récupération global
+## 9. Taux de récupération global
 
 **Définition.** Part du compte réconciliable justifiée par l'inventaire courant
 **ou** le N+1.
@@ -226,7 +278,7 @@ nommer lequel on cite.
 
 ---
 
-## 9. Conformité par consigne
+## 10. Conformité par consigne
 
 **Définition.** La consigne de la revue a-t-elle été appliquée au compte ?
 
@@ -250,6 +302,9 @@ dossier conforme peut être fortement sous-provisionné (c'est la chute qui le d
 Les deux lectures (conformité vs provisionnement) sont **complémentaires**, jamais
 interchangeables.
 
+> 📊 **Illustration** : graphe 5 `5_conformite_consignes.png` — conforme /
+> non retrouvé / encore au compte, par consigne.
+
 **Déclinaison opérationnelle.** La table `consignes_par_type_compte` applique la même
 règle ventilée par **TYPE_COMPTE × consigne** (nb, suivies / non
 suivies, PM) : c'est le « tableau de bord des consignes » Power BI — les cartes
@@ -260,7 +315,7 @@ Direction Financière).
 
 ---
 
-## 10. Conformité globale
+## 11. Conformité globale
 
 **Définition.** Taux de conformité agrégé sur conserver + ajouter + étudier.
 
@@ -274,11 +329,14 @@ Direction Financière).
 **Intérêt.** L'indicateur de **pilotage** unique de la conformité.
 
 **Limite.** Mélange trois consignes de natures différentes → toujours pouvoir
-descendre au détail (§9) pour expliquer un écart.
+descendre au détail (§10) pour expliquer un écart.
+
+> 📊 **Illustration** : graphe 8 `8_kpi_conformite_globale.png` — le donut de
+> pilotage.
 
 ---
 
-## 11. Taux de suppression effective (consigne « à supprimer »)
+## 12. Taux de suppression effective (consigne « à supprimer »)
 
 **Définition.** Part des « à supprimer » réellement **disparues** du compte.
 
@@ -298,10 +356,10 @@ de PM associée ; ce taux est en **nombre**.
 
 ---
 
-## 12. Investigation des orphelins compte (`CPT_ONLY`)
+## 13. Investigation des orphelins compte (`CPT_ONLY`)
 
 **But.** Les anomalies `CPT_ONLY` définitives sont le « reste à instruire » de
-l'étude (complément du taux de récupération global, §8). La table `orphelins`
+l'étude (complément du taux de récupération global, §9). La table `orphelins`
 les découpe sous **six angles** (colonne `AXE`, `ORDRE` = rang de lecture)
 pour **orienter l'investigation** — ce sont des vues de diagnostic, pas des
 KPI :
@@ -333,9 +391,13 @@ orphelins** (Σ = 100 % du bloc `CPT_ONLY`), pas des taux de l'étude. Les quatr
 ventilations se recoupent (Σ chacune = total `CPT_ONLY`, vérifié par
 `controles_coherence`).
 
+> 📊 **Illustrations** : graphe 11 `11_orphelins_par_compte.png` (le compte
+> qui concentre les orphelins) et graphe 6 `6_anomalies_cpt_only.png` (la
+> saisonnalité des survenances, effet fin d'année).
+
 ---
 
-## 13. Pièges de lecture (cohérence) — la check-list orale
+## 14. Pièges de lecture (cohérence) — la check-list orale
 
 1. **Nombre vs valeur.** Couverture / conformité = en **dossiers** ; chute /
    niveaux de PM = en **euros**. Ne jamais conclure « bien provisionné » à partir
@@ -355,12 +417,13 @@ ventilations se recoupent (Σ chacune = total `CPT_ONLY`, vérifié par
 
 ---
 
-## 14. Récapitulatif — une ligne par KPI
+## 15. Récapitulatif — une ligne par KPI
 
 | KPI | Formule | Exemple fil rouge | Lecture |
 |---|---|---|---|
 | Taux de chute | Σ(MRM−CPT)/Σ MRM | +10 % | sous-provisionné de 100 k€ |
 | Taux de chute N+1 | idem sur CPT_LATE | +8,3 % | analyse séparée |
+| Distribution des écarts | nb dossiers par tranche ±1/5/20/100 k€ | 44 sous / 27 sur / 6 nuls | où se loge l'écart (concentré vs diffus) |
 | Couverture MRM | matchés / (matchés+missing) | 80 % | revue présente au compte |
 | Couverture compte | matchés / réconciliable | 80 % | compte justifié (inventaire) |
 | Récup. tardive | LATE / (LATE+CPT_ONLY) | 25 % | orphelins rattrapés au N+1 |

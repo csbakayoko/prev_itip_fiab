@@ -1,9 +1,12 @@
 """
-Orchestration de la couche métriques — les 8 tables, et leur export.
+Orchestration de la couche métriques — les 9 tables, et leur export.
 
-toutes_metriques : les 8 tables pandas en un dict (contrôles inclus).
+toutes_metriques : les 9 tables pandas en un dict (8 tables-sujets + la
+dimension de run `dim_run`, contrôles inclus).
 export_metriques : écriture multi-format (Excel privilégié, CSV/JSON/Parquet
 DBFS, Delta si schéma) sous <EXPORT_BASE_PATH>/<CLIENT>_<PERIM>/metrics.
+Toutes les tables portent la clé de liaison CLE_RUN (DATE_INVENTAIRE ×
+PERIMETRE) : le modèle en étoile Power BI se construit sans transformation.
 """
 
 import os
@@ -15,11 +18,11 @@ from pyspark.sql import DataFrame
 
 from config import CLIENT_NAME, EXPORT_BASE_PATH
 from core.io.excel_export import export_excel
-from core.io.save_result import to_date_iso, write_delta_historise
+from core.io.save_result import cle_run, to_date_iso, write_delta_historise
 from core.synthese.kpi_export import compute_synthese
 from core.synthese.synthese_contract import SyntheseScalars
 from core.metrics.base import _PERIMETRE, _to_local, output_dir, _annee_inventaire
-from core.metrics.scalaires import synthese, bilan_cas, consignes, couverture
+from core.metrics.scalaires import dim_run, synthese, bilan_cas, consignes, couverture
 from core.metrics.agregats import chute, consignes_par_type_compte, orphelins
 from core.metrics.coherence import controles_coherence
 
@@ -29,12 +32,13 @@ from core.metrics.coherence import controles_coherence
 # ============================================================================
 
 def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) -> Dict[str, pd.DataFrame]:
-    """Les 8 tables métriques en un dict {nom: DataFrame pandas}.
+    """Les 9 tables métriques en un dict {nom: DataFrame pandas}.
 
     Une table = un sujet complet (contrat : docs/METRIQUES.md §6) ; les angles
     d'analyse sont des COLONNES (EXERCICE, AXE, SEGMENT, UNIVERS), jamais des
     tables séparées :
 
+        dim_run                   — la dimension de run (pivot du modèle en étoile)
         synthese                  — tous les KPI, une ligne par run
         bilan_cas                 — LE bilan cas par cas (avec explications)
         couverture                — les deux univers (Compte / Revue MRM)
@@ -49,6 +53,7 @@ def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) 
     """
     d = d if d is not None else compute_synthese(df_result)
     tables = {
+        "dim_run"                  : dim_run(d),
         "synthese"                 : synthese(d),
         "bilan_cas"                : bilan_cas(d),
         "couverture"               : couverture(d),
@@ -82,7 +87,9 @@ def export_metriques(
     remplace SES lignes, les autres inventaires/périmètres coexistent).
 
     Schéma standard des exports : toutes les tables portent les colonnes de
-    run DATE_INVENTAIRE, PERIMETRE et LIBELLE_RUN.
+    run DATE_INVENTAIRE, PERIMETRE, LIBELLE_RUN et la clé de liaison CLE_RUN
+    (« <date ISO>|<périmètre> ») — la colonne de relation du modèle en étoile
+    Power BI, dont la table `dim_run` est le pivot (1-n vers chaque table).
     """
     d       = d if d is not None else compute_synthese(df_result)
     tables  = toutes_metriques(df_result, d)
@@ -95,6 +102,7 @@ def export_metriques(
         pdf["DATE_INVENTAIRE"] = date_iso or d["date_inventaire"]
         pdf["PERIMETRE"]       = _PERIMETRE
         pdf["LIBELLE_RUN"]     = CLIENT_NAME
+        pdf["CLE_RUN"]         = cle_run(date_iso or d["date_inventaire"], _PERIMETRE)
 
     out = _to_local(output_dir(base_path, "metrics"))
     os.makedirs(out, exist_ok=True)

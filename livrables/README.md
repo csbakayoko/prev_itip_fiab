@@ -51,11 +51,26 @@ les identités comptables tiennent (union 13 910 = 12 480 + 6 350 −
 aucun chiffre réel résiduel. **Seule version à utiliser hors AXA**
 (mémoire / soutenance ISFA).
 
+`jeu_fictif_metriques/` — **le jeu de MÉTRIQUES fictives 2023 + 2024**
+(édition du 20/07) : générateur pandas (`genere_jeu_fictif_metriques.py`,
+volumes ≈ ÷2, pourcentages décalés, 54 contrôles de cohérence vérifiés),
+les 9 tables en CSV (années empilées, clé de liaison `CLE_RUN`) + classeur
+`jeu_fictif_metriques.xlsx` prêt pour l'outil de tableau de bord, et son
+`LISEZMOI.md` (chiffres de tête + garde-fous). C'est le jeu de la
+**maquette du tableau de bord** et des captures école — ⚠ ne pas le
+mélanger avec le jeu du deck école ci-dessus ni avec celui du mémoire
+(`claude_project_memoire/02_JEU_DONNEES_FICTIF.md`) : un document = un jeu.
+
 ## `tutoriels/` — guides techniques (chiffres fictifs)
 
 `Tutoriel_PowerBI_Backtest_ITIP` (docx + pdf + pptx + `_deck.pdf`),
-`Tutoriel_Job_Databricks_ITIP` (docx + pdf),
-`PROMPT_CLAUDE_DESIGN.md` (+ `.html`), `PROMPTS_SCHEMAS.md` (+ `.html`).
+`Tutoriel_Job_Databricks_ITIP` (docx + pdf — la source à jour est
+`docs/TUTORIEL_JOB_DATABRICKS.md`, régénérer les exports depuis elle),
+`PROMPT_CLAUDE_DESIGN.md` (+ `.html`) — **réécrit le 20/07** : prompt
+complet de la maquette DYNAMIQUE du rapport (un fichier HTML autonome,
+visuels 100 % natifs Power BI, 8 onglets + page détail, jeu
+`jeu_fictif_metriques` embarqué ; le `.html` d'ancienne génération est à
+régénérer), `PROMPTS_SCHEMAS.md` (+ `.html`).
 
 ## `claude_project/` — docs de connaissance pour projet Claude (travail)
 

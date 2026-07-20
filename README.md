@@ -2,9 +2,10 @@
 
 Backtesting entre la **revue d'inventaire MRM** (fichier Excel ou CSV déposé
 sur DBFS) et le **compte CPT** (table du Lab Databricks) : contrôles qualité,
-matching en cascade, calcul des KPI (chute, couverture, conformité), puis
-restitution — 8 tables métriques (Delta / Excel / CSV / Parquet / JSON)
-consommées par Power BI, et 11 graphiques.
+matching en cascade, calcul des KPI (chute, couverture, conformité,
+distribution des écarts), puis restitution — 9 tables métriques (Delta /
+Excel / CSV / Parquet / JSON) consommées par Power BI en modèle en étoile
+(clé de liaison `CLE_RUN`, dimension `dim_run`), et 12 graphiques.
 
 ## Chaîne
 
@@ -41,17 +42,19 @@ bout en bout (voir « Axe d'analyse » plus bas), élargir le périmètre est un
 | `core/prep/` | Contrôles qualité, nettoyage, dédoublonnage, clés de matching |
 | `core/match/` | Waterfall de matching, récupérations (N+1, statut NON), audit de clé |
 | `core/synthese/` | Synthèse : passe Spark unique (`compute_synthese`), contrat typé, rendu console |
-| `core/metrics/` | Les 8 tables métriques + contrôles de cohérence inter-tables ; `viz.py` = 11 graphiques |
+| `core/metrics/` | Les 9 tables métriques + contrôles de cohérence inter-tables ; `viz.py` = 12 graphiques |
 | `notebooks/` | Orchestration uniquement — aucune logique métier |
 | `tests/` | Tests unitaires (pytest) — lancés en CI |
-| `docs/` | `RECETTE_ETUDE.md` (fabrication de l'étude de bout en bout) · `METRIQUES.md` (contrat formel des métriques) · `GUIDE_KPI.md` (interprétation, exemples chiffrés) · `POWERBI_MAQUETTE.md` (maquette du rapport, branchement SQL Warehouse) |
+| `docs/` | `RECETTE_ETUDE.md` (fabrication de l'étude de bout en bout) · `METRIQUES.md` (contrat formel des métriques) · `GUIDE_KPI.md` (interprétation, exemples chiffrés) · `POWERBI_MAQUETTE.md` (maquette du rapport, branchement SQL Warehouse) · `TUTORIEL_JOB_DATABRICKS.md` (construire, lancer, planifier et dépanner le Job) |
 | `livrables/` | Documents générés, **dernières versions** (Word / PPT / PDF — seul l'index `README.md` est suivi avec le code) : tutoriels rapport Power BI et Job Databricks, recette de l'étude, cartographie des anomalies, trame d'entretien |
 
 ## Notebooks (Databricks Repos — la racine du repo est sur `sys.path`)
 
 | Notebook | Usage |
 |---|---|
-| `itip_fiab_powerbi` | **Production** : pipeline → contrôles bloquants → export des 8 tables (Delta + fichiers) |
+| `itip_fiab_powerbi` | **Production** : pipeline → contrôles bloquants → export des 9 tables (Delta + fichiers) — mise en place du Job : [`docs/TUTORIEL_JOB_DATABRICKS.md`](docs/TUTORIEL_JOB_DATABRICKS.md) |
+| `itip_fiab_vision_cc2023` | **Recette vision CC2023** : l'exercice 2023 déroulé et commenté de bout en bout (tables, distribution des écarts, graphiques), **sans écriture** |
+| `itip_fiab_vision_cc2024` | **Recette vision CC2024** : idem 2024 — sans MRM N+1 (blocs N+1 vides), **sans écriture** |
 | `itip_fiab_main` | Run interactif par année d'inventaire (widgets 2023/2024), métriques affichées table par table |
 | `itip_fiab_comparaison` | Comparaison côte à côte des inventaires 2023 vs 2024 |
 | `itip_fiab_smoke` | Smoke test après mise à jour du code : tout le pipeline, **sans export** |
@@ -75,7 +78,7 @@ et permet aussi de rejouer plusieurs inventaires dans une même session.
 
 **Qui écrit quoi — le Hive est la sortie de référence.** `EXPORT_ANALYSES = True`
 et `EXPORT_FORMATS = ("delta", "excel", "parquet", "csv")` (`config/profile.py`) :
-`main.run` — donc le Job comme un `spark-submit main.py` — écrit les 8 tables
+`main.run` — donc le Job comme un `spark-submit main.py` — écrit les 9 tables
 métriques **et** le détail `resultat_backtest` dans `EXPORT_DELTA_SCHEMA`
 (défaut `hive_metastore.itip_backtest`), puis les fichiers DBFS et les PNG en
 sortie **secondaire**.
@@ -140,13 +143,15 @@ paramètres sont des widgets, surchargeables en « base parameters » du Job :
 Le run est **bloquant** sur les contrôles (lignes toutes classées, taux de
 chute cohérent, recoupements inter-tables) : un Job vert = des onglets
 Power BI fiables. En sortie : les tables métriques (`<schema>.metrique_*`,
-dont `metrique_consignes_par_type_compte` — le tableau de bord des consignes)
+dont `metrique_dim_run` — la dimension de run, pivot du modèle en étoile — et
+`metrique_consignes_par_type_compte` — le tableau de bord des consignes)
 et le détail dossier par dossier (`<schema>.resultat_backtest`).
 Les noms de tables sont **stables** (le périmètre est la colonne `PERIMETRE`,
 pas un suffixe de nom) et **toutes les tables Delta sont historisées par run**
 (`replaceWhere` sur `DATE_INVENTAIRE × PERIMETRE` : rejouer un run remplace
 ses lignes, 2023 et 2024 coexistent) ; colonnes de run `DATE_INVENTAIRE` /
-`PERIMETRE` / `LIBELLE_RUN`. Power BI se connecte au SQL Warehouse, ou importe
+`PERIMETRE` / `LIBELLE_RUN` / `CLE_RUN` (la clé qui relie `dim_run` à chaque
+table dans Power BI). Power BI se connecte au SQL Warehouse, ou importe
 le classeur Excel écrit sous `EXPORT_BASE_PATH`.
 
 **Axe d'analyse : `TYPE_COMPTE`, pas la clause.** Les métriques se ventilent

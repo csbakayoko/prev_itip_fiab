@@ -22,6 +22,8 @@ problématique de fiabilisation (direction financière et engagements) :
                                 la méthode d'inventaire diffère selon l'année
    11. orphelins_par_compte   — quel compte PB concentre les orphelins (souscripteur
                                 à investiguer)
+   12. distribution_ecarts    — combien de dossiers sur/sous-provisionnés, et à
+                                quelle ampleur ? (tranches de SEUILS_ECART_PM)
 
 Usage (notebook Databricks) :
     from core.metrics.viz import restituer_graphiques
@@ -39,9 +41,9 @@ from pyspark.sql import DataFrame
 
 from core.synthese.kpi_export import compute_synthese, kas_totaux
 from core.metrics import (
-    chute_par_type_compte, chute_par_anciennete, anomalies_cpt_only,
-    orphelins_par_clause, output_dir, _to_local,
-    EXERCICE_INV, _annee_inventaire,
+    chute_par_type_compte, chute_par_anciennete, chute_par_tranche_ecart,
+    anomalies_cpt_only, orphelins_par_clause, output_dir, _to_local,
+    EXERCICE_INV, TRANCHE_ECART_NUL, _annee_inventaire,
 )
 
 # Palette AXA en priorité, complétée quand la sémantique l'exige.
@@ -575,6 +577,57 @@ def graph_orphelins_par_compte(pdf_orph, d: dict, top: int = 12):
 
 
 # ============================================================================
+# 12. DISTRIBUTION DES ÉCARTS DE PM (dossiers sur/sous-provisionnés par tranche)
+# ============================================================================
+
+def graph_distribution_ecarts(pdf_tranches, d: dict):
+    """Combien de dossiers sur/sous-provisionnés, et à quelle ampleur ?
+
+    Le taux agrégé dit le solde ; la distribution dit combien de dossiers
+    portent un écart et à quel niveau (un taux quasi nul peut cacher de gros
+    écarts compensés). pdf_tranches = metrics.chute_par_tranche_ecart
+    (df_result), bloc « Inventaire courant » (les stats globales)."""
+    pdf = pdf_tranches[pdf_tranches["EXERCICE"] == EXERCICE_INV].copy()
+    if pdf.empty or pdf["NB_DOSSIERS"].sum() == 0:
+        return _empty_fig("Distribution des écarts : aucune donnée")
+
+    ordre_nul = int(pdf.loc[pdf["TRANCHE_ECART"] == TRANCHE_ECART_NUL, "ORDRE"].iloc[0])
+    colors = [C_OCEAN if o < ordre_nul else C_GRIS if o == ordre_nul else C_SIENNE
+              for o in pdf["ORDRE"]]
+
+    fig, ax = plt.subplots(figsize=(12.5, 5.8))
+    ax.bar(pdf["TRANCHE_ECART"], pdf["NB_DOSSIERS"], color=colors, width=0.62)
+    vmax = float(pdf["NB_DOSSIERS"].max()) or 1
+    for i, (_, r) in enumerate(pdf.iterrows()):
+        if r["NB_DOSSIERS"]:
+            ax.text(i, r["NB_DOSSIERS"] + vmax * 0.02, _n(r["NB_DOSSIERS"]),
+                    ha="center", va="bottom", fontsize=F_TXT - 1)
+    ax.margins(y=0.14)
+    ax.set_xticks(range(len(pdf)))
+    ax.set_xticklabels(pdf["TRANCHE_ECART"], rotation=30, ha="right")
+    ax.legend(handles=[
+        Patch(color=C_OCEAN,  label="sur-provisionné (marge)"),
+        Patch(color=C_GRIS,   label="écart nul"),
+        Patch(color=C_SIENNE, label="sous-provisionné (risque)"),
+    ], loc="upper right", fontsize=F_LEG, frameon=False)
+    _style(ax, ylabel="Nombre de dossiers")
+
+    sous = int(pdf["NB_SOUS_PROVISION"].sum())
+    sur  = int(pdf["NB_SUR_PROVISION"].sum())
+    nul  = int(pdf["NB_ECART_NUL"].sum())
+    _title(
+        fig,
+        f"Écarts de provision dossier par dossier : {_n(sous)} sous-provisionnés, "
+        f"{_n(sur)} sur-provisionnés, {_n(nul)} à l'équilibre",
+        "Écart signé (PM revue − PM compte) par tranche de seuils — matchés de "
+        f"l'inventaire courant, hors « à supprimer » / statut NON ; solde "
+        f"{_meur(d['metrics_pm_ecart'])} ({_pct(d['taux_chute_inventaire'])})",
+    )
+    fig.subplots_adjust(top=0.80, bottom=0.24, left=0.08, right=0.97)
+    return fig
+
+
+# ============================================================================
 # ORCHESTRATEUR
 # ============================================================================
 
@@ -586,7 +639,7 @@ def restituer_graphiques(
     top      : int = 12,
 ) -> dict:
     """
-    Construit les 11 graphiques de restitution, les affiche (notebook) et les
+    Construit les 12 graphiques de restitution, les affiche (notebook) et les
     écrit en PNG (save_dir, DBFS). save_dir=None → pas d'écriture.
 
     `d` = dict de compute_synthese si déjà calculé (ex. retour de
@@ -610,6 +663,7 @@ def restituer_graphiques(
         "9_pm_par_consigne"        : graph_pm_par_consigne(d),
         "10_chute_par_anciennete"  : graph_chute_par_anciennete(chute_par_anciennete(df_result, annee), d),
         "11_orphelins_par_compte"  : graph_orphelins_par_compte(orphelins_par_clause(df_result), d),
+        "12_distribution_ecarts"   : graph_distribution_ecarts(chute_par_tranche_ecart(df_result), d),
     }
 
     if save_dir:

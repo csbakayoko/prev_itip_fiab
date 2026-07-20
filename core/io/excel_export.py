@@ -3,13 +3,14 @@ Export Excel multi-onglets — propre, lisible et prêt pour Power BI.
 
 Objectif : un seul classeur .xlsx qui RÉPOND À L'ÉTUDE, avec des onglets nommés
 en clair (pas de noms de variables bruts) — un onglet par table métrique
-(8 tables, une table = un sujet complet), organisés par axe :
+(9 tables, une table = un sujet complet), organisés par axe :
     1. Vue d'ensemble (synthèse, bilan cas par cas)
     2. Couverture des listes d'arrêts (les deux univers)
     3. Niveau de provisionnement (le taux de chute sous tous ses angles)
     4. Suivi des consignes (détail + tableau de bord par type de compte)
     5. Investigation orphelins (six angles)
     6. Fiabilité (recoupements inter-onglets)
+    7. Modèle de données (dimension du run — pivot des relations Power BI)
 
 Chaque onglet est une VRAIE table Excel (ListObject) → Power BI la détecte comme
 table nommée (« Get Data → Excel » propose directement chaque table), avec :
@@ -52,6 +53,8 @@ ONGLETS: Tuple[Tuple[str, str, str, str], ...] = (
      "Les orphelins compte sous six angles (colonne AXE) : type de compte, garantie, ancienneté, mois, clause, clés nulles."),
     ("controles_coherence",  "Contrôles cohérence",     "Fiabilité",
      "Recoupements inter-onglets : une grandeur = une valeur partout (attendu/obtenu)."),
+    ("dim_run",              "Dimension du run",        "Modèle de données",
+     "Le pivot du modèle en étoile : une ligne par run (CLE_RUN), reliée en 1-n à chaque table."),
 )
 
 # Palette AXA pour l'en-tête du Sommaire.

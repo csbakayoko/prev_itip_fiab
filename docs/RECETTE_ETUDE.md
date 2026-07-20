@@ -3,7 +3,7 @@
 > Ce document décrit **comment l'étude est fabriquée**, de la donnée brute à la
 > restitution Power BI : les ingrédients (sources), la préparation (nettoyage,
 > clés), la cuisson (waterfall de matching + récupérations), le dressage
-> (synthèse, 8 tables, 11 graphiques) et les garde-fous (contrôles de
+> (synthèse, 9 tables, 12 graphiques) et les garde-fous (contrôles de
 > cohérence). Chaque étape renvoie au module qui la porte.
 >
 > 📐 **Le contrat formel des métriques** (formules, univers, limites) →
@@ -40,7 +40,7 @@ CPT (table Lab)          MRM (CSV ou Excel sur DBFS)
                │
       ┌────────┼──────────────┐
       ▼        ▼              ▼
-  synthèse  8 tables      11 graphiques          ← §7 restitution
+  synthèse  9 tables      12 graphiques          ← §7 restitution
   console   métriques     (titres-messages)
             (Delta/Excel/CSV/Parquet/JSON)
                │
@@ -48,6 +48,10 @@ CPT (table Lab)          MRM (CSV ou Excel sur DBFS)
                │
             Power BI
 ```
+
+> 📊 **Illustration à placer ici** : la figure « chaîne du pipeline » (schéma
+> Excalidraw de la vue d'ensemble, reprise en tête du document HTML) — elle
+> remplace avantageusement le schéma ASCII dans les exports Word / PDF.
 
 Deux principes traversent toute la recette :
 
@@ -230,6 +234,11 @@ Points de recette :
   tous sont des matchés légitimes (`MATCH_LABELS`), la clé clause est suivie
   à part pour auditer cette clé moins stricte.
 
+> 📊 **Illustration à placer ici** : la figure « cascade de matching »
+> (entonnoir des 14 étapes, du plus strict au plus flexible, avec les
+> volumétries par étape) — c'est le visuel qui fait comprendre la méthode en
+> une image dans les restitutions.
+
 ---
 
 ## 5. Les secondes chances — récupérations post-waterfall (`core/match/recovery.py`)
@@ -307,12 +316,17 @@ aucune grandeur n'est recalculée deux fois, donc aucune ne peut diverger :
    statut NON — dans le **vocabulaire client à deux couches** (*retrouvé /
    non retrouvé* = le fait ; *conforme / encore au compte* = le verdict, cf.
    [`METRIQUES.md`](METRIQUES.md) §0).
-2. **8 tables métriques** (`core/metrics/`, contrat complet →
-   [`METRIQUES.md`](METRIQUES.md) §6) : `synthese` (tous les KPI en 1 ligne /
-   run, historisable), `bilan_cas`, `couverture`, `chute`, `consignes`,
+2. **9 tables métriques** (`core/metrics/`, contrat complet →
+   [`METRIQUES.md`](METRIQUES.md) §6) : `dim_run` (la dimension de run —
+   pivot du modèle en étoile, reliée à toutes les tables par la clé de
+   liaison `CLE_RUN`), `synthese` (tous les KPI en 1 ligne / run,
+   historisable), `bilan_cas`, `couverture`, `chute` (dont l'axe « Tranche
+   d'écart » : la distribution des écarts de PM par seuils — la volumétrie
+   des dossiers sur/sous-provisionnés), `consignes`,
    `consignes_par_type_compte` (le tableau de bord TYPE_COMPTE × CONSIGNE),
    `orphelins`, `controles_coherence` — une table = un sujet complet, les
-   angles d'analyse (exercice, type de compte, ancienneté, garantie, univers…)
+   angles d'analyse (exercice, type de compte, ancienneté, tranche d'écart,
+   garantie, univers…)
    sont des **colonnes** (`EXERCICE`, `AXE`, `SEGMENT`, `UNIVERS`), jamais des
    tables séparées. Écrites **en Delta dans le metastore
    Hive** — la sortie de **référence**, celle que Power BI interroge : chaque
@@ -320,11 +334,22 @@ aucune grandeur n'est recalculée deux fois, donc aucune ne peut diverger :
    inventaire remplace exactement ses lignes, 2023 et 2024 coexistent). Les
    fichiers **Excel / parquet / CSV** sur DBFS sont la sortie **secondaire**
    (import Power BI sans Warehouse, dépannage, partage). Le détail dossier par
-   dossier part dans `resultat_backtest`, même historisation.
-3. **11 graphiques-messages** (`core/metrics/viz.py`) : le titre porte la
+   dossier part dans `resultat_backtest`, même historisation, même `CLE_RUN`.
+3. **12 graphiques-messages** (`core/metrics/viz.py`) : le titre porte la
    conclusion (justification du compte, couverture de la revue, chute par
-   type de compte / consigne / ancienneté, conformité, anomalies, orphelins).
-   Affichés en notebook + PNG sur DBFS.
+   type de compte / consigne / ancienneté, distribution des écarts,
+   conformité, anomalies, orphelins). Affichés en notebook + PNG sur DBFS.
+
+> 📊 **Emplacement des graphiques dans les documents de restitution** — les
+> PNG (`1_… .png` à `12_… .png`, dossier `graphiques` des exports DBFS) ont
+> chacun UNE place naturelle : 1-2 (couverture) illustrent la partie
+> « justification / couverture », 7 puis 3-10-12 la partie
+> « provisionnement » (le KPI d'abord, les ventilations ensuite, la
+> distribution en zoom), 4-9 le par-consigne, 5-8 la conformité, 6-11
+> l'investigation des orphelins. Même ordre dans le rapport Power BI
+> ([`POWERBI_MAQUETTE.md`](POWERBI_MAQUETTE.md)), le deck de restitution et
+> les documents : l'étude raconte partout la même histoire dans le même
+> ordre.
 
 > **Qui écrit ?** `main.run` (donc le Job) — piloté par `EXPORT_ANALYSES`,
 > `EXPORT_FORMATS`, `EXPORT_DELTA_SCHEMA` de `config/profile.py`.
@@ -356,7 +381,9 @@ le cœur est `build_df_result` / `run` dans `main.py`.
 
 | Contexte | Entrée | Particularité |
 |---|---|---|
-| **Production** (Databricks Job) | `notebooks/itip_fiab_powerbi` | widgets / base parameters (`annee_inventaire`, `fichier_mrm_n1`, `types_compte`, `delta_schema`…) ; contrôles **bloquants** ; export des 8 tables + `resultat_backtest` |
+| **Production** (Databricks Job) | `notebooks/itip_fiab_powerbi` | widgets / base parameters (`annee_inventaire`, `fichier_mrm_n1`, `types_compte`, `delta_schema`…) ; contrôles **bloquants** ; export des 9 tables + `resultat_backtest` — mise en place pas à pas : [`TUTORIEL_JOB_DATABRICKS.md`](TUTORIEL_JOB_DATABRICKS.md) |
+| **Recette vision CC2023** | `notebooks/itip_fiab_vision_cc2023` | l'exercice 2023 déroulé et commenté de bout en bout (tables + distribution des écarts + graphiques), **aucune écriture** |
+| **Recette vision CC2024** | `notebooks/itip_fiab_vision_cc2024` | idem pour 2024 — sans MRM N+1 (blocs N+1 vides, récupération « non mesurée »), **aucune écriture** |
 | Run interactif | `notebooks/itip_fiab_main` | widgets par année (2023 / 2024), métriques table par table ; **la cellule d'export écrit dans le metastore** (viser un schéma de test pour expérimenter) |
 | Comparaison | `notebooks/itip_fiab_comparaison` | 2023 vs 2024 côte à côte (via `configurer_run`, plusieurs inventaires dans une session) |
 | Smoke test | `notebooks/itip_fiab_smoke` | tout le pipeline après mise à jour du code via `build_df_result`, **aucune écriture** (ni Delta, ni fichier, ni PNG) |
@@ -381,6 +408,7 @@ check .`, `pytest` (rejoués automatiquement par l'intégration continue
 | `RELAPSE_WINDOW_DAYS` | 30 | fenêtre max pour rattacher une rechute IT |
 | `ORPHAN_FIN_ANNEE_MOIS` | (11, 12) | mois « fin d'année » (obs. tardives IT, segmentation orphelins) |
 | `ORPHAN_PM_THRESHOLD` | 20 000 € | seuil « orphelin montant élevé » (`TAG_CPT_ONLY`) |
+| `SEUILS_ECART_PM` | ±1 k€ / ±5 k€ / ±20 k€ / ±100 k€ | seuils de la distribution des écarts de PM (axe « Tranche d'écart » de `chute`, graphe 12) — tranches symétriques, libellés et bornes dérivés |
 
 Chaque dosage vit à **un seul endroit** : changer la fenêtre, l'offset IP ou
 le seuil orphelin ne demande qu'une ligne de config — la cascade, les
