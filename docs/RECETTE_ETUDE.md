@@ -3,7 +3,7 @@
 > Ce document décrit **comment l'étude est fabriquée**, de la donnée brute à la
 > restitution Power BI : les ingrédients (sources), la préparation (nettoyage,
 > clés), la cuisson (waterfall de matching + récupérations), le dressage
-> (synthèse, 22 tables, 11 graphiques) et les garde-fous (contrôles de
+> (synthèse, 8 tables, 11 graphiques) et les garde-fous (contrôles de
 > cohérence). Chaque étape renvoie au module qui la porte.
 >
 > 📐 **Le contrat formel des métriques** (formules, univers, limites) →
@@ -40,7 +40,7 @@ CPT (table Lab)          MRM (CSV ou Excel sur DBFS)
                │
       ┌────────┼──────────────┐
       ▼        ▼              ▼
-  synthèse  22 tables     11 graphiques          ← §7 restitution
+  synthèse  8 tables      11 graphiques          ← §7 restitution
   console   métriques     (titres-messages)
             (Delta/Excel/CSV/Parquet/JSON)
                │
@@ -78,6 +78,14 @@ et `CLIENT_CLAUSES = None` (toutes les clauses) définissent le périmètre cour
 Un run paramétré (widgets notebook, paramètres de Job) passe par
 `core.runtime.configurer_run` qui surcharge date, vision et fichiers sans
 toucher au code.
+
+> **PB aujourd'hui, pas une limite du compte.** Le compte CPT/CORECO couvre
+> déjà l'intégralité du portefeuille ; `CLIENT_TYPE_CLAUSES = ["PB"]` reflète
+> le périmètre **actuellement intégré au Lab Databricks**, pas une limite de
+> CORECO. Le basculement à venir élargit le Lab aux autres périmètres (HPB,
+> …) : côté pipeline, il ne s'agit que d'ajouter une valeur à
+> `CLIENT_TYPE_CLAUSES` — l'axe `TYPE_COMPTE` (§6 de `METRIQUES.md`) est déjà
+> prêt à ventiler PB / HPB / … sans changement de code.
 
 ---
 
@@ -179,7 +187,7 @@ métriques de valeur ne sont jamais polluées par des couples à PM MRM = 0.
 ## 4. La cuisson — le waterfall de matching (`core/match/waterfall.py`)
 
 À chaque étape : join sur la clé courante (MRM **dédoublonné sur la clé**
-avant le join → un CPT matche au plus 1 MRM, pas de fan-out), filtre métier
+avant le join → un CPT matche au plus 1 MRM, pas de démultiplication), filtre métier
 optionnel, puis **anti-join** — les lignes matchées sortent, les restantes
 descendent à l'étape suivante. Chaque étape est matérialisée (checkpoint
 DBFS) : la lignée Spark reste plate, le run survit à l'autoscaling.
@@ -299,12 +307,14 @@ aucune grandeur n'est recalculée deux fois, donc aucune ne peut diverger :
    statut NON — dans le **vocabulaire client à deux couches** (*retrouvé /
    non retrouvé* = le fait ; *conforme / encore au compte* = le verdict, cf.
    [`METRIQUES.md`](METRIQUES.md) §0).
-2. **22 tables métriques** (`core/metrics/`, contrat complet →
+2. **8 tables métriques** (`core/metrics/`, contrat complet →
    [`METRIQUES.md`](METRIQUES.md) §6) : `synthese` (tous les KPI en 1 ligne /
-   run, historisable), `bilan_cas`, `taux_chute`, `consignes`,
+   run, historisable), `bilan_cas`, `couverture`, `chute`, `consignes`,
    `consignes_par_type_compte` (le tableau de bord TYPE_COMPTE × CONSIGNE),
-   ventilations par type de compte / ancienneté / garantie, analyses
-   d'orphelins, `controles_coherence`… Écrites **en Delta dans le metastore
+   `orphelins`, `controles_coherence` — une table = un sujet complet, les
+   angles d'analyse (exercice, type de compte, ancienneté, garantie, univers…)
+   sont des **colonnes** (`EXERCICE`, `AXE`, `SEGMENT`, `UNIVERS`), jamais des
+   tables séparées. Écrites **en Delta dans le metastore
    Hive** — la sortie de **référence**, celle que Power BI interroge : chaque
    table est **historisée par `DATE_INVENTAIRE × PERIMETRE`** (rejouer un
    inventaire remplace exactement ses lignes, 2023 et 2024 coexistent). Les
@@ -346,7 +356,7 @@ le cœur est `build_df_result` / `run` dans `main.py`.
 
 | Contexte | Entrée | Particularité |
 |---|---|---|
-| **Production** (Databricks Job) | `notebooks/itip_fiab_powerbi` | widgets / base parameters (`annee_inventaire`, `fichier_mrm_n1`, `types_compte`, `delta_schema`…) ; contrôles **bloquants** ; export des 22 tables + `resultat_backtest` |
+| **Production** (Databricks Job) | `notebooks/itip_fiab_powerbi` | widgets / base parameters (`annee_inventaire`, `fichier_mrm_n1`, `types_compte`, `delta_schema`…) ; contrôles **bloquants** ; export des 8 tables + `resultat_backtest` |
 | Run interactif | `notebooks/itip_fiab_main` | widgets par année (2023 / 2024), métriques table par table ; **la cellule d'export écrit dans le metastore** (viser un schéma de test pour expérimenter) |
 | Comparaison | `notebooks/itip_fiab_comparaison` | 2023 vs 2024 côte à côte (via `configurer_run`, plusieurs inventaires dans une session) |
 | Smoke test | `notebooks/itip_fiab_smoke` | tout le pipeline après mise à jour du code via `build_df_result`, **aucune écriture** (ni Delta, ni fichier, ni PNG) |
@@ -355,7 +365,8 @@ le cœur est `build_df_result` / `run` dans `main.py`.
 Surcharges d'environnement (conf cluster / Job, sans toucher au code) :
 `ITIP_DBFS_HOME` (racine de travail) et `ITIP_DELTA_SCHEMA` (schéma Delta,
 `""` = pas d'export). En local / CI : `pip install -e ".[dev]"`, `ruff
-check .`, `pytest` (rejoués par GitHub Actions à chaque push).
+check .`, `pytest` (rejoués automatiquement par l'intégration continue
+à chaque mise à jour du code).
 
 ---
 

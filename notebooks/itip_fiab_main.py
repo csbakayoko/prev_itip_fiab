@@ -106,16 +106,18 @@ annee_inv = metrics._annee_inventaire(d)   # année dérivée de d["date_inventa
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Métriques
+# MAGIC ## 4. Métriques — les 8 tables (une table = un sujet complet)
 # MAGIC
-# MAGIC Des fonctions simples (`core.metrics`) : les métriques scalaires prennent
-# MAGIC `d` ; `chute_par_*`, `anomalies_cpt_only` et `orphelins_*` ré-agrègent
-# MAGIC `df_result` côté Spark.
+# MAGIC Des fonctions simples (`core.metrics`) : les tables scalaires prennent `d`
+# MAGIC (`synthese`, `bilan_cas`, `consignes`, `couverture`) ; `chute` et
+# MAGIC `orphelins` ré-agrègent `df_result` côté Spark. Les angles d'analyse sont
+# MAGIC des **colonnes** (`EXERCICE`, `AXE`, `SEGMENT`, `UNIVERS`) — mêmes tables
+# MAGIC que l'export Power BI.
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Synthèse (1 ligne) + bilan cas par cas + taux de chute
+# MAGIC ### Synthèse (1 ligne) + bilan cas par cas
 
 # COMMAND ----------
 
@@ -127,37 +129,27 @@ display(metrics.bilan_cas(d))   # LE bilan cas par cas (avec explications)
 
 # COMMAND ----------
 
-display(metrics.taux_chute(d))
-
-# COMMAND ----------
-
 # MAGIC %md
-# MAGIC ### Chute par exercice (inventaire courant / N+1 séparé) + suivi consignes N+1
-
-# COMMAND ----------
-
-display(metrics.chute_par_exercice(d))
-
-# COMMAND ----------
-
-display(metrics.suivi_n1(d))
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Chute par ancienneté — N / N-1 / N-2 et antérieur
+# MAGIC ### La chute sous tous ses angles — `AXE` × `EXERCICE`
 # MAGIC
-# MAGIC La méthode d'inventaire diffère selon l'année de survenance (revue tête par
-# MAGIC tête sur N-1). Σ du bloc « Inventaire courant » = taux de chute principal.
+# MAGIC `AXE` = Ensemble (le taux officiel) / Type de compte / Ancienneté ;
+# MAGIC `EXERCICE` sépare l'inventaire courant (stats globales) des récupérés N+1
+# MAGIC (analyse séparée). Dans chaque bloc, Σ des lignes redonne le taux
+# MAGIC « Ensemble » ; l'ancienneté suit la méthode d'inventaire (revue tête par
+# MAGIC tête sur N-1).
 
 # COMMAND ----------
 
-display(metrics.chute_par_anciennete(df_result, annee_inv))
+display(metrics.chute(df_result, d))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Analyse des consignes (conformité + PM + chute) — exercice courant pur
+# MAGIC ### Le suivi des consignes — les deux exercices (`EXERCICE`)
+# MAGIC
+# MAGIC Conformité + PM + chute par consigne (exercice courant pur, ligne « Sans
+# MAGIC consigne reconnue » incluse) ; bloc « Récupérés N+1 » = analyse séparée.
+# MAGIC Puis le tableau de bord ventilé par type de compte.
 
 # COMMAND ----------
 
@@ -165,50 +157,35 @@ display(metrics.consignes(d))
 
 # COMMAND ----------
 
+display(metrics.consignes_par_type_compte(df_result))
+
+# COMMAND ----------
+
 # MAGIC %md
-# MAGIC ### Investigation des orphelins (CPT_ONLY, compte préposé)
+# MAGIC ### La couverture — les deux univers (`UNIVERS`)
 # MAGIC
-# MAGIC `orphelins_par_type_compte` : la ventilation complète (Σ = tous les
-# MAGIC orphelins). `orphelins_par_clause` : le détail des comptes porteurs d'une
-# MAGIC clause, RANG 1 = le plus représentatif (à investiguer avec le
-# MAGIC souscripteur). `orphelins_cles_nulles` : composantes de la clé
-# MAGIC nulles/vides (explique pourquoi ces dossiers n'ont pas matché).
+# MAGIC « Compte » : qui justifie chaque ligne du compte (retrouvés, N+1,
+# MAGIC repêchés, clos, anomalies) ; « Revue MRM » : part de la revue retrouvée +
+# MAGIC non retrouvés par consigne.
 
 # COMMAND ----------
 
-display(metrics.orphelins_par_type_compte(df_result))  # ventilation complète (PB / HPB / …)
-
-# COMMAND ----------
-
-display(metrics.orphelins_par_clause(df_result))      # détail : compte le plus représentatif (RANG 1)
-
-# COMMAND ----------
-
-display(metrics.orphelins_par_garantie(df_result))    # IT 60 / IP 64 / autre
-
-# COMMAND ----------
-
-display(metrics.orphelins_par_anciennete(df_result, annee_inv))
-
-# COMMAND ----------
-
-display(metrics.orphelins_cles_nulles(df_result))     # nullité des colonnes de la clé
+display(metrics.couverture(d))
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### Autres données derrière les graphiques
+# MAGIC ### L'investigation des orphelins — six angles (`AXE`)
+# MAGIC
+# MAGIC Type de compte / garantie / ancienneté / mois de survenance partitionnent
+# MAGIC les orphelins (Σ = total, chacun). « Clause (détail) » : sous-ensemble des
+# MAGIC porteurs de clause, `ORDRE` 1 = le plus représentatif (à investiguer avec
+# MAGIC le souscripteur). « Composante de clé nulle » : fréquence de nullité de
+# MAGIC chaque composante (explique pourquoi ces dossiers n'ont pas matché).
 
 # COMMAND ----------
 
-display(metrics.compte_justification(d))            # graphe 1
-display(metrics.couverture_mrm(d))                  # graphe 2
-display(metrics.chute_par_type_compte(df_result))    # graphe 3 — par bloc EXERCICE
-display(metrics.chute_par_consigne(d))              # graphe 4
-display(metrics.conformite_consignes(d))            # graphe 5
-display(metrics.anomalies_cpt_only(df_result))      # graphe 6
-display(metrics.conformite_globale(d))              # graphe 8
-display(metrics.pm_par_consigne(d))                 # graphe 9
+display(metrics.orphelins(df_result, annee_inv))
 
 # COMMAND ----------
 

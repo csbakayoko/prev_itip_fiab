@@ -55,8 +55,13 @@ CLIENT_MRM_STATUT_INV  = None          # filtre statut inventaire au chargement.
 # Périmètre PB : aucune clause figée, mais on filtre le TYPE sur PB. Côté MRM
 # cela écarte les HPB (qui n'existent pas dans le compte) ; côté CPT c'est un
 # garde-fou sur le préfixe CPB_ (le compte ne contient déjà que du PB).
+#
+# NB : ["PB"] reflète le périmètre ACTUELLEMENT intégré au Lab Databricks, pas
+# une limite du compte CORECO (qui couvre déjà tout le portefeuille). Élargir
+# à HPB / autres = ajouter la valeur ici, aucun code à toucher (axe TYPE_COMPTE
+# déjà câblé de bout en bout, cf. docs/METRIQUES.md).
 CLIENT_CLAUSES      = None         # numéros sans préfixe ; None = toutes les clauses
-CLIENT_TYPE_CLAUSES = ["PB"]       # "PB" / "HPB" ; filtre type (MRM = PB seul)
+CLIENT_TYPE_CLAUSES = ["PB"]       # "PB" / "HPB" ; filtre type (Lab = PB seul aujourd'hui)
 
 # Libellé de périmètre du run : la clause si le run est filtré sur une seule,
 # sinon "MULTI". Nomme les dossiers/fichiers d'export et alimente la colonne

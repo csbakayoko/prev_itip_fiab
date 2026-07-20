@@ -13,40 +13,33 @@
 # MAGIC | 1 | ⚙️ **Setup** | session Spark + paramètres du run (widgets = paramètres du Job, défauts `config/profile.py`) |
 # MAGIC | 2 | 🏗️ **Pipeline** | chargement → nettoyage → matching (11 étapes) → états terminaux (`MRM_DELETE`, orphelins) → récupérations (N+1, statut NON) → tags |
 # MAGIC | 3 | 🔎 **Synthèse** | contrôles de cohérence **bloquants** (lignes classées, `chute_coherente`) |
-# MAGIC | 4 | 📦 **Export** | les 22 tables métriques en Delta dans le metastore (la sortie de **référence**, celle que Power BI interroge) + fichiers DBFS en secondaire, puis recoupements inter-tables **bloquants** |
+# MAGIC | 4 | 📦 **Export** | les 8 tables métriques en Delta dans le metastore (la sortie de **référence**, celle que Power BI interroge) + fichiers DBFS en secondaire, puis recoupements inter-tables **bloquants** |
 # MAGIC | 5 | 🗄️ **Détail du run** | `df_result` écrit en table `resultat_backtest`, historisée par `DATE_INVENTAIRE × PERIMETRE` (2023 et 2024 coexistent) |
 # MAGIC | 6 | ✅ **Récapitulatif** | la liste des tables à brancher dans Power BI |
 # MAGIC
-# MAGIC ### Tables produites (tidy, une table par question métier)
+# MAGIC ### Les 8 tables produites (tidy — une table = un sujet complet)
+# MAGIC Les angles d'analyse sont des **colonnes** (`EXERCICE`, `AXE`, `SEGMENT`,
+# MAGIC `UNIVERS`), jamais des tables séparées : Power BI filtre, il n'assemble pas.
 # MAGIC | Table | Contenu |
 # MAGIC |---|---|
 # MAGIC | `synthese` | 1 ligne / run — tous les KPI (chute, conformité, couvertures, retrouvés vs base chute) — **historisable** |
 # MAGIC | `bilan_cas` | LE bilan cas par cas : matchés, retrouvés par tentatives (N+1, statut NON), non retrouvés de part et d'autre — nb, PM, taux, **explication** |
-# MAGIC | `taux_chute` | LE taux (matchés inventaire courant) + composantes PM (base chute, retrouvés, totaux) ; N+1 en regard |
-# MAGIC | `chute_par_exercice` | 1 ligne / exercice (inventaire courant, N+1 séparé) — nb, PM, écart, taux |
-# MAGIC | `suivi_n1` | consignes des récupérés N+1 (analyse séparée), 1 ligne / consigne N+1 |
-# MAGIC | `consignes` | conformité + PM + chute (exercice courant pur), 1 ligne / consigne |
-# MAGIC | `compte_justification` | décomposition du compte (retrouvés, N+1, repêchés, clos, anomalies) |
-# MAGIC | `couverture_mrm` | part de la revue retrouvée au compte + non retrouvés par consigne |
-# MAGIC | `chute_par_type_compte` | taux de chute par TYPE_COMPTE (PB / HPB / …) × EXERCICE (inventaire courant / N+1 séparé) |
-# MAGIC | `chute_par_anciennete` | taux de chute par année de survenance (N / N-1 / N-2 et antérieur) × EXERCICE |
+# MAGIC | `couverture` | les deux univers (`UNIVERS`) : justification du compte / part de la revue MRM retrouvée |
+# MAGIC | `chute` | LE taux de chute sous tous ses angles (`AXE` : Ensemble / type de compte / ancienneté) × `EXERCICE` (inventaire courant / N+1 séparé) |
+# MAGIC | `consignes` | conformité + PM + chute par consigne, les deux exercices (`EXERCICE`), ligne « Sans consigne reconnue » incluse |
 # MAGIC | `consignes_par_type_compte` | tableau de bord : suivi des consignes par TYPE_COMPTE × CONSIGNE |
-# MAGIC | `chute_par_consigne` / `pm_par_consigne` | chute et PM par consigne pertinente |
-# MAGIC | `conformite_consignes` / `conformite_globale` | application des consignes (détail + segments) |
-# MAGIC | `anomalies_cpt_only` | anomalies par mois de survenance (effet fin d'année) |
-# MAGIC | `orphelins_par_type_compte` | orphelins compte par TYPE_COMPTE — ventilation complète |
-# MAGIC | `orphelins_par_clause` | **détail** : orphelins des comptes porteurs d'une clause, RANG 1 = à investiguer |
-# MAGIC | `orphelins_par_garantie` / `_par_anciennete` / `_cles_nulles` | investigation des orphelins |
+# MAGIC | `orphelins` | l'investigation sous six angles (`AXE` : type de compte / garantie / ancienneté / mois / clause / clés nulles), `ORDRE` = rang de lecture |
 # MAGIC | `controles_coherence` | recoupements inter-tables (attendu / obtenu / OK) — onglet « fiabilité » |
 # MAGIC
 # MAGIC > 🎯 **Axe d'analyse** : les métriques se ventilent par `TYPE_COMPTE`, le
 # MAGIC > périmètre métier. La clause n'est pas un axe (elle ne sert qu'à remplacer
 # MAGIC > un RPP nul dans la clé de matching, et tous les comptes n'en portent pas) :
-# MAGIC > elle ne subsiste que dans la table de détail `orphelins_par_clause`.
+# MAGIC > elle ne subsiste que dans l'angle « Clause (détail) » de la table
+# MAGIC > `orphelins`.
 # MAGIC
 # MAGIC > 📚 Contrats : [`docs/METRIQUES.md`](../docs/METRIQUES.md) (métriques) ·
 # MAGIC > [`docs/POWERBI_MAQUETTE.md`](../docs/POWERBI_MAQUETTE.md) (rapport) ·
-# MAGIC > tutoriels Word/PPT dans `docs/`.
+# MAGIC > tutoriels Word/PPT (rapport Power BI, Job) dans `livrables/`.
 
 # COMMAND ----------
 
@@ -180,15 +173,25 @@ print("✅ Contrôles de synthèse OK — export autorisé.")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. 📦 Export Power BI — les 22 tables métriques
+# MAGIC ## 4. 📦 Export Power BI — les 8 tables métriques
 # MAGIC
-# MAGIC Une passe : les 22 tables écrites en Delta (`<schema>.metrique_<nom>`,
+# MAGIC Une passe : les 8 tables écrites en Delta (`<schema>.metrique_<nom>`,
 # MAGIC historisées par `DATE_INVENTAIRE × PERIMETRE`) + fichiers DBFS secondaires.
 # MAGIC
 # MAGIC Puis le verrou final : **les onglets Power BI doivent se recouper**. Tout
 # MAGIC recoupement inter-tables KO invalide l'étude → run en échec. La table
 # MAGIC `controles_coherence` est exportée avec le reste (onglet « fiabilité »
 # MAGIC du rapport, page P7).
+# MAGIC
+# MAGIC > ⚠️ **Migration (une fois)** — l'export était auparavant éclaté en 22
+# MAGIC > tables. Les anciennes `metrique_*` du schéma ne sont plus alimentées et
+# MAGIC > `metrique_consignes` change de schéma (colonne `EXERCICE`) : passer une
+# MAGIC > fois un `DROP TABLE` sur les anciennes tables (`metrique_taux_chute`,
+# MAGIC > `metrique_chute_par_*`, `metrique_orphelins_par_*`, `metrique_suivi_n1`,
+# MAGIC > `metrique_conformite_*`, `metrique_pm_par_consigne`,
+# MAGIC > `metrique_compte_justification`, `metrique_couverture_mrm`,
+# MAGIC > `metrique_anomalies_cpt_only`, `metrique_orphelins_cles_nulles`,
+# MAGIC > `metrique_consignes`) — les 8 tables se (re)créent au run suivant.
 
 # COMMAND ----------
 

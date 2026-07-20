@@ -4,13 +4,21 @@ Métriques scalaires — reshape du dict de compute_synthese en tables pandas.
 Chaque fonction prend `d` (SyntheseScalars — LA passe Spark, déjà faite) et
 renvoie un DataFrame pandas tidy en DONNÉES BRUTES (le formatage M€/% reste
 au niveau restitution). Correspondance graphiques : cf. core/metrics/__init__.py.
+
+Les tables exportées regroupent chacune UN sujet complet (contrat :
+docs/METRIQUES.md §6) : `consignes` porte les deux exercices (colonne
+EXERCICE), `couverture` les deux univers (colonne UNIVERS).
 """
 
 import pandas as pd
 
-from core.synthese.kpi_export import kas_totaux
 from core.synthese.synthese_contract import SyntheseScalars
 from core.metrics.base import EXERCICE_INV, EXERCICE_N1
+
+# Libellés de lignes/blocs des tables regroupées — un seul vocabulaire.
+SANS_CONSIGNE  = "Sans consigne reconnue"   # matché, MRM_ACTION nulle/inconnue
+UNIVERS_COMPTE = "Compte"                   # couverture : le compte est-il justifié ?
+UNIVERS_REVUE  = "Revue MRM"                # couverture : la revue est-elle retrouvée ?
 
 
 # ============================================================================
@@ -100,7 +108,8 @@ def bilan_cas(d: SyntheseScalars) -> pd.DataFrame:
         ("Retrouvés par tentatives", "└ base chute N+1",
          d["chute_n1_nb"], d["chute_n1_pm_mrm"], d["chute_n1_pm_cpt"],
          d["taux_chute_n1"],
-         "hors « à supprimer » N+1 — taux de chute et consignes propres (suivi_n1)"),
+         "hors « à supprimer » N+1 — taux de chute et consignes propres "
+         "(bloc N+1 des tables chute et consignes)"),
         ("Retrouvés par tentatives", "Repêchés statut NON — exercice N",
          d["recup_non_n_nb"], None, d["recup_non_n_pm"], None,
          "anomalie résolue sur un MRM statut NON de l'exercice courant "
@@ -147,80 +156,25 @@ def bilan_cas(d: SyntheseScalars) -> pd.DataFrame:
     } for volet, cas, nb, pm_mrm, pm_cpt, taux, expl in rows])
 
 
-def taux_chute(d: SyntheseScalars) -> pd.DataFrame:
-    """LE taux de chute, PM MRM et PM Compte (base chute + retrouvés) — graphe 7.
-
-    Base chute = matchés de l'inventaire courant, hors « à supprimer » et
-    hors statut inventaire NON (sans-consigne inclus). Les récupérés N+1
-    (TAUX_CHUTE_N1_PCT) sont une analyse séparée, hors stats globales.
-    Retrouvés = tous les matchés + tous les N+1 (bulle de la synthèse).
-    PM totales = grands totaux des deux univers d'entrée (MRM, Compte).
-    """
-    return pd.DataFrame([{
-        "TAUX_CHUTE_PCT"        : d["taux_chute_inventaire"],
-        "TAUX_CHUTE_N1_PCT"     : d["taux_chute_n1"],
-        "PM_MRM_BASE_CHUTE"     : d["metrics_pm_mrm"],
-        "PM_CPT_BASE_CHUTE"     : d["metrics_pm_cpt"],
-        "ECART_BASE_CHUTE"      : d["metrics_pm_ecart"],
-        "NB_BASE_CHUTE"         : d["metrics_nb"],
-        "NB_RECUP_N1"           : d["chute_n1_nb"],
-        "NB_HORS_CONSIGNE"      : d["hors_consigne_nb"],
-        "NB_RETROUVES"          : d["trouves_nb"],
-        "PM_MRM_RETROUVES"      : d["trouves_pm_mrm"],
-        "PM_CPT_RETROUVES"      : d["trouves_pm_cpt"],
-        "PM_MRM_TOTALE"         : d["mrm_pm"],
-        "PM_CPT_TOTALE"         : d["cpt_pm"],
-    }])
-
-
-def chute_par_exercice(d: SyntheseScalars) -> pd.DataFrame:
-    """Taux de chute par exercice de matching : inventaire courant (les stats
-    globales) et récupérés N+1 (analyse séparée, hors stats globales).
-
-    Une ligne par exercice — univers disjoints, chacun son taux.
-    """
-    rows = [
-        (EXERCICE_INV, d["metrics_nb"],
-         d["metrics_pm_mrm"],  d["metrics_pm_cpt"],  d["taux_chute_inventaire"]),
-        (EXERCICE_N1,  d["chute_n1_nb"],
-         d["chute_n1_pm_mrm"], d["chute_n1_pm_cpt"], d["taux_chute_n1"]),
-    ]
-    return pd.DataFrame([{
-        "EXERCICE"       : lbl,
-        "NB_DOSSIERS"    : nb,
-        "PM_MRM"         : pm_mrm,
-        "PM_CPT"         : pm_cpt,
-        "ECART"          : pm_mrm - pm_cpt,
-        "TAUX_CHUTE_PCT" : taux,
-    } for lbl, nb, pm_mrm, pm_cpt, taux in rows])
-
-
-def suivi_n1(d: SyntheseScalars) -> pd.DataFrame:
-    """Suivi des consignes des récupérés N+1 (analyse séparée) — une ligne par
-    consigne N+1. KEEP/ADD/STUDY = conformes (le dossier est retrouvé) ;
-    DELETE = encore au compte ; consigne non reconnue à part."""
-    rows = [(consigne, nb, "conforme" if consigne != "À supprimer" else "encore au compte")
-            for consigne, nb in d["n1_consignes"].items()]
-    if d["n1_sans_consigne"]:
-        rows.append(("Sans consigne", d["n1_sans_consigne"], "—"))
-    return pd.DataFrame([{
-        "CONSIGNE"    : consigne,
-        "NB_DOSSIERS" : nb,
-        "STATUT"      : statut,
-    } for consigne, nb, statut in rows])
-
-
 def consignes(d: SyntheseScalars) -> pd.DataFrame:
-    """Analyse complète par consigne : conformité, PM et taux de chute —
-    EXERCICE COURANT pur (les récupérés N+1 ont leur suivi séparé, suivi_n1).
+    """LE suivi des consignes — les deux exercices dans une table (graphes 4, 5, 8, 9).
 
-    Une ligne par consigne (conserver / étudier / ajouter / supprimer).
-    Couvre à elle seule les graphiques 4 (chute), 5 (conformité) et
-    9 (PM revue vs compte) — les fonctions dédiées en sont des vues filtrées.
+    Une ligne par consigne × exercice, la colonne EXERCICE sépare les univers
+    (même règle que la table `chute`, cf. METRIQUES §4.2) :
+    - « Inventaire courant » : conformité + PM + taux de chute par consigne
+      (exercice courant pur, §5), plus la ligne « Sans consigne reconnue » —
+      dossiers matchés sans consigne exploitable : pas de conformité à mesurer,
+      mais leur PM est DANS la base chute (§4.3) ;
+    - « Récupérés N+1 » : suivi des consignes N+1 (analyse séparée, hors stats
+      globales) — volumétries seules, les PM du bloc N+1 sont dans `chute`.
+
+    Le KO reste nommé par le fait (« non retrouvé » / « encore au compte ») ;
+    les graphes par consigne se lisent en filtrant EXERCICE = inventaire courant.
     """
     rows = []
     for consigne, c in d["consignes"].items():
         rows.append({
+            "EXERCICE"        : EXERCICE_INV,
             "CONSIGNE"        : consigne,
             "NB_TOTAL"        : c["nb"],
             "NB_CONFORMES"    : c["conf"],
@@ -234,13 +188,74 @@ def consignes(d: SyntheseScalars) -> pd.DataFrame:
             "TAUX_CHUTE_PCT"  : c["taux_chute"],
             "PM_PERTINENTE"   : c["pertinent"],    # False pour « à supprimer »
         })
+    hc_mrm, hc_cpt = d["hors_consigne_pm_mrm"], d["hors_consigne_pm_cpt"]
+    rows.append({
+        "EXERCICE"        : EXERCICE_INV,
+        "CONSIGNE"        : SANS_CONSIGNE,
+        "NB_TOTAL"        : None,                  # conformité sans objet
+        "NB_CONFORMES"    : None,
+        "PCT_CONFORMITE"  : None,
+        "NB_KO"           : None,
+        "NATURE_KO"       : None,
+        "NB_BASE_CHUTE"   : d["hors_consigne_nb"],
+        "PM_MRM"          : hc_mrm,
+        "PM_CPT"          : hc_cpt,
+        "ECART"           : hc_mrm - hc_cpt,
+        "TAUX_CHUTE_PCT"  : round((hc_mrm - hc_cpt) / hc_mrm * 100, 2) if hc_mrm else 0.0,
+        "PM_PERTINENTE"   : True,
+    })
+    # Bloc N+1 : présent seulement si le run a une récupération N+1. Un récupéré
+    # est retrouvé PAR CONSTRUCTION → conforme, sauf « à supprimer » (encore au
+    # compte). « À supprimer » N+1 est hors base chute N+1 (NB_BASE_CHUTE nul).
+    for consigne, nb in d["n1_consignes"].items():
+        delete = consigne == "À supprimer"
+        rows.append({
+            "EXERCICE"        : EXERCICE_N1,
+            "CONSIGNE"        : consigne,
+            "NB_TOTAL"        : nb,
+            "NB_CONFORMES"    : 0 if delete else nb,
+            "PCT_CONFORMITE"  : (0.0 if delete else 100.0) if nb else None,
+            "NB_KO"           : nb if delete else 0,
+            "NATURE_KO"       : "encore au compte" if delete else None,
+            "NB_BASE_CHUTE"   : None if delete else nb,
+            "PM_MRM"          : None,
+            "PM_CPT"          : None,
+            "ECART"           : None,
+            "TAUX_CHUTE_PCT"  : None,
+            "PM_PERTINENTE"   : not delete,
+        })
+    if d["n1_consignes"] or d["n1_sans_consigne"]:
+        rows.append({
+            "EXERCICE"        : EXERCICE_N1,
+            "CONSIGNE"        : SANS_CONSIGNE,
+            "NB_TOTAL"        : None,
+            "NB_CONFORMES"    : None,
+            "PCT_CONFORMITE"  : None,
+            "NB_KO"           : None,
+            "NATURE_KO"       : None,
+            "NB_BASE_CHUTE"   : d["n1_sans_consigne"],
+            "PM_MRM"          : None,
+            "PM_CPT"          : None,
+            "ECART"           : None,
+            "TAUX_CHUTE_PCT"  : None,
+            "PM_PERTINENTE"   : True,
+        })
     return pd.DataFrame(rows)
 
 
-def compte_justification(d: SyntheseScalars) -> pd.DataFrame:
-    """Décomposition du compte : retrouvés, récupérés N+1, anomalies — graphe 1.
+def couverture(d: SyntheseScalars) -> pd.DataFrame:
+    """LA couverture — les deux univers dans une table (graphes 1 et 2).
 
-    Une ligne par catégorie (nb + PM compte), avec son poids dans le compte.
+    Une ligne par catégorie × univers, la colonne UNIVERS sépare les lectures :
+    - « Compte » : le compte est-il justifié ? décomposition en retrouvés,
+      récupérés N+1, repêchés statut NON, clos avant inventaire, anomalies —
+      PM côté compte, poids en nombre ET en PM ;
+    - « Revue MRM » : la revue est-elle retrouvée ? part retrouvée au compte +
+      non retrouvés par consigne (+ « à supprimer » encore au compte) — PM
+      côté revue, poids en nombre.
+
+    PCT_NB = poids dans son univers (« à supprimer » : part de sa propre
+    consigne) ; PCT_PM = poids en PM (univers compte seul).
     """
     cats = [
         ("Retrouvés (inventaire)",    d["match_nb"],     d["match_pm_cpt"]),
@@ -251,91 +266,33 @@ def compte_justification(d: SyntheseScalars) -> pd.DataFrame:
     ]
     tot_nb = sum(c[1] for c in cats) or 1
     tot_pm = sum(c[2] for c in cats) or 1.0
-    return pd.DataFrame([{
+    rows = [{
+        "UNIVERS"     : UNIVERS_COMPTE,
         "CATEGORIE"   : lbl,
         "NB_DOSSIERS" : nb,
+        "PM_MRM"      : None,
         "PM_CPT"      : pm,
         "PCT_NB"      : round(nb / tot_nb * 100, 1),
         "PCT_PM"      : round(pm / tot_pm * 100, 1),
-    } for lbl, nb, pm in cats])
+    } for lbl, nb, pm in cats]
 
-
-def couverture_mrm(d: SyntheseScalars) -> pd.DataFrame:
-    """Part de la revue MRM retrouvée au compte, non retrouvés par consigne — graphe 2.
-
-    Inclut les « à supprimer » retrouvées au compte (consigne non suivie).
-    PCT = part de la revue à comparer (base), sauf « à supprimer » (part de
-    sa propre consigne).
-    """
-    base  = d["a_comparer_nb"] or 1
-    c_del = d["consignes"]["À supprimer"]
+    base   = d["a_comparer_nb"] or 1
+    c_del  = d["consignes"]["À supprimer"]
     del_ko = c_del["nb"] - c_del["conf"]
-    rows = [
+    revue = [
         ("Retrouvés au compte",                  d["match_nb"], round(d["match_nb"] / base * 100, 1), None),
         ("À conserver non retrouvé",             d["keep_nb"],  round(d["keep_nb"]  / base * 100, 1), d["keep_pm"]),
         ("À étudier non retrouvé",               d["study_nb"], round(d["study_nb"] / base * 100, 1), d["study_pm"]),
         ("À ajouter non retrouvé",               d["add_nb"],   round(d["add_nb"]   / base * 100, 1), d["add_pm"]),
         ("« À supprimer » retrouvées au compte", del_ko,        round(del_ko / (c_del["nb"] or 1) * 100, 1), c_del["pm_mrm"]),
     ]
-    return pd.DataFrame([{
+    rows += [{
+        "UNIVERS"     : UNIVERS_REVUE,
         "CATEGORIE"   : lbl,
         "NB_DOSSIERS" : nb,
-        "PCT"         : pct,
         "PM_MRM"      : pm,
-    } for lbl, nb, pct, pm in rows])
-
-
-def conformite_globale(d: SyntheseScalars) -> pd.DataFrame:
-    """Suivi des consignes au global (exercice courant) — graphe 8 : segments
-    conforme / non retrouvé (conserver/étudier/ajouter) + suppression
-    effective. Les récupérés N+1 ont leur suivi séparé (suivi_n1).
-
-    Une ligne par segment, deux groupes (KAS = conserver/étudier/ajouter,
-    DELETE = à supprimer), avec le taux du groupe.
-    """
-    k = kas_totaux(d)
-    cons = d["consignes"]
-    nr = (cons["À conserver"]["ko"] + cons["À ajouter"]["ko"]
-          + cons["À étudier"]["ko"])                           # non retrouvés
-    c_del  = cons["À supprimer"]
-    del_ok = c_del["conf"]
-    del_ko = c_del["nb"] - del_ok
-    rows = [
-        ("conserver/étudier/ajouter", "Conforme",        k["conf"], d["conformite_globale"]),
-        ("conserver/étudier/ajouter", "Non retrouvé",    nr,        d["conformite_globale"]),
-        ("à supprimer",               "Supprimé (OK)",   del_ok,    c_del["pct"]),
-        ("à supprimer",               "Encore au compte", del_ko,   c_del["pct"]),
-    ]
-    return pd.DataFrame([{
-        "GROUPE"           : grp,
-        "SEGMENT"          : seg,
-        "NB_DOSSIERS"      : nb,
-        "PCT_CONFORMITE_GROUPE" : pct,
-    } for grp, seg, nb, pct in rows])
-
-
-# ── Vues filtrées de consignes() — graphes 4, 5 et 9 ─────────────────────────
-
-def chute_par_consigne(d: SyntheseScalars) -> pd.DataFrame:
-    """Taux de chute par consigne pertinente (= graphe 4)."""
-    df = consignes(d)
-    return df[df["PM_PERTINENTE"]][
-        ["CONSIGNE", "TAUX_CHUTE_PCT", "PM_MRM", "PM_CPT", "ECART"]
-    ].reset_index(drop=True)
-
-
-def pm_par_consigne(d: SyntheseScalars) -> pd.DataFrame:
-    """PM revue MRM vs PM compte par consigne pertinente (= graphe 9)."""
-    df = consignes(d)
-    return df[df["PM_PERTINENTE"]][
-        ["CONSIGNE", "PM_MRM", "PM_CPT", "ECART", "TAUX_CHUTE_PCT"]
-    ].reset_index(drop=True)
-
-
-def conformite_consignes(d: SyntheseScalars) -> pd.DataFrame:
-    """Conformité par consigne, toutes consignes (= graphe 5)."""
-    out = consignes(d)[
-        ["CONSIGNE", "NB_TOTAL", "NB_CONFORMES", "PCT_CONFORMITE", "NB_KO", "NATURE_KO"]
-    ].copy()
-    out["PCT_KO"] = (100 - out["PCT_CONFORMITE"]).round(1)
-    return out
+        "PM_CPT"      : None,
+        "PCT_NB"      : pct,
+        "PCT_PM"      : None,
+    } for lbl, nb, pct, pm in revue]
+    return pd.DataFrame(rows)

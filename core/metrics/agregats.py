@@ -19,11 +19,23 @@ import pyspark.sql.functions as F
 from pyspark.sql import DataFrame
 
 from config import CODE_GARANTIE_IT, CODE_GARANTIE_IP, MATCH_LABELS, RECUP_NON_LABEL
+from core.synthese.synthese_contract import SyntheseScalars
 from core.metrics.base import (
     EXERCICE_INV, EXERCICE_N1, _EXERCICE_ORDRE, _BLOC_ORDRE,
+    _annee_inventaire,
     derive_clause_column, _with_mrm_action, _filter_chute_universe,
     _mois_label_expr, _bloc_anciennete_expr,
 )
+
+# Libellés des AXES des tables regroupées `chute` et `orphelins` — un axe = un
+# angle d'analyse, la colonne SEGMENT porte la modalité (PB, N-1, Oct, …).
+AXE_ENSEMBLE    = "Ensemble"                  # chute : le taux officiel de l'exercice
+AXE_TYPE_COMPTE = "Type de compte"
+AXE_ANCIENNETE  = "Ancienneté"
+AXE_GARANTIE    = "Garantie"
+AXE_MOIS        = "Mois de survenance"
+AXE_CLAUSE      = "Clause (détail)"           # sous-ensemble : porteurs de clause
+AXE_CLE_NULLE   = "Composante de clé nulle"   # fréquences de nullité, non additif
 
 
 # ============================================================================
@@ -147,6 +159,90 @@ def chute_par_anciennete(
     return _finalise_chute_par_anciennete(pdf)
 
 
+# ============================================================================
+# TABLE REGROUPÉE « CHUTE » — le taux sous tous ses angles
+# ============================================================================
+
+_CHUTE_COLONNES = [
+    "EXERCICE", "AXE", "SEGMENT", "TYPE_COMPTE",
+    "NB_DOSSIERS", "NB_SOUS_PROVISION", "NB_SUR_PROVISION", "NB_ECART_NUL",
+    "PM_MRM", "PM_CPT", "ECART", "TAUX_CHUTE_PCT", "POIDS_PM_PCT",
+]
+
+
+def _ensemble_chute(d: SyntheseScalars) -> pd.DataFrame:
+    """Lignes AXE = « Ensemble » : le taux de chute OFFICIEL de chaque exercice
+    (scalaires de compute_synthese — la référence que Σ de chaque axe ventilé
+    doit redonner). Le détail des signes (sous/sur-provision) est porté par
+    les axes ventilés."""
+    rows = [
+        (EXERCICE_INV, d["metrics_nb"],
+         d["metrics_pm_mrm"],  d["metrics_pm_cpt"],  d["taux_chute_inventaire"]),
+        (EXERCICE_N1,  d["chute_n1_nb"],
+         d["chute_n1_pm_mrm"], d["chute_n1_pm_cpt"], d["taux_chute_n1"]),
+    ]
+    return pd.DataFrame([{
+        "EXERCICE"          : lbl,
+        "AXE"               : AXE_ENSEMBLE,
+        "SEGMENT"           : AXE_ENSEMBLE,
+        "NB_DOSSIERS"       : nb,
+        "NB_SOUS_PROVISION" : None,
+        "NB_SUR_PROVISION"  : None,
+        "NB_ECART_NUL"      : None,
+        "PM_MRM"            : pm_mrm,
+        "PM_CPT"            : pm_cpt,
+        "ECART"             : pm_mrm - pm_cpt,
+        "TAUX_CHUTE_PCT"    : taux,
+        "POIDS_PM_PCT"      : 100.0,
+    } for lbl, nb, pm_mrm, pm_cpt, taux in rows])
+
+
+def _empiler_axe(pdf: pd.DataFrame, axe: str, segment_col: str) -> pd.DataFrame:
+    """Renomme la colonne d'axe en SEGMENT et insère la colonne AXE — pure pandas."""
+    pdf = pdf.rename(columns={segment_col: "SEGMENT"}).copy()
+    pdf.insert(0, "AXE", axe)
+    return pdf
+
+
+def _assemble_chute(
+    ensemble       : pd.DataFrame,
+    par_type_compte: pd.DataFrame,
+    par_anciennete : pd.DataFrame,
+) -> pd.DataFrame:
+    """Empile les trois angles dans le schéma commun — pure pandas.
+
+    L'axe « Type de compte » garde sa colonne TYPE_COMPTE en plus de SEGMENT
+    (grain de l'axe — cible des relations Power BI), comme dans `orphelins`.
+    """
+    tc = par_type_compte.copy()
+    tc.insert(0, "AXE", AXE_TYPE_COMPTE)
+    tc["SEGMENT"] = tc["TYPE_COMPTE"]
+    blocs = [
+        ensemble,
+        tc,
+        _empiler_axe(par_anciennete, AXE_ANCIENNETE, "BLOC_ANCIENNETE"),
+    ]
+    return pd.concat(blocs, ignore_index=True).reindex(columns=_CHUTE_COLONNES)
+
+
+def chute(df_result: DataFrame, d: SyntheseScalars) -> pd.DataFrame:
+    """LE taux de chute sous tous ses angles — une seule table (graphes 3, 7, 10).
+
+    Une ligne par EXERCICE × AXE × SEGMENT :
+    - AXE « Ensemble » : le taux officiel de l'exercice (stats globales pour
+      l'inventaire courant, analyse séparée pour les récupérés N+1) ;
+    - AXE « Type de compte » (PB / HPB / …) et « Ancienneté » (N / N-1 / N-2
+      et antérieur) : les ventilations — dans chaque bloc EXERCICE × AXE,
+      Σ des lignes (Σ écart / Σ PM MRM) redonne le taux « Ensemble » et les
+      poids PM se lisent dans le bloc (garanti par controles_coherence).
+    """
+    return _assemble_chute(
+        _ensemble_chute(d),
+        chute_par_type_compte(df_result),
+        chute_par_anciennete(df_result, _annee_inventaire(d)),
+    )
+
+
 def anomalies_cpt_only(
     df_result: DataFrame,
     date_col : str = "CPT_D_SURVENANCE",
@@ -214,7 +310,7 @@ def consignes_par_type_compte(df_result: DataFrame) -> pd.DataFrame:
                          non suivie = non retrouvé (MRM_MISSING).
         DELETE         : suivie = suppression effective (absent du compte) ;
                          non suivie = encore au compte (matché).
-    Les récupérés N+1 (suivi séparé, cf. suivi_n1) sont exclus.
+    Les récupérés N+1 (suivi séparé : bloc N+1 de `consignes`) sont exclus.
 
     NB_NON_REMONTE_DF : dossiers repêchés via statut inventaire NON (PM MRM
     = 0, non remontée à la Direction Financière) — hors conformité, comptés
@@ -442,4 +538,78 @@ def orphelins_cles_nulles(df_result: DataFrame) -> pd.DataFrame:
                                     "NB_TOTAL_ORPHELINS"])
         .sort_values("NB_NULL_OU_VIDE", ascending=False)
         .reset_index(drop=True)
+    )
+
+
+# ============================================================================
+# TABLE REGROUPÉE « ORPHELINS » — l'investigation sous tous ses angles
+# ============================================================================
+
+_ORPHELINS_COLONNES = [
+    "AXE", "SEGMENT", "TYPE_COMPTE", "ORDRE",
+    "NB_DOSSIERS", "PM_CPT", "POIDS_NB_PCT", "POIDS_PM_PCT",
+]
+
+
+def _assemble_orphelins(
+    par_type_compte: pd.DataFrame,
+    par_garantie   : pd.DataFrame,
+    par_anciennete : pd.DataFrame,
+    par_mois       : pd.DataFrame,
+    par_clause     : pd.DataFrame,
+    cles_nulles    : pd.DataFrame,
+) -> pd.DataFrame:
+    """Empile les six angles dans le schéma commun — pure pandas.
+
+    ORDRE = ordre de lecture dans l'axe : rang de représentativité quand il
+    existe (type de compte, clause), position triée sinon (garantie par
+    volume, ancienneté N → N-2+, mois chronologique, composantes par nullité).
+    TYPE_COMPTE n'est renseigné que là où il fait partie du grain (type de
+    compte, clause).
+    """
+    tc = par_type_compte.copy()
+    tc["AXE"], tc["SEGMENT"], tc["ORDRE"] = AXE_TYPE_COMPTE, tc["TYPE_COMPTE"], tc["RANG"]
+
+    gar = par_garantie.copy()
+    gar["AXE"], gar["SEGMENT"], gar["ORDRE"] = AXE_GARANTIE, gar["GARANTIE_LIBELLE"], range(1, len(gar) + 1)
+
+    anc = par_anciennete.copy()
+    anc["AXE"], anc["SEGMENT"], anc["ORDRE"] = AXE_ANCIENNETE, anc["BLOC_ANCIENNETE"], range(1, len(anc) + 1)
+
+    mois = _finalise_orphelins(par_mois[["MOIS_SURVENANCE", "MOIS_LABEL", "NB_DOSSIERS", "PM_CPT"]])
+    mois["AXE"], mois["SEGMENT"], mois["ORDRE"] = AXE_MOIS, mois["MOIS_LABEL"], mois["MOIS_SURVENANCE"]
+
+    cla = par_clause.copy()
+    cla["AXE"], cla["SEGMENT"], cla["ORDRE"] = AXE_CLAUSE, cla["CLAUSE"], cla["RANG"]
+
+    cle = cles_nulles.copy()
+    cle["AXE"], cle["SEGMENT"], cle["ORDRE"] = AXE_CLE_NULLE, cle["COMPOSANTE"], range(1, len(cle) + 1)
+    cle["NB_DOSSIERS"], cle["POIDS_NB_PCT"] = cle["NB_NULL_OU_VIDE"], cle["PCT_NULL"]
+
+    return (
+        pd.concat([tc, gar, anc, mois, cla, cle], ignore_index=True)
+        .reindex(columns=_ORPHELINS_COLONNES)
+    )
+
+
+def orphelins(df_result: DataFrame, annee_inventaire: Optional[int]) -> pd.DataFrame:
+    """L'investigation des orphelins CPT_ONLY — une seule table, six angles
+    (graphes 6 et 11).
+
+    Une ligne par AXE × SEGMENT. Quatre axes PARTITIONNENT les orphelins
+    (Σ NB_DOSSIERS = total des orphelins, chacun — garanti par
+    controles_coherence) : « Type de compte », « Garantie », « Ancienneté »,
+    « Mois de survenance ». Deux axes de détail ne partitionnent pas :
+    « Clause (détail) » (seuls les porteurs de clause, Σ ≤ total) et
+    « Composante de clé nulle » (fréquence de nullité de chaque composante —
+    un même dossier peut compter plusieurs fois). Les poids se lisent
+    TOUJOURS en part du total des orphelins.
+    """
+    return _assemble_orphelins(
+        orphelins_par_type_compte(df_result),
+        orphelins_par_garantie(df_result),
+        orphelins_par_anciennete(df_result, annee_inventaire),
+        anomalies_cpt_only(df_result),
+        orphelins_par_clause(df_result),
+        orphelins_cles_nulles(df_result),
     )

@@ -2,10 +2,14 @@
 Export Excel multi-onglets — propre, lisible et prêt pour Power BI.
 
 Objectif : un seul classeur .xlsx qui RÉPOND À L'ÉTUDE, avec des onglets nommés
-en clair (pas de noms de variables bruts) et organisés par axe :
-    1. Couverture des listes d'arrêts (revue MRM vs compte)
-    2. Niveau de provisionnement (taux de chute, PM)
-    3. Cohérence des sources & conformité des consignes
+en clair (pas de noms de variables bruts) — un onglet par table métrique
+(8 tables, une table = un sujet complet), organisés par axe :
+    1. Vue d'ensemble (synthèse, bilan cas par cas)
+    2. Couverture des listes d'arrêts (les deux univers)
+    3. Niveau de provisionnement (le taux de chute sous tous ses angles)
+    4. Suivi des consignes (détail + tableau de bord par type de compte)
+    5. Investigation orphelins (six angles)
+    6. Fiabilité (recoupements inter-onglets)
 
 Chaque onglet est une VRAIE table Excel (ListObject) → Power BI la détecte comme
 table nommée (« Get Data → Excel » propose directement chaque table), avec :
@@ -36,46 +40,18 @@ ONGLETS: Tuple[Tuple[str, str, str, str], ...] = (
      "Tous les indicateurs de tête du run (une ligne, historisable)."),
     ("bilan_cas",            "Bilan cas par cas",       "Vue d'ensemble",
      "La réconciliation cas par cas : retrouvés / non retrouvés / encore au compte."),
-    ("couverture_mrm",       "Couverture revue MRM",    "Couverture des listes",
-     "Part de la revue MRM retrouvée au compte ; non retrouvés par consigne."),
-    ("compte_justification", "Justification du compte", "Couverture des listes",
-     "Décomposition du compte : retrouvés, récupérés N+1, anomalies."),
-    ("anomalies_cpt_only",   "Anomalies orphelins",     "Couverture des listes",
-     "Orphelins compte sans contrepartie MRM, par mois de survenance."),
-    ("taux_chute",           "Taux de chute",           "Niveau de provisionnement",
-     "Taux de chute global + PM revue vs compte (base inventaire courant)."),
-    ("chute_par_exercice",   "Chute par exercice",      "Niveau de provisionnement",
-     "Taux de chute : inventaire courant vs récupérés N+1 (analyse séparée)."),
-    ("chute_par_type_compte", "Chute par type de compte", "Niveau de provisionnement",
-     "Taux de chute ventilé par type de compte (PB / HPB / …) × exercice."),
-    ("chute_par_anciennete", "Chute par ancienneté",    "Niveau de provisionnement",
-     "Taux de chute par année de survenance (N / N-1 / N-2 et antérieur) × exercice."),
-    ("chute_par_consigne",   "Chute par consigne",      "Niveau de provisionnement",
-     "Taux de chute par consigne pertinente."),
-    ("pm_par_consigne",      "PM revue vs compte",      "Niveau de provisionnement",
-     "PM revue MRM vs PM compte par consigne, écart."),
-    ("consignes",            "Consignes (détail)",      "Niveau de provisionnement",
-     "Analyse complète par consigne : conformité, PM, taux de chute."),
-    ("consignes_par_type_compte", "Consignes par type",  "Cohérence des sources",
-     "Tableau de bord des consignes : suivi par type de compte × consigne."),
-    ("conformite_consignes", "Conformité consignes",    "Cohérence des sources",
-     "Conformité par consigne (conforme / non retrouvé)."),
-    ("conformite_globale",   "Conformité globale",      "Cohérence des sources",
-     "Suivi des consignes au global (segments conforme / reste)."),
-    ("suivi_n1",             "Suivi N+1",               "Cohérence des sources",
-     "Suivi des consignes des récupérés N+1 (analyse séparée)."),
-    ("controles_coherence",  "Contrôles cohérence",     "Cohérence des sources",
+    ("couverture",           "Couverture",              "Couverture des listes",
+     "Les deux univers (colonne UNIVERS) : justification du compte / part de la revue MRM retrouvée."),
+    ("chute",                "Taux de chute",           "Niveau de provisionnement",
+     "Le taux de chute sous tous ses angles (colonne AXE) : Ensemble, type de compte, ancienneté — × exercice."),
+    ("consignes",            "Consignes",               "Suivi des consignes",
+     "Conformité + PM + taux de chute par consigne, les deux exercices (colonne EXERCICE)."),
+    ("consignes_par_type_compte", "Consignes par type", "Suivi des consignes",
+     "Tableau de bord : suivi des consignes par type de compte × consigne."),
+    ("orphelins",            "Orphelins",               "Investigation orphelins",
+     "Les orphelins compte sous six angles (colonne AXE) : type de compte, garantie, ancienneté, mois, clause, clés nulles."),
+    ("controles_coherence",  "Contrôles cohérence",     "Fiabilité",
      "Recoupements inter-onglets : une grandeur = une valeur partout (attendu/obtenu)."),
-    ("orphelins_par_type_compte", "Orphelins par type",   "Investigation orphelins",
-     "Orphelins compte (CPT_ONLY) par type de compte — ventilation complète."),
-    ("orphelins_par_clause",    "Orphelins par compte",    "Investigation orphelins",
-     "Détail : orphelins des comptes porteurs d'une clause ; RANG 1 = le plus représentatif."),
-    ("orphelins_par_garantie",  "Orphelins par garantie",  "Investigation orphelins",
-     "Orphelins compte ventilés par garantie (IT 60 / IP 64 / autre / non renseignée)."),
-    ("orphelins_par_anciennete", "Orphelins par ancienneté", "Investigation orphelins",
-     "Orphelins compte par année de survenance (N / N-1 / N-2 et antérieur)."),
-    ("orphelins_cles_nulles",   "Orphelins clés nulles",   "Investigation orphelins",
-     "Nullité des colonnes constitutives de la clé (explique l'orphelinage)."),
 )
 
 # Palette AXA pour l'en-tête du Sommaire.

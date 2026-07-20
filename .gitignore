@@ -64,5 +64,9 @@ notes.txt
 *.pptx
 ~$*
 
+# Livrables : tout est hors git (dépôt SharePoint), seul l'index est versionné
+livrables/*
+!livrables/README.md
+
 # macOS
 .DS_Store

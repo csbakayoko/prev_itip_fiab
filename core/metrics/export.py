@@ -1,7 +1,7 @@
 """
-Orchestration de la couche métriques — toutes les tables, et leur export.
+Orchestration de la couche métriques — les 8 tables, et leur export.
 
-toutes_metriques : toutes les tables pandas en un dict (contrôles inclus).
+toutes_metriques : les 8 tables pandas en un dict (contrôles inclus).
 export_metriques : écriture multi-format (Excel privilégié, CSV/JSON/Parquet
 DBFS, Delta si schéma) sous <EXPORT_BASE_PATH>/<CLIENT>_<PERIM>/metrics.
 """
@@ -19,17 +19,8 @@ from core.io.save_result import to_date_iso, write_delta_historise
 from core.synthese.kpi_export import compute_synthese
 from core.synthese.synthese_contract import SyntheseScalars
 from core.metrics.base import _PERIMETRE, _to_local, output_dir, _annee_inventaire
-from core.metrics.scalaires import (
-    synthese, bilan_cas, taux_chute, chute_par_exercice, suivi_n1, consignes,
-    compte_justification, couverture_mrm, conformite_globale,
-    chute_par_consigne, pm_par_consigne, conformite_consignes,
-)
-from core.metrics.agregats import (
-    chute_par_type_compte, chute_par_anciennete, anomalies_cpt_only,
-    consignes_par_type_compte,
-    orphelins_par_type_compte, orphelins_par_clause, orphelins_par_garantie,
-    orphelins_par_anciennete, orphelins_cles_nulles,
-)
+from core.metrics.scalaires import synthese, bilan_cas, consignes, couverture
+from core.metrics.agregats import chute, consignes_par_type_compte, orphelins
 from core.metrics.coherence import controles_coherence
 
 
@@ -38,36 +29,33 @@ from core.metrics.coherence import controles_coherence
 # ============================================================================
 
 def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) -> Dict[str, pd.DataFrame]:
-    """Toutes les métriques en un dict {nom: DataFrame pandas}.
+    """Les 8 tables métriques en un dict {nom: DataFrame pandas}.
+
+    Une table = un sujet complet (contrat : docs/METRIQUES.md §6) ; les angles
+    d'analyse sont des COLONNES (EXERCICE, AXE, SEGMENT, UNIVERS), jamais des
+    tables séparées :
+
+        synthese                  — tous les KPI, une ligne par run
+        bilan_cas                 — LE bilan cas par cas (avec explications)
+        couverture                — les deux univers (Compte / Revue MRM)
+        chute                     — le taux de chute sous tous ses angles
+        consignes                 — le suivi des consignes, les deux exercices
+        consignes_par_type_compte — tableau de bord TYPE_COMPTE × CONSIGNE
+        orphelins                 — l'investigation des orphelins, six angles
+        controles_coherence       — recoupements inter-tables (attendu/obtenu/OK)
 
     `d` = dict de compute_synthese si déjà calculé (ex. retour de
     print_synthese) — sinon la passe Spark est lancée ici.
     """
     d = d if d is not None else compute_synthese(df_result)
-    annee = _annee_inventaire(d)
     tables = {
-        "synthese"             : synthese(d),
-        "bilan_cas"            : bilan_cas(d),
-        "taux_chute"           : taux_chute(d),
-        "chute_par_exercice"   : chute_par_exercice(d),
-        "suivi_n1"             : suivi_n1(d),
+        "synthese"                 : synthese(d),
+        "bilan_cas"                : bilan_cas(d),
+        "couverture"               : couverture(d),
+        "chute"                    : chute(df_result, d),
         "consignes"                : consignes(d),
         "consignes_par_type_compte": consignes_par_type_compte(df_result),
-        "compte_justification" : compte_justification(d),
-        "couverture_mrm"       : couverture_mrm(d),
-        "chute_par_type_compte": chute_par_type_compte(df_result),
-        "chute_par_anciennete" : chute_par_anciennete(df_result, annee),
-        "chute_par_consigne"   : chute_par_consigne(d),
-        "conformite_consignes" : conformite_consignes(d),
-        "anomalies_cpt_only"   : anomalies_cpt_only(df_result),
-        # Investigation des orphelins CPT_ONLY (compte préposé).
-        "orphelins_par_type_compte": orphelins_par_type_compte(df_result),
-        "orphelins_par_clause"     : orphelins_par_clause(df_result),
-        "orphelins_par_garantie"  : orphelins_par_garantie(df_result),
-        "orphelins_par_anciennete": orphelins_par_anciennete(df_result, annee),
-        "orphelins_cles_nulles"   : orphelins_cles_nulles(df_result),
-        "conformite_globale"   : conformite_globale(d),
-        "pm_par_consigne"      : pm_par_consigne(d),
+        "orphelins"                : orphelins(df_result, _annee_inventaire(d)),
     }
     # Les onglets Power BI doivent se recouper : contrôles inter-tables,
     # exportés avec le reste (bloquants dans le run de production).

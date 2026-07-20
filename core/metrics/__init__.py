@@ -9,9 +9,9 @@ FAÇADE du paquet : ré-exporte l'API des modules thématiques, pour que
                     dimensions CLAUSE / TYPE_COMPTE, univers de chute,
                     chemins DBFS)
     scalaires.py  — les métriques depuis `d` (dict de compute_synthese) :
-                    synthese, bilan_cas, taux_chute, consignes, …
-    agregats.py   — les ré-agrégations Spark de df_result : chute par type de
-                    compte / ancienneté, anomalies, orphelins CPT_ONLY
+                    synthese, bilan_cas, consignes, couverture
+    agregats.py   — les ré-agrégations Spark de df_result et les tables
+                    regroupées `chute` / `orphelins` (angles empilés par AXE)
     coherence.py  — controles_coherence (recoupements inter-tables)
     export.py     — toutes_metriques + export_metriques (multi-format)
     viz.py        — les 11 graphiques matplotlib (import séparé)
@@ -20,16 +20,22 @@ Les fonctions renvoient des DONNÉES BRUTES (nombres, pas de chaînes
 formatées) : le formatage (M€, %, séparateurs FR) reste au niveau
 restitution. Contrat des métriques : docs/METRIQUES.md.
 
-Correspondance avec les 11 graphiques (core.metrics.viz) :
-    1. compte_justification   → compte_justification(d)
-    2. couverture_mrm         → couverture_mrm(d)
+LES 8 TABLES EXPORTÉES (toutes_metriques) — une table = un sujet complet,
+les angles d'analyse sont des colonnes (EXERCICE, AXE, SEGMENT, UNIVERS) :
+    synthese, bilan_cas, couverture, chute, consignes,
+    consignes_par_type_compte, orphelins, controles_coherence.
+
+Correspondance avec les 11 graphiques (core.metrics.viz) — les graphes se
+nourrissent de `d` et des ré-agrégations par axe (briques des tables) :
+    1. compte_justification   → couverture(d), univers Compte
+    2. couverture_mrm         → couverture(d), univers Revue MRM
     3. chute_par_type_compte  → chute_par_type_compte(df_result)  [× exercice]
-    4. chute_par_consigne     → chute_par_consigne(d)
-    5. conformite_consignes   → conformite_consignes(d)
+    4. chute_par_consigne     → consignes(d), exercice courant
+    5. conformite_consignes   → consignes(d), exercice courant
     6. anomalies_cpt_only     → anomalies_cpt_only(df_result)
-    7. kpi_chute              → taux_chute(d)
-    8. kpi_conformite_globale → conformite_globale(d)
-    9. pm_par_consigne        → pm_par_consigne(d)
+    7. kpi_chute              → chute(df_result, d), axe Ensemble
+    8. kpi_conformite_globale → consignes(d) + d["conformite_globale"]
+    9. pm_par_consigne        → consignes(d), exercice courant
    10. chute_par_anciennete   → chute_par_anciennete(df_result, annee)  [× exercice]
    11. orphelins_par_compte   → orphelins_par_clause(df_result)
 
@@ -64,18 +70,15 @@ from core.metrics.base import (
 from core.metrics.scalaires import (
     synthese,
     bilan_cas,
-    taux_chute,
-    chute_par_exercice,
-    suivi_n1,
     consignes,
-    compte_justification,
-    couverture_mrm,
-    conformite_globale,
-    chute_par_consigne,
-    pm_par_consigne,
-    conformite_consignes,
+    couverture,
+    SANS_CONSIGNE,
+    UNIVERS_COMPTE,
+    UNIVERS_REVUE,
 )
 from core.metrics.agregats import (
+    chute,
+    orphelins,
     chute_par_type_compte,
     chute_par_anciennete,
     anomalies_cpt_only,
@@ -85,6 +88,15 @@ from core.metrics.agregats import (
     orphelins_par_garantie,
     orphelins_par_anciennete,
     orphelins_cles_nulles,
+    AXE_ENSEMBLE,
+    AXE_TYPE_COMPTE,
+    AXE_ANCIENNETE,
+    AXE_GARANTIE,
+    AXE_MOIS,
+    AXE_CLAUSE,
+    AXE_CLE_NULLE,
+    _assemble_chute,
+    _assemble_orphelins,
     _finalise_chute_par_type_compte,
     _finalise_chute_par_anciennete,
     _finalise_consignes_par_type_compte,

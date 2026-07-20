@@ -60,7 +60,8 @@ justifie un ajustement de provision.
 **Limites.**
 - Mesure une **moyenne pondérée** : un taux de 10 % peut cacher des segments très
   sous-provisionnés et d'autres sur-provisionnés qui se compensent → toujours
-  lire en regard de `chute_par_type_compte` / `chute_par_consigne`.
+  lire en regard des ventilations de la table `chute` (type de compte,
+  ancienneté) et du par-consigne de la table `consignes`.
 - Ne porte que sur les **retrouvés** : un dossier non retrouvé (`MRM_MISSING`) ne
   pèse pas dans la chute (il pèse dans la *couverture*).
 - Exclut « à supprimer » (cf. §11) et statut NON (cf. §13, piège 6).
@@ -117,8 +118,8 @@ interroge la méthode de ce bloc, pas la revue entière.
 **Pourquoi pas par clause ?** La clause n'est pas un axe d'analyse : elle sert
 à remplacer un RPP nul dans la clé de matching, et tous les types de compte
 n'en portent pas (un HPB n'en a pas). Ventiler par clause casserait à l'entrée
-du HPB dans le périmètre. Pour cibler un contrat précis, il reste la table de
-détail `orphelins_par_clause`.
+du HPB dans le périmètre. Pour cibler un contrat précis, il reste l'angle
+« Clause (détail) » de la table `orphelins`.
 
 **Cohérence garantie.** Dans chaque exercice, **Σ des lignes = le taux global**
 (Σécarts / ΣPM par type de compte redonne `taux_chute_inventaire`). Vérifié à
@@ -250,7 +251,7 @@ Les deux lectures (conformité vs provisionnement) sont **complémentaires**, ja
 interchangeables.
 
 **Déclinaison opérationnelle.** La table `consignes_par_type_compte` applique la même
-règle ventilée par **TYPE_COMPTE × CLAUSE × consigne** (nb, suivies / non
+règle ventilée par **TYPE_COMPTE × consigne** (nb, suivies / non
 suivies, PM) : c'est le « tableau de bord des consignes » Power BI — les cartes
 par périmètre (PB / autres) et le tableau filtrable s'en déduisent par simple
 filtre. Sa colonne `NB_NON_REMONTE_DF` compte **à part, hors conformité**, les
@@ -300,21 +301,24 @@ de PM associée ; ce taux est en **nombre**.
 ## 12. Investigation des orphelins compte (`CPT_ONLY`)
 
 **But.** Les anomalies `CPT_ONLY` définitives sont le « reste à instruire » de
-l'étude (complément du taux de récupération global, §8). Quatre tables les
-découpent pour **orienter l'investigation** — ce sont des vues de diagnostic,
-pas des KPI :
+l'étude (complément du taux de récupération global, §8). La table `orphelins`
+les découpe sous **six angles** (colonne `AXE`, `ORDRE` = rang de lecture)
+pour **orienter l'investigation** — ce sont des vues de diagnostic, pas des
+KPI :
 
-| Table | Découpage | Ce qu'elle révèle |
+| Angle (`AXE`) | Découpage | Ce qu'il révèle |
 |---|---|---|
-| `orphelins_par_type_compte` | type de compte (PB / HPB / …), avec **RANG** | la ventilation complète : c'est ici que se lit le total des orphelins |
-| `orphelins_par_clause` | clause × type, avec **RANG** — **détail** | RANG 1 = le compte le plus représentatif → **à investiguer avec le souscripteur** (graphe 11). Ne couvre que les comptes porteurs d'une clause : son total est inférieur au total des orphelins, ne pas s'en servir pour un cumul |
-| `orphelins_par_garantie` | IT (60) / IP (64) / autre / non renseignée | une garantie sur-représentée oriente la recherche de cause |
-| `orphelins_par_anciennete` | N / N-1 / N-2 et antérieur | stock ancien (récurrent) vs flux récent (ponctuel) |
-| `orphelins_cles_nulles` | % de nullité de chaque composante de la clé (RPP, naissance, survenance, garantie, nom, clause) | une composante souvent vide **explique mécaniquement l'orphelinage** (pas de rapprochement possible) |
+| « Type de compte » | PB / HPB / …, `ORDRE` = rang | la ventilation complète : c'est ici que se lit le total des orphelins |
+| « Clause (détail) » | clause × type, `ORDRE` = rang — **détail** | ORDRE 1 = le compte le plus représentatif → **à investiguer avec le souscripteur** (graphe 11). Ne couvre que les comptes porteurs d'une clause : son total est inférieur au total des orphelins, ne pas s'en servir pour un cumul |
+| « Garantie » | IT (60) / IP (64) / autre / non renseignée | une garantie sur-représentée oriente la recherche de cause |
+| « Ancienneté » | N / N-1 / N-2 et antérieur | stock ancien (récurrent) vs flux récent (ponctuel) |
+| « Mois de survenance » | mois de survenance, fin d'année = `ORDRE` ≥ 10 | l'effet déclarations tardives d'octobre-décembre |
+| « Composante de clé nulle » | % de nullité de chaque composante de la clé (RPP, naissance, survenance, garantie, nom, clause) | une composante souvent vide **explique mécaniquement l'orphelinage** (pas de rapprochement possible) |
 
-**Exemple fil rouge.** Sur les 15 anomalies : le compte PB de RANG 1 en
-concentre 8 (53 % du nombre) ; `orphelins_cles_nulles` montre un RPP nul sur
-9 dossiers (60 %) → la clé principale ne *pouvait pas* matcher ces lignes.
+**Exemple fil rouge.** Sur les 15 anomalies : le compte PB d'ORDRE 1 en
+concentre 8 (53 % du nombre) ; l'angle « Composante de clé nulle » montre un
+RPP nul sur 9 dossiers (60 %) → la clé principale ne *pouvait pas* matcher
+ces lignes.
 
 **À dire à l'oral.** « Les anomalies ne sont pas diffuses : **un compte** en
 concentre la moitié, et **le RPP manquant** explique l'essentiel du

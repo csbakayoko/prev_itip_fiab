@@ -12,6 +12,11 @@ import pandas as pd
 
 from core.synthese.synthese_contract import SyntheseScalars
 from core.metrics.base import EXERCICE_INV, EXERCICE_N1
+from core.metrics.scalaires import UNIVERS_COMPTE, UNIVERS_REVUE
+from core.metrics.agregats import (
+    AXE_ENSEMBLE, AXE_TYPE_COMPTE, AXE_ANCIENNETE,
+    AXE_GARANTIE, AXE_MOIS, AXE_CLAUSE,
+)
 
 
 # ============================================================================
@@ -23,10 +28,10 @@ def controles_coherence(tables: Dict[str, pd.DataFrame], d: SyntheseScalars) -> 
     dans tous les onglets Power BI — l'étude raconte UNE histoire.
 
     Les tables issues de `d` se recoupent par construction ; les contrôles
-    portent surtout sur les ré-agrégations Spark (chute_par_type_compte,
-    anomalies_cpt_only) et les sommes internes (consignes, bilan_cas,
-    couverture, suivi N+1). Une ligne par contrôle : attendu, obtenu, OK.
-    Exportée avec les autres tables ; bloquante dans le run de production.
+    portent surtout sur les ré-agrégations Spark (blocs ventilés de `chute`
+    et `orphelins`) et les sommes internes (consignes, bilan_cas, couverture).
+    Une ligne par contrôle : attendu, obtenu, OK. Exportée avec les autres
+    tables ; bloquante dans le run de production.
     """
     rows = []
 
@@ -35,66 +40,61 @@ def controles_coherence(tables: Dict[str, pd.DataFrame], d: SyntheseScalars) -> 
         rows.append({"CONTROLE": nom, "ATTENDU": attendu, "OBTENU": obtenu,
                      "ECART": round(ecart, 2), "OK": abs(ecart) <= tol})
 
-    # chute_par_type_compte (ré-agrégation Spark) vs base chute / bloc N+1 de d.
+    # chute : dans chaque bloc EXERCICE, chaque axe ventilé (ré-agrégation
+    # Spark) recoupe la ligne « Ensemble » (scalaires de d) — Σ nb / PM.
     # Tolérance 1 € sur les PM : arrondi à 2 décimales par ligne.
-    cl  = tables["chute_par_type_compte"]
-    inv = cl[cl["EXERCICE"] == EXERCICE_INV]
-    n1  = cl[cl["EXERCICE"] == EXERCICE_N1]
-    ctrl("chute_par_type_compte inv. : Σ nb = base chute",     d["metrics_nb"],     int(inv["NB_DOSSIERS"].sum()))
-    ctrl("chute_par_type_compte inv. : Σ PM MRM = base chute", d["metrics_pm_mrm"], float(inv["PM_MRM"].sum()), tol=1.0)
-    ctrl("chute_par_type_compte inv. : Σ PM CPT = base chute", d["metrics_pm_cpt"], float(inv["PM_CPT"].sum()), tol=1.0)
-    ctrl("chute_par_type_compte N+1 : Σ nb = base chute N+1",  d["chute_n1_nb"],    int(n1["NB_DOSSIERS"].sum()))
-    ctrl("chute_par_type_compte N+1 : Σ PM MRM = base N+1",    d["chute_n1_pm_mrm"], float(n1["PM_MRM"].sum()), tol=1.0)
+    ch = tables["chute"]
+    refs = (
+        (EXERCICE_INV, d["metrics_nb"],  d["metrics_pm_mrm"],  d["metrics_pm_cpt"]),
+        (EXERCICE_N1,  d["chute_n1_nb"], d["chute_n1_pm_mrm"], d["chute_n1_pm_cpt"]),
+    )
+    for axe in (AXE_TYPE_COMPTE, AXE_ANCIENNETE):
+        for exercice, nb_ref, pm_mrm_ref, pm_cpt_ref in refs:
+            bloc = ch[(ch["AXE"] == axe) & (ch["EXERCICE"] == exercice)]
+            ctrl(f"chute {axe} / {exercice} : Σ nb = Ensemble",     nb_ref,     int(bloc["NB_DOSSIERS"].sum()))
+            ctrl(f"chute {axe} / {exercice} : Σ PM MRM = Ensemble", pm_mrm_ref, float(bloc["PM_MRM"].sum()), tol=1.0)
+            ctrl(f"chute {axe} / {exercice} : Σ PM CPT = Ensemble", pm_cpt_ref, float(bloc["PM_CPT"].sum()), tol=1.0)
 
-    # chute_par_anciennete (ré-agrégation Spark) vs base chute / bloc N+1 de d :
-    # même univers que chute_par_type_compte, découpé par année de survenance.
-    anc     = tables["chute_par_anciennete"]
-    anc_inv = anc[anc["EXERCICE"] == EXERCICE_INV]
-    anc_n1  = anc[anc["EXERCICE"] == EXERCICE_N1]
-    ctrl("chute_par_anciennete inv. : Σ nb = base chute",     d["metrics_nb"],     int(anc_inv["NB_DOSSIERS"].sum()))
-    ctrl("chute_par_anciennete inv. : Σ PM MRM = base chute", d["metrics_pm_mrm"], float(anc_inv["PM_MRM"].sum()), tol=1.0)
-    ctrl("chute_par_anciennete inv. : Σ PM CPT = base chute", d["metrics_pm_cpt"], float(anc_inv["PM_CPT"].sum()), tol=1.0)
-    ctrl("chute_par_anciennete N+1 : Σ nb = base chute N+1",  d["chute_n1_nb"],    int(anc_n1["NB_DOSSIERS"].sum()))
-
-    # anomalies_cpt_only (ré-agrégation Spark) vs CPT_ONLY de d.
-    anom = tables["anomalies_cpt_only"]
-    ctrl("anomalies : Σ nb = CPT_ONLY",     d["def_nb"], int(anom["NB_DOSSIERS"].sum()))
-    ctrl("anomalies : Σ PM CPT = CPT_ONLY", d["def_pm"], float(anom["PM_CPT"].sum()), tol=1.0)
-
-    # Investigation orphelins : chaque ventilation PARTITIONNANTE recoupe les
-    # CPT_ONLY → Σ nb = def_nb. `orphelins_par_clause` est volontairement exclue
-    # de ce recoupement : elle ne garde que les lignes portant une clause (table
-    # de détail), sa somme est donc INFÉRIEURE au total — c'est attendu, pas une
-    # incohérence. Son garde-fou est ci-dessous (elle ne peut pas dépasser).
-    orph_tc = tables["orphelins_par_type_compte"]
-    ctrl("orphelins_par_type_compte : Σ nb = CPT_ONLY",     d["def_nb"], int(orph_tc["NB_DOSSIERS"].sum()))
-    ctrl("orphelins_par_type_compte : Σ PM CPT = CPT_ONLY", d["def_pm"], float(orph_tc["PM_CPT"].sum()), tol=1.0)
-    orph_cl  = tables["orphelins_par_clause"]
-    nb_avec_clause = int(orph_cl["NB_DOSSIERS"].sum())
+    # orphelins : chaque axe PARTITIONNANT recoupe les CPT_ONLY → Σ nb =
+    # def_nb (et Σ PM = def_pm sur deux axes témoins). L'axe « Clause
+    # (détail) » est volontairement exclu de ce recoupement : il ne garde que
+    # les lignes portant une clause (sous-ensemble), sa somme est donc
+    # INFÉRIEURE au total — c'est attendu, pas une incohérence. Son garde-fou
+    # est ci-dessous (il ne peut pas dépasser). L'axe « Composante de clé
+    # nulle » n'est pas additif (un dossier compte plusieurs fois).
+    orph = tables["orphelins"]
+    for axe in (AXE_TYPE_COMPTE, AXE_GARANTIE, AXE_ANCIENNETE, AXE_MOIS):
+        ctrl(f"orphelins {axe} : Σ nb = CPT_ONLY", d["def_nb"],
+             int(orph.loc[orph["AXE"] == axe, "NB_DOSSIERS"].sum()))
+    for axe in (AXE_TYPE_COMPTE, AXE_MOIS):
+        ctrl(f"orphelins {axe} : Σ PM CPT = CPT_ONLY", d["def_pm"],
+             float(orph.loc[orph["AXE"] == axe, "PM_CPT"].sum()), tol=1.0)
+    nb_avec_clause = int(orph.loc[orph["AXE"] == AXE_CLAUSE, "NB_DOSSIERS"].sum())
     rows.append({
-        "CONTROLE": "orphelins_par_clause : Σ nb ≤ CPT_ONLY (sous-ensemble porteur de clause)",
+        "CONTROLE": f"orphelins {AXE_CLAUSE} : Σ nb ≤ CPT_ONLY (sous-ensemble porteur de clause)",
         "ATTENDU" : d["def_nb"], "OBTENU": nb_avec_clause,
         "ECART"   : nb_avec_clause - (d["def_nb"] or 0),
         "OK"      : nb_avec_clause <= (d["def_nb"] or 0),
     })
-    ctrl("orphelins_par_garantie : Σ nb = CPT_ONLY",   d["def_nb"], int(tables["orphelins_par_garantie"]["NB_DOSSIERS"].sum()))
-    ctrl("orphelins_par_anciennete : Σ nb = CPT_ONLY", d["def_nb"], int(tables["orphelins_par_anciennete"]["NB_DOSSIERS"].sum()))
-    cles = tables["orphelins_cles_nulles"]
-    ctrl("orphelins_cles_nulles : total orphelins = CPT_ONLY",
-         d["def_nb"], int(cles["NB_TOTAL_ORPHELINS"].iloc[0]) if len(cles) else 0)
 
-    # consignes : Σ bases KAS + hors consigne == base chute (cf. chute_coherente).
-    kas = tables["consignes"][tables["consignes"]["PM_PERTINENTE"]]
-    ctrl("consignes : Σ base KAS + hors consigne = base chute",
-         d["metrics_nb"], int(kas["NB_BASE_CHUTE"].sum()) + d["hors_consigne_nb"])
-    ctrl("consignes : Σ PM MRM KAS + hors consigne = base chute",
-         d["metrics_pm_mrm"], float(kas["PM_MRM"].sum()) + d["hors_consigne_pm_mrm"], tol=1.0)
+    # consignes : dans le bloc inventaire courant, Σ des bases PM pertinentes
+    # (KAS + sans consigne reconnue) == base chute (cf. chute_coherente) ;
+    # dans le bloc N+1, Σ des bases == base chute N+1 (DELETE exclu).
+    cons = tables["consignes"]
+    inv  = cons[(cons["EXERCICE"] == EXERCICE_INV) & cons["PM_PERTINENTE"].fillna(False)]
+    ctrl("consignes inv. : Σ base (KAS + sans consigne) = base chute",
+         d["metrics_nb"], int(inv["NB_BASE_CHUTE"].sum()))
+    ctrl("consignes inv. : Σ PM MRM (KAS + sans consigne) = base chute",
+         d["metrics_pm_mrm"], float(inv["PM_MRM"].sum()), tol=1.0)
+    n1 = cons[cons["EXERCICE"] == EXERCICE_N1]
+    ctrl("consignes N+1 : Σ base = base chute N+1",
+         d["chute_n1_nb"], int(n1["NB_BASE_CHUTE"].sum()))
 
-    # consignes_par_type_compte (ré-agrégation Spark) vs consignes (globale,
-    # issue de d) : mêmes règles de suivi, ventilées par TYPE_COMPTE —
-    # Σ des types de compte d'une consigne = la ligne globale de cette consigne.
+    # consignes_par_type_compte (ré-agrégation Spark) vs consignes (bloc
+    # inventaire courant, issu de d) : mêmes règles de suivi, ventilées par
+    # TYPE_COMPTE — Σ des types de compte d'une consigne = la ligne globale.
     cpc      = tables["consignes_par_type_compte"]
-    cons_idx = tables["consignes"].set_index("CONSIGNE")
+    cons_idx = cons[cons["EXERCICE"] == EXERCICE_INV].set_index("CONSIGNE")
     for code, libelle in (("KEEP", "À conserver"), ("ADD", "À ajouter"),
                           ("STUDY", "À étudier"), ("DELETE", "À supprimer")):
         if libelle not in cons_idx.index:
@@ -122,26 +122,20 @@ def controles_coherence(tables: Dict[str, pd.DataFrame], d: SyntheseScalars) -> 
          int(b.loc["Repêchés statut NON — exercice N", "NB_DOSSIERS"]
              + b.loc["Repêchés statut NON — exercice N+1", "NB_DOSSIERS"]))
 
-    # suivi_n1 : conformes + sans consigne == base chute N+1 (DELETE exclu).
-    sn1 = tables["suivi_n1"]
-    ctrl("suivi_n1 : conformes + sans consigne = base chute N+1",
-         d["chute_n1_nb"],
-         int(sn1.loc[sn1["STATUT"] != "encore au compte", "NB_DOSSIERS"].sum()))
-
-    # compte_justification : Σ catégories == compte entier.
-    ctrl("compte_justification : Σ nb = compte",
-         d["cpt_nb"], int(tables["compte_justification"]["NB_DOSSIERS"].sum()))
-
-    # couverture_mrm : retrouvés + non retrouvés == revue à comparer.
-    cm = tables["couverture_mrm"]
-    ctrl("couverture_mrm : retrouvés + non retrouvés = à comparer",
+    # couverture : chaque univers boucle sur son total.
+    cov    = tables["couverture"]
+    compte = cov[cov["UNIVERS"] == UNIVERS_COMPTE]
+    ctrl("couverture Compte : Σ nb = compte entier",
+         d["cpt_nb"], int(compte["NB_DOSSIERS"].sum()))
+    revue  = cov[cov["UNIVERS"] == UNIVERS_REVUE]
+    ctrl("couverture Revue MRM : retrouvés + non retrouvés = à comparer",
          d["a_comparer_nb"],
-         int(cm.loc[~cm["CATEGORIE"].str.contains("supprimer"), "NB_DOSSIERS"].sum()))
+         int(revue.loc[~revue["CATEGORIE"].str.contains("supprimer"), "NB_DOSSIERS"].sum()))
 
-    # chute_par_exercice == taux_chute (mêmes scalaires, deux onglets).
-    ce = tables["chute_par_exercice"]
-    ctrl("chute_par_exercice = taux_chute (base chute)",
-         int(tables["taux_chute"]["NB_BASE_CHUTE"].iloc[0]),
-         int(ce.loc[ce["EXERCICE"] == EXERCICE_INV, "NB_DOSSIERS"].iloc[0]))
+    # synthese ↔ chute : la ligne « Ensemble » (inventaire) == les KPI de tête.
+    ens_inv = ch[(ch["AXE"] == AXE_ENSEMBLE) & (ch["EXERCICE"] == EXERCICE_INV)]
+    ctrl("chute Ensemble (inventaire) = synthese (base chute)",
+         int(tables["synthese"]["NB_BASE_CHUTE"].iloc[0]),
+         int(ens_inv["NB_DOSSIERS"].iloc[0]))
 
     return pd.DataFrame(rows)

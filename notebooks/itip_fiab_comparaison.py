@@ -117,8 +117,15 @@ display(kpi.reset_index().rename(columns={"index": "INDICATEUR"}))
 
 # COMMAND ----------
 
+def _chute_anciennete(annee: str) -> pd.DataFrame:
+    """Axe « Ancienneté » de la table chute, colonne d'axe renommée en clair."""
+    ch = resultats[annee]["tables"]["chute"]
+    return (ch[ch["AXE"] == metrics.AXE_ANCIENNETE]
+            .rename(columns={"SEGMENT": "BLOC_ANCIENNETE"}))
+
+
 def _anc_inv(annee: str) -> pd.DataFrame:
-    anc = resultats[annee]["tables"]["chute_par_anciennete"]
+    anc = _chute_anciennete(annee)
     inv = anc[anc["EXERCICE"] == metrics.EXERCICE_INV].copy()
     inv.insert(0, "ANNEE", annee)
     return inv[["ANNEE", "BLOC_ANCIENNETE", "NB_DOSSIERS", "PM_MRM", "PM_CPT",
@@ -147,8 +154,14 @@ display(pivot_taux.reset_index())
 
 # COMMAND ----------
 
+def _orph_axe(annee: str, axe: str) -> pd.DataFrame:
+    """Un angle de la table orphelins (AXE), sans la colonne d'axe."""
+    orph = resultats[annee]["tables"]["orphelins"]
+    return orph[orph["AXE"] == axe].drop(columns="AXE").reset_index(drop=True)
+
+
 def _orph_type(annee: str) -> pd.DataFrame:
-    t = resultats[annee]["tables"]["orphelins_par_type_compte"].copy()
+    t = _orph_axe(annee, metrics.AXE_TYPE_COMPTE).copy()
     t.insert(0, "ANNEE", annee)
     return t
 
@@ -162,7 +175,7 @@ display(pd.concat([_orph_type(an) for an in ANNEES], ignore_index=True))
 # COMMAND ----------
 
 def _top_orphelins(annee: str, n: int = 5) -> pd.DataFrame:
-    t = resultats[annee]["tables"]["orphelins_par_clause"].head(n).copy()
+    t = _orph_axe(annee, metrics.AXE_CLAUSE).head(n).copy()
     t.insert(0, "ANNEE", annee)
     return t
 
@@ -175,12 +188,12 @@ display(pd.concat([_top_orphelins(an) for an in ANNEES], ignore_index=True))
 
 # COMMAND ----------
 
-def _orph_dim(annee: str, table: str, key: str) -> pd.DataFrame:
-    t = resultats[annee]["tables"][table][[key, "NB_DOSSIERS", "PM_CPT"]].copy()
+def _orph_dim(annee: str, axe: str) -> pd.DataFrame:
+    t = _orph_axe(annee, axe)[["SEGMENT", "NB_DOSSIERS", "PM_CPT"]].copy()
     t = t.rename(columns={"NB_DOSSIERS": f"NB_{annee}", "PM_CPT": f"PM_{annee}"})
-    return t.set_index(key)
+    return t.set_index("SEGMENT")
 
-gar = pd.concat([_orph_dim(an, "orphelins_par_garantie", "GARANTIE_LIBELLE") for an in ANNEES], axis=1)
+gar = pd.concat([_orph_dim(an, metrics.AXE_GARANTIE) for an in ANNEES], axis=1)
 display(gar.reset_index())
 
 # COMMAND ----------
@@ -191,7 +204,7 @@ display(gar.reset_index())
 # COMMAND ----------
 
 anc_orph = pd.concat(
-    [_orph_dim(an, "orphelins_par_anciennete", "BLOC_ANCIENNETE") for an in ANNEES], axis=1
+    [_orph_dim(an, metrics.AXE_ANCIENNETE) for an in ANNEES], axis=1
 ).reindex([metrics.BLOC_N, metrics.BLOC_N1, metrics.BLOC_N2_PLUS, metrics.BLOC_INDET]).dropna(how="all")
 display(anc_orph.reset_index())
 
@@ -203,8 +216,9 @@ display(anc_orph.reset_index())
 # COMMAND ----------
 
 def _cles(annee: str) -> pd.DataFrame:
-    t = resultats[annee]["tables"]["orphelins_cles_nulles"][["COMPOSANTE", "PCT_NULL"]].copy()
-    return t.rename(columns={"PCT_NULL": f"PCT_NULL_{annee}"}).set_index("COMPOSANTE")
+    t = _orph_axe(annee, metrics.AXE_CLE_NULLE)[["SEGMENT", "POIDS_NB_PCT"]].copy()
+    return t.rename(columns={"SEGMENT": "COMPOSANTE",
+                             "POIDS_NB_PCT": f"PCT_NULL_{annee}"}).set_index("COMPOSANTE")
 
 display(pd.concat([_cles(an) for an in ANNEES], axis=1).reset_index())
 
@@ -218,10 +232,14 @@ display(pd.concat([_cles(an) for an in ANNEES], axis=1).reset_index())
 import matplotlib.pyplot as plt
 
 for an in ANNEES:
-    tb, dd = resultats[an]["tables"], resultats[an]["d"]
+    dd = resultats[an]["d"]
     print(f"───────── Inventaire {an} ─────────")
-    graph_chute_par_anciennete(tb["chute_par_anciennete"], dd)
-    graph_orphelins_par_compte(tb["orphelins_par_clause"], dd)
+    # Les graphes lisent les vues par axe : on les re-taille depuis les tables
+    # regroupées (SEGMENT → colonne d'axe en clair, ORDRE → RANG).
+    cla = _orph_axe(an, metrics.AXE_CLAUSE).rename(
+        columns={"SEGMENT": "CLAUSE", "ORDRE": "RANG"})
+    graph_chute_par_anciennete(_chute_anciennete(an), dd)
+    graph_orphelins_par_compte(cla, dd)
     plt.show()
 
 # COMMAND ----------
