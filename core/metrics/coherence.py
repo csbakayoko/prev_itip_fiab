@@ -14,7 +14,7 @@ from core.synthese.synthese_contract import SyntheseScalars
 from core.metrics.base import EXERCICE_INV, EXERCICE_N1
 from core.metrics.scalaires import UNIVERS_COMPTE, UNIVERS_REVUE
 from core.metrics.agregats import (
-    AXE_ENSEMBLE, AXE_TYPE_COMPTE, AXE_ANCIENNETE, AXE_TRANCHE_ECART,
+    AXE_ENSEMBLE, AXE_TYPE_COMPTE, AXE_ANCIENNETE,
     AXE_GARANTIE, AXE_MOIS, AXE_CLAUSE,
 )
 
@@ -42,20 +42,35 @@ def controles_coherence(tables: Dict[str, pd.DataFrame], d: SyntheseScalars) -> 
 
     # chute : dans chaque bloc EXERCICE, chaque axe ventilé (ré-agrégation
     # Spark) recoupe la ligne « Ensemble » (scalaires de d) — Σ nb / PM.
-    # L'axe « Tranche d'écart » (distribution des écarts) partitionne le même
-    # univers : il recoupe comme les autres. Tolérance 1 € sur les PM :
-    # arrondi à 2 décimales par ligne.
+    # Tolérance 1 € sur les PM : arrondi à 2 décimales par ligne.
     ch = tables["chute"]
     refs = (
         (EXERCICE_INV, d["metrics_nb"],  d["metrics_pm_mrm"],  d["metrics_pm_cpt"]),
         (EXERCICE_N1,  d["chute_n1_nb"], d["chute_n1_pm_mrm"], d["chute_n1_pm_cpt"]),
     )
-    for axe in (AXE_TYPE_COMPTE, AXE_ANCIENNETE, AXE_TRANCHE_ECART):
+    for axe in (AXE_TYPE_COMPTE, AXE_ANCIENNETE):
         for exercice, nb_ref, pm_mrm_ref, pm_cpt_ref in refs:
             bloc = ch[(ch["AXE"] == axe) & (ch["EXERCICE"] == exercice)]
             ctrl(f"chute {axe} / {exercice} : Σ nb = Ensemble",     nb_ref,     int(bloc["NB_DOSSIERS"].sum()))
             ctrl(f"chute {axe} / {exercice} : Σ PM MRM = Ensemble", pm_mrm_ref, float(bloc["PM_MRM"].sum()), tol=1.0)
             ctrl(f"chute {axe} / {exercice} : Σ PM CPT = Ensemble", pm_cpt_ref, float(bloc["PM_CPT"].sum()), tol=1.0)
+
+    # distribution_ecarts : table AUTONOME — dans chaque exercice, Σ des tranches
+    # recoupe sa PROPRE ligne « Ensemble » de référence (le taux officiel), sans
+    # dépendre de `chute`. Même tolérance PM.
+    dist = tables["distribution_ecarts"]
+    for exercice in (EXERCICE_INV, EXERCICE_N1):
+        bloc = dist[dist["EXERCICE"] == exercice]
+        ens  = bloc[bloc["TRANCHE_ECART"] == AXE_ENSEMBLE]
+        tr   = bloc[bloc["TRANCHE_ECART"] != AXE_ENSEMBLE]
+        if ens.empty:
+            continue
+        ctrl(f"distribution / {exercice} : Σ tranches nb = Ensemble",
+             int(ens["NB_DOSSIERS"].iloc[0]), int(tr["NB_DOSSIERS"].sum()))
+        ctrl(f"distribution / {exercice} : Σ tranches PM MRM = Ensemble",
+             float(ens["PM_MRM"].iloc[0]), float(tr["PM_MRM"].sum()), tol=1.0)
+        ctrl(f"distribution / {exercice} : Σ tranches PM CPT = Ensemble",
+             float(ens["PM_CPT"].iloc[0]), float(tr["PM_CPT"].sum()), tol=1.0)
 
     # orphelins : chaque axe PARTITIONNANT recoupe les CPT_ONLY → Σ nb =
     # def_nb (et Σ PM = def_pm sur deux axes témoins). L'axe « Clause

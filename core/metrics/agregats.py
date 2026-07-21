@@ -250,16 +250,16 @@ def _finalise_chute_par_tranche_ecart(pdf: pd.DataFrame, tranches: list) -> pd.D
 
 
 def chute_par_tranche_ecart(df_result: DataFrame, seuils=SEUILS_ECART_PM) -> pd.DataFrame:
-    """Distribution des écarts de PM par tranche de seuils × exercice — graphe 12.
+    """Distribution des écarts de PM par tranche de seuils × exercice.
 
-    Découpe l'univers de chute (même filtre que les autres axes) par NIVEAU
-    d'écart signé (PM_MRM − PM_CPT) : la volumétrie des dossiers
-    sur-provisionnés (écart < 0, marge) et sous-provisionnés (écart > 0,
-    risque) à chaque seuil de `SEUILS_ECART_PM` (config). Les tranches sans
-    dossier sont conservées à zéro (axe stable dans Power BI). Même structure
-    que les autres axes : deux blocs EXERCICE (« Inventaire courant » = stats
-    globales / « Récupérés N+1 » = analyse séparée), et dans chaque bloc
-    Σ des tranches (nb, PM, écart) redonne la ligne « Ensemble ».
+    Brique de la table `distribution_ecarts` (et du graphe 12). Découpe
+    l'univers de chute (même filtre que les axes de `chute`) par NIVEAU d'écart
+    signé (PM_MRM − PM_CPT) : la volumétrie des dossiers sur-provisionnés
+    (écart < 0, marge) et sous-provisionnés (écart > 0, risque) à chaque seuil
+    de `SEUILS_ECART_PM` (config). Les tranches sans dossier sont conservées à
+    zéro (axe stable dans Power BI). Deux blocs EXERCICE (« Inventaire
+    courant » = stats globales / « Récupérés N+1 » = analyse séparée), et dans
+    chaque bloc Σ des tranches (nb, PM, écart) redonne la ligne « Ensemble ».
     """
     tranches = tranches_ecart(seuils)
     df = (
@@ -285,6 +285,81 @@ def chute_par_tranche_ecart(df_result: DataFrame, seuils=SEUILS_ECART_PM) -> pd.
         .toPandas()
     )
     return _finalise_chute_par_tranche_ecart(pdf, tranches)
+
+
+# ── Table autonome « distribution_ecarts » ───────────────────────────────────
+# La distribution est un HISTOGRAMME (ampleur des écarts par dossier), pas une
+# ventilation métier du taux : elle a sa propre table, séparée de `chute` (qui
+# ne garde que Ensemble / Type de compte / Ancienneté). Elle embarque sa ligne
+# « Ensemble » de référence → elle se lit et se contrôle SEULE (Σ tranches ==
+# Ensemble), sans dépendre de `chute`.
+
+_DISTRIBUTION_COLONNES = [
+    "EXERCICE", "TRANCHE_ECART", "ORDRE",
+    "NB_DOSSIERS", "NB_SOUS_PROVISION", "NB_SUR_PROVISION", "NB_ECART_NUL",
+    "PM_MRM", "PM_CPT", "ECART", "TAUX_CHUTE_PCT", "POIDS_PM_PCT",
+]
+
+
+def _ensemble_distribution(d: SyntheseScalars) -> pd.DataFrame:
+    """Ligne « Ensemble » de référence par exercice : le taux OFFICIEL de chaque
+    exercice (scalaires de compute_synthese) — la table `distribution_ecarts`
+    devient autonome, Σ de ses tranches doit redonner cette ligne."""
+    rows = [
+        (EXERCICE_INV, d["metrics_nb"],
+         d["metrics_pm_mrm"],  d["metrics_pm_cpt"],  d["taux_chute_inventaire"]),
+        (EXERCICE_N1,  d["chute_n1_nb"],
+         d["chute_n1_pm_mrm"], d["chute_n1_pm_cpt"], d["taux_chute_n1"]),
+    ]
+    return pd.DataFrame([{
+        "EXERCICE"          : lbl,
+        "TRANCHE_ECART"     : AXE_ENSEMBLE,
+        "ORDRE"             : 0,
+        "NB_DOSSIERS"       : nb,
+        "NB_SOUS_PROVISION" : None,
+        "NB_SUR_PROVISION"  : None,
+        "NB_ECART_NUL"      : None,
+        "PM_MRM"            : pm_mrm,
+        "PM_CPT"            : pm_cpt,
+        "ECART"             : pm_mrm - pm_cpt,
+        "TAUX_CHUTE_PCT"    : taux,
+        "POIDS_PM_PCT"      : 100.0,
+    } for lbl, nb, pm_mrm, pm_cpt, taux in rows])
+
+
+def _assemble_distribution(ensemble: pd.DataFrame, par_tranche_ecart: pd.DataFrame) -> pd.DataFrame:
+    """Empile la ligne « Ensemble » de référence et les tranches, triées par
+    exercice puis ORDRE (Ensemble en tête) — pure pandas."""
+    out = pd.concat([ensemble, par_tranche_ecart], ignore_index=True)
+    return (
+        out.sort_values(["EXERCICE", "ORDRE"],
+                        key=lambda s: s.map(_EXERCICE_ORDRE) if s.name == "EXERCICE" else s)
+        .reset_index(drop=True)
+        .reindex(columns=_DISTRIBUTION_COLONNES)
+    )
+
+
+def distribution_ecarts(
+    df_result: DataFrame, d: SyntheseScalars, seuils=SEUILS_ECART_PM,
+) -> pd.DataFrame:
+    """LA distribution des écarts de PM — une table autonome (graphe 12).
+
+    Une ligne par EXERCICE × TRANCHE_ECART :
+    - TRANCHE_ECART « Ensemble » (ORDRE 0) : le taux officiel de l'exercice,
+      référence de la table ;
+    - les tranches de `SEUILS_ECART_PM` (ORDRE 1 = la plus sur-provisionnée →
+      la plus sous-provisionnée) : combien de dossiers portent un écart, dans
+      quel sens et à quelle ampleur (un taux quasi nul peut cacher de gros
+      écarts compensés). Dans chaque exercice, Σ des tranches (nb, PM, écart)
+      redonne la ligne « Ensemble » — garanti par controles_coherence.
+
+    Deux blocs EXERCICE, comme `chute` : « Inventaire courant » = stats
+    globales, « Récupérés N+1 » = analyse séparée.
+    """
+    return _assemble_distribution(
+        _ensemble_distribution(d),
+        chute_par_tranche_ecart(df_result, seuils),
+    )
 
 
 # ============================================================================
@@ -334,20 +409,19 @@ def _empiler_axe(pdf: pd.DataFrame, axe: str, segment_col: str) -> pd.DataFrame:
 
 
 def _assemble_chute(
-    ensemble         : pd.DataFrame,
-    par_type_compte  : pd.DataFrame,
-    par_anciennete   : pd.DataFrame,
-    par_tranche_ecart: pd.DataFrame,
+    ensemble       : pd.DataFrame,
+    par_type_compte: pd.DataFrame,
+    par_anciennete : pd.DataFrame,
 ) -> pd.DataFrame:
-    """Empile les quatre angles dans le schéma commun — pure pandas.
+    """Empile les trois angles dans le schéma commun — pure pandas.
 
-    L'axe « Type de compte » garde sa colonne TYPE_COMPTE en plus de SEGMENT
-    (grain de l'axe — cible des relations Power BI), comme dans `orphelins`.
-    ORDRE = ordre de lecture des SEGMENT dans l'axe (« Trier par colonne »
-    Power BI) — STABLE par SEGMENT, identique dans les deux blocs EXERCICE :
-    0 pour « Ensemble », rang de PM MRM totale par type de compte, ordre
-    N → N-2+ pour l'ancienneté, du plus sur-provisionné au plus
-    sous-provisionné pour les tranches d'écart.
+    La distribution des écarts a sa propre table (`distribution_ecarts`) : ici
+    ne restent que le taux et ses ventilations MÉTIER. L'axe « Type de compte »
+    garde sa colonne TYPE_COMPTE en plus de SEGMENT (grain de l'axe — cible des
+    relations Power BI), comme dans `orphelins`. ORDRE = ordre de lecture des
+    SEGMENT dans l'axe (« Trier par colonne » Power BI) — STABLE par SEGMENT,
+    identique dans les deux blocs EXERCICE : 0 pour « Ensemble », rang de PM MRM
+    totale par type de compte, ordre N → N-2+ pour l'ancienneté.
     """
     tc = par_type_compte.copy()
     tc.insert(0, "AXE", AXE_TYPE_COMPTE)
@@ -358,33 +432,28 @@ def _assemble_chute(
     anc = _empiler_axe(par_anciennete, AXE_ANCIENNETE, "BLOC_ANCIENNETE")
     anc["ORDRE"] = anc["SEGMENT"].map(_BLOC_ORDRE) + 1
 
-    blocs = [
-        ensemble,
-        tc,
-        anc,
-        _empiler_axe(par_tranche_ecart, AXE_TRANCHE_ECART, "TRANCHE_ECART"),
-    ]
-    return pd.concat(blocs, ignore_index=True).reindex(columns=_CHUTE_COLONNES)
+    return pd.concat([ensemble, tc, anc], ignore_index=True).reindex(columns=_CHUTE_COLONNES)
 
 
 def chute(df_result: DataFrame, d: SyntheseScalars) -> pd.DataFrame:
-    """LE taux de chute sous tous ses angles — une seule table (graphes 3, 7, 10, 12).
+    """LE taux de chute et ses ventilations métier — une seule table (graphes 3, 7, 10).
 
     Une ligne par EXERCICE × AXE × SEGMENT :
     - AXE « Ensemble » : le taux officiel de l'exercice (stats globales pour
       l'inventaire courant, analyse séparée pour les récupérés N+1) ;
-    - AXE « Type de compte » (PB / HPB / …), « Ancienneté » (N / N-1 / N-2
-      et antérieur) et « Tranche d'écart » (distribution des écarts de PM,
-      seuils `SEUILS_ECART_PM`) : les ventilations — dans chaque bloc
-      EXERCICE × AXE, Σ des lignes (Σ écart / Σ PM MRM) redonne le taux
-      « Ensemble » et les poids PM se lisent dans le bloc (garanti par
-      controles_coherence). ORDRE trie les SEGMENT dans chaque axe.
+    - AXE « Type de compte » (PB / HPB / …) et « Ancienneté » (N / N-1 / N-2
+      et antérieur) : les ventilations métier — dans chaque bloc EXERCICE ×
+      AXE, Σ des lignes (Σ écart / Σ PM MRM) redonne le taux « Ensemble » et
+      les poids PM se lisent dans le bloc (garanti par controles_coherence).
+      ORDRE trie les SEGMENT dans chaque axe.
+
+    La distribution des écarts par tranche (ampleur unitaire, un histogramme)
+    est sortie dans sa propre table `distribution_ecarts` (graphe 12).
     """
     return _assemble_chute(
         _ensemble_chute(d),
         chute_par_type_compte(df_result),
         chute_par_anciennete(df_result, _annee_inventaire(d)),
-        chute_par_tranche_ecart(df_result),
     )
 
 

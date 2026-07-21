@@ -3,7 +3,7 @@
 # MAGIC # 📘 ITIP-FIAB — Vision CC2024 (inventaire du 31/12/2024)
 # MAGIC
 # MAGIC **Le notebook de recette de la vision comptable CC2024** : il déroule tout
-# MAGIC le backtest de l'exercice 2024 — pipeline, synthèse, les 9 tables
+# MAGIC le backtest de l'exercice 2024 — pipeline, synthèse, les 10 tables
 # MAGIC métriques, la distribution des écarts de PM et les 12 graphiques — **sans
 # MAGIC rien écrire** (ni table Delta, ni fichier, ni PNG). L'export officiel de
 # MAGIC cette vision se fait par le Job 🚀 `itip_fiab_powerbi` (widget
@@ -123,7 +123,7 @@ print("✅ Contrôles de synthèse OK — lignes toutes classées, chute cohére
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. 📦 Les 9 tables métriques — mêmes tables que l'export Power BI
+# MAGIC ## 4. 📦 Les 10 tables métriques — mêmes tables que l'export Power BI
 # MAGIC
 # MAGIC Une table = **un sujet complet** ; les angles d'analyse sont des
 # MAGIC **colonnes** (`EXERCICE`, `AXE`, `SEGMENT`, `UNIVERS`), jamais des tables
@@ -302,7 +302,7 @@ displayHTML(f"""
     <li><b>{df_result.count():,}</b> dossiers réconciliés — lignes toutes classées, chute cohérente ;</li>
     <li>taux de chute inventaire : <b>{d["taux_chute_inventaire"]} %</b> — pas de N+1 sur cette vision
         (récupération tardive « non mesurée », à rejouer avec l'inventaire du 30/06/2025) ;</li>
-    <li>9 tables calculées et recoupées ({len(ctrl)}/{len(ctrl)} contrôles OK), 12 graphiques rendus ;</li>
+    <li>10 tables calculées et recoupées ({len(ctrl)}/{len(ctrl)} contrôles OK), 12 graphiques rendus ;</li>
     <li>export officiel : Job <b>itip_fiab_powerbi</b>, widget <code>annee_inventaire = 2024</code>
         → tables Delta <code>hive_metastore.itip_backtest.*</code> historisées 31/12/2024 × MULTI —
         2023 et 2024 coexistent, le rapport les compare nativement.</li>

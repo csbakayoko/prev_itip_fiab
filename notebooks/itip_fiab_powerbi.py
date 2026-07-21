@@ -13,11 +13,11 @@
 # MAGIC | 1 | ⚙️ **Setup** | session Spark + paramètres du run (widgets = paramètres du Job, défauts `config/profile.py`) |
 # MAGIC | 2 | 🏗️ **Pipeline** | chargement → nettoyage → matching (14 étapes) → états terminaux (`MRM_DELETE`, orphelins) → récupérations (N+1, statut NON) → tags |
 # MAGIC | 3 | 🔎 **Synthèse** | contrôles de cohérence **bloquants** (lignes classées, `chute_coherente`) |
-# MAGIC | 4 | 📦 **Export** | les 9 tables métriques en Delta dans le metastore (la sortie de **référence**, celle que Power BI interroge) + fichiers DBFS en secondaire, puis recoupements inter-tables **bloquants** |
+# MAGIC | 4 | 📦 **Export** | les 10 tables métriques en Delta dans le metastore (la sortie de **référence**, celle que Power BI interroge) + fichiers DBFS en secondaire, puis recoupements inter-tables **bloquants** |
 # MAGIC | 5 | 🗄️ **Détail du run** | `df_result` écrit en table `resultat_backtest`, historisée par `DATE_INVENTAIRE × PERIMETRE` (2023 et 2024 coexistent) |
 # MAGIC | 6 | ✅ **Récapitulatif** | la liste des tables à brancher dans Power BI |
 # MAGIC
-# MAGIC ### Les 9 tables produites (tidy — une table = un sujet complet)
+# MAGIC ### Les 10 tables produites (tidy — une table = un sujet complet)
 # MAGIC Les angles d'analyse sont des **colonnes** (`EXERCICE`, `AXE`, `SEGMENT`,
 # MAGIC `UNIVERS`), jamais des tables séparées : Power BI filtre, il n'assemble pas.
 # MAGIC Toutes portent la clé de liaison **`CLE_RUN`** (date × périmètre) : le
@@ -28,7 +28,8 @@
 # MAGIC | `synthese` | 1 ligne / run — tous les KPI (chute, conformité, couvertures, retrouvés vs base chute) — **historisable** |
 # MAGIC | `bilan_cas` | LE bilan cas par cas : matchés, retrouvés par tentatives (N+1, statut NON), non retrouvés de part et d'autre — nb, PM, taux, **explication** |
 # MAGIC | `couverture` | les deux univers (`UNIVERS`) : justification du compte / part de la revue MRM retrouvée |
-# MAGIC | `chute` | LE taux de chute sous tous ses angles (`AXE` : Ensemble / type de compte / ancienneté / **tranche d'écart** — la distribution des écarts de PM) × `EXERCICE` (inventaire courant / N+1 séparé), `ORDRE` = tri des segments |
+# MAGIC | `chute` | LE taux de chute et ses ventilations métier (`AXE` : Ensemble / type de compte / ancienneté) × `EXERCICE` (inventaire courant / N+1 séparé), `ORDRE` = tri des segments |
+# MAGIC | `distribution_ecarts` | LA distribution des écarts de PM par tranche (`TRANCHE_ECART`, histogramme) × `EXERCICE` — table **autonome** avec sa ligne « Ensemble » de référence (`ORDRE 0`) |
 # MAGIC | `consignes` | conformité + PM + chute par consigne, les deux exercices (`EXERCICE`), ligne « Sans consigne reconnue » incluse |
 # MAGIC | `consignes_par_type_compte` | tableau de bord : suivi des consignes par TYPE_COMPTE × CONSIGNE |
 # MAGIC | `orphelins` | l'investigation sous six angles (`AXE` : type de compte / garantie / ancienneté / mois / clause / clés nulles), `ORDRE` = rang de lecture |
@@ -176,9 +177,9 @@ print("✅ Contrôles de synthèse OK — export autorisé.")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. 📦 Export Power BI — les 9 tables métriques
+# MAGIC ## 4. 📦 Export Power BI — les 10 tables métriques
 # MAGIC
-# MAGIC Une passe : les 9 tables écrites en Delta (`<schema>.metrique_<nom>`,
+# MAGIC Une passe : les 10 tables écrites en Delta (`<schema>.metrique_<nom>`,
 # MAGIC historisées par `DATE_INVENTAIRE × PERIMETRE`) + fichiers DBFS secondaires.
 # MAGIC Chaque table porte le schéma standard `DATE_INVENTAIRE` / `PERIMETRE` /
 # MAGIC `LIBELLE_RUN` / **`CLE_RUN`** (la clé de relation du modèle en étoile).
@@ -205,7 +206,7 @@ print("✅ Contrôles de synthèse OK — export autorisé.")
 # MAGIC > sur les `metrique_*` existantes (et `resultat_backtest`, qui gagne
 # MAGIC > `CLE_RUN`).
 # MAGIC >
-# MAGIC > Dans les deux cas, les 9 tables se (re)créent au run suivant.
+# MAGIC > Dans les deux cas, les 10 tables se (re)créent au run suivant.
 
 # COMMAND ----------
 

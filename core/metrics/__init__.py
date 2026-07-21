@@ -20,12 +20,12 @@ Les fonctions renvoient des DONNÉES BRUTES (nombres, pas de chaînes
 formatées) : le formatage (M€, %, séparateurs FR) reste au niveau
 restitution. Contrat des métriques : docs/METRIQUES.md.
 
-LES 9 TABLES EXPORTÉES (toutes_metriques) — une table = un sujet complet,
+LES 10 TABLES EXPORTÉES (toutes_metriques) — une table = un sujet complet,
 les angles d'analyse sont des colonnes (EXERCICE, AXE, SEGMENT, UNIVERS) :
     dim_run (la dimension de run, pivot du modèle en étoile — reliée à
     chaque table par la clé CLE_RUN posée à l'export), synthese, bilan_cas,
-    couverture, chute, consignes, consignes_par_type_compte, orphelins,
-    controles_coherence.
+    couverture, chute, distribution_ecarts, consignes,
+    consignes_par_type_compte, orphelins, controles_coherence.
 
 Correspondance avec les 12 graphiques (core.metrics.viz) — les graphes se
 nourrissent de `d` et des ré-agrégations par axe (briques des tables) :
@@ -82,6 +82,7 @@ from core.metrics.scalaires import (
 )
 from core.metrics.agregats import (
     chute,
+    distribution_ecarts,
     orphelins,
     chute_par_type_compte,
     chute_par_anciennete,

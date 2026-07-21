@@ -4,7 +4,7 @@
 > qui exécute le notebook de production `notebooks/itip_fiab_powerbi` et
 > alimente les tables consommées par le rapport Power BI.
 >
-> **Résultat attendu d'un run vert** : les 9 tables métriques
+> **Résultat attendu d'un run vert** : les 10 tables métriques
 > (`hive_metastore.itip_backtest.metrique_*`, dont la dimension
 > `metrique_dim_run`) et le détail `resultat_backtest`, historisés par
 > `DATE_INVENTAIRE × PERIMETRE`, tous reliés par la clé `CLE_RUN` — plus le
@@ -24,7 +24,7 @@ Job Databricks « ITIP-FIAB Backtest »
         1. lit les paramètres (widgets ← « base parameters » du Job)
         2. pipeline complet (chargement → matching → récupérations → tags)
         3. contrôles de cohérence BLOQUANTS (avant toute écriture)
-        4. écrit les 9 tables métriques (Delta, référence + fichiers DBFS)
+        4. écrit les 10 tables métriques (Delta, référence + fichiers DBFS)
         5. écrit le détail resultat_backtest
         6. récapitule les tables à brancher dans Power BI
 ```
@@ -63,7 +63,7 @@ Deux principes à garder en tête :
 ## 3. Avant le premier Job : valider le pipeline (5 min)
 
 1. Ouvrir `notebooks/itip_fiab_smoke` sur le cluster.
-2. « Run all » : le smoke test déroule **tout** le pipeline, les 9 tables et
+2. « Run all » : le smoke test déroule **tout** le pipeline, les 10 tables et
    les 12 graphiques **sans rien écrire**.
 3. Toutes les cellules vertes → le code et les données sont prêts, passer à
    la création du Job. Une cellule rouge → traiter d'abord (cf. §8, les
@@ -177,7 +177,7 @@ inventaire). Dans l'onglet « Schedules & Triggers » du Job :
 
 | Sortie | Emplacement | Usage |
 |---|---|---|
-| **Tables métriques** (référence) | `hive_metastore.itip_backtest.metrique_*` (9 tables) | Power BI via SQL Warehouse — historisées par run |
+| **Tables métriques** (référence) | `hive_metastore.itip_backtest.metrique_*` (10 tables) | Power BI via SQL Warehouse — historisées par run |
 | Détail dossier par dossier | `hive_metastore.itip_backtest.resultat_backtest` | analyses fines, drillthrough |
 | Classeur Excel | `dbfs:/.../itip_fiab_exports/<CLIENT>_<PERIM>/metrics/metrics_*.xlsx` | import Power BI sans Warehouse, partage |
 | CSV / Parquet | même dossier `metrics/` | rejeu, autres outils |
@@ -215,5 +215,5 @@ inventaire). Dans l'onglet « Schedules & Triggers » du Job :
       simultané max, notifications d'échec
 - [ ] `annee_inventaire` renseigné, autres paramètres vides (défauts) sauf
       besoin ponctuel
-- [ ] Run vert : contrôles OK, 9 tables + `resultat_backtest` écrites
+- [ ] Run vert : contrôles OK, 10 tables + `resultat_backtest` écrites
 - [ ] Rafraîchissement Power BI enchaîné (jamais sur un run rouge)

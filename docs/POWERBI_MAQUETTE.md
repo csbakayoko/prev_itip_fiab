@@ -16,8 +16,8 @@
   (volumétrie faible : tables agrégées ; le refresh suit le Job).
   `resultat_backtest` (détail tête par tête) peut rester en DirectQuery si
   la volumétrie grossit.
-- **Tables** : les 9 `metrique_*` (dont `metrique_dim_run`) +
-  `resultat_backtest`. Noms **stables** —
+- **Tables** : les 10 `metrique_*` (dont `metrique_dim_run` et
+  `metrique_distribution_ecarts`) + `resultat_backtest`. Noms **stables** —
   le run est porté par les colonnes, jamais par le nom de table. Une table =
   un sujet complet ; les angles d'analyse sont des **colonnes** (`EXERCICE`,
   `AXE`, `SEGMENT`, `UNIVERS`) : le rapport **filtre**, il n'assemble pas.
@@ -29,17 +29,18 @@
   filtre unidirectionnel. Résultat : **un seul segment (date d'inventaire ou
   année, posé sur `dim_run`) pilote tout le rapport** — aucune table de dates
   à fabriquer, aucune clé composite à concaténer dans Power Query.
-- **Tri des axes** : dans `metrique_chute` et `metrique_orphelins`, trier la
-  colonne `SEGMENT` par la colonne `ORDRE` (« Trier par colonne ») — les
-  tranches d'écart, blocs d'ancienneté et rangs s'affichent alors dans
-  l'ordre métier, pas alphabétique.
+- **Tri des axes** : dans `metrique_chute`, `metrique_distribution_ecarts` et
+  `metrique_orphelins`, trier la colonne `SEGMENT` (ou `TRANCHE_ECART`) par la
+  colonne `ORDRE` (« Trier par colonne ») — blocs d'ancienneté, tranches
+  d'écart et rangs s'affichent alors dans l'ordre métier, pas alphabétique.
 - **Migration (une fois)** : deux cas. Depuis l'ancien export éclaté en 22
   tables : les anciennes `metrique_*` ne sont plus alimentées (et
   `metrique_consignes` change de schéma) → `DROP TABLE` sur les anciennes.
-  Depuis des tables regroupées créées **avant** `CLE_RUN` / `ORDRE` /
-  « Tranche d'écart » : le schéma a évolué et l'écriture historisée refuse un
+  Depuis des tables regroupées créées **avant** la sortie de la distribution
+  dans sa propre table (`metrique_distribution_ecarts`, nouvelle) ou avant
+  `CLE_RUN` / `ORDRE` : le schéma a évolué et l'écriture historisée refuse un
   changement de schéma → `DROP TABLE` sur les `metrique_*` existantes (et
-  `resultat_backtest`). Dans les deux cas les 9 tables se (re)créent au run
+  `resultat_backtest`). Dans les deux cas les 10 tables se (re)créent au run
   suivant ; rebrancher les visuels selon la maquette ci-dessous.
 - **Aucune mesure DAX de recalcul métier** : les taux sont des colonnes des
   tables (formules agrégées, cf. METRIQUES §4.1) — recalculer un ratio en
@@ -97,9 +98,10 @@ Chaque page = une question, ses visuels, sa table source. Segments globaux
 
 ### P3 — Écarts par dossier (distribution) 🆕
 - **La question** : combien de dossiers sur/sous-provisionnés, à quelle
-  ampleur ? Tout vient de `metrique_chute`, `AXE` = « Tranche d'écart »,
-  bloc `EXERCICE` = « Inventaire courant » (graphe 12).
-- **Histogramme** (barres) : `SEGMENT` en axe (tri par `ORDRE` — du plus
+  ampleur ? Tout vient de sa **table dédiée** `metrique_distribution_ecarts`,
+  bloc `EXERCICE` = « Inventaire courant », lignes hors « Ensemble »
+  (`ORDRE > 0`) — la ligne « Ensemble » sert de total de référence (graphe 12).
+- **Histogramme** (barres) : `TRANCHE_ECART` en axe (tri par `ORDRE` — du plus
   sur-provisionné au plus sous-provisionné), `NB_DOSSIERS` en valeur,
   couleur par sens (sur-provisionné / écart nul / sous-provisionné).
 - **Cartes** : Σ `NB_SOUS_PROVISION` (dossiers en risque), Σ

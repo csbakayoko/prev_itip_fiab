@@ -3,7 +3,7 @@
 > Ce document décrit **comment l'étude est fabriquée**, de la donnée brute à la
 > restitution Power BI : les ingrédients (sources), la préparation (nettoyage,
 > clés), la cuisson (waterfall de matching + récupérations), le dressage
-> (synthèse, 9 tables, 12 graphiques) et les garde-fous (contrôles de
+> (synthèse, 10 tables, 12 graphiques) et les garde-fous (contrôles de
 > cohérence). Chaque étape renvoie au module qui la porte.
 >
 > 📐 **Le contrat formel des métriques** (formules, univers, limites) →
@@ -40,7 +40,7 @@ CPT (table Lab)          MRM (CSV ou Excel sur DBFS)
                │
       ┌────────┼──────────────┐
       ▼        ▼              ▼
-  synthèse  9 tables      12 graphiques          ← §7 restitution
+  synthèse  10 tables      12 graphiques          ← §7 restitution
   console   métriques     (titres-messages)
             (Delta/Excel/CSV/Parquet/JSON)
                │
@@ -316,7 +316,7 @@ aucune grandeur n'est recalculée deux fois, donc aucune ne peut diverger :
    statut NON — dans le **vocabulaire client à deux couches** (*retrouvé /
    non retrouvé* = le fait ; *conforme / encore au compte* = le verdict, cf.
    [`METRIQUES.md`](METRIQUES.md) §0).
-2. **9 tables métriques** (`core/metrics/`, contrat complet →
+2. **10 tables métriques** (`core/metrics/`, contrat complet →
    [`METRIQUES.md`](METRIQUES.md) §6) : `dim_run` (la dimension de run —
    pivot du modèle en étoile, reliée à toutes les tables par la clé de
    liaison `CLE_RUN`), `synthese` (tous les KPI en 1 ligne / run,
@@ -381,7 +381,7 @@ le cœur est `build_df_result` / `run` dans `main.py`.
 
 | Contexte | Entrée | Particularité |
 |---|---|---|
-| **Production** (Databricks Job) | `notebooks/itip_fiab_powerbi` | widgets / base parameters (`annee_inventaire`, `fichier_mrm_n1`, `types_compte`, `delta_schema`…) ; contrôles **bloquants** ; export des 9 tables + `resultat_backtest` — mise en place pas à pas : [`TUTORIEL_JOB_DATABRICKS.md`](TUTORIEL_JOB_DATABRICKS.md) |
+| **Production** (Databricks Job) | `notebooks/itip_fiab_powerbi` | widgets / base parameters (`annee_inventaire`, `fichier_mrm_n1`, `types_compte`, `delta_schema`…) ; contrôles **bloquants** ; export des 10 tables + `resultat_backtest` — mise en place pas à pas : [`TUTORIEL_JOB_DATABRICKS.md`](TUTORIEL_JOB_DATABRICKS.md) |
 | **Recette vision CC2023** | `notebooks/itip_fiab_vision_cc2023` | l'exercice 2023 déroulé et commenté de bout en bout (tables + distribution des écarts + graphiques), **aucune écriture** |
 | **Recette vision CC2024** | `notebooks/itip_fiab_vision_cc2024` | idem pour 2024 — sans MRM N+1 (blocs N+1 vides, récupération « non mesurée »), **aucune écriture** |
 | Run interactif | `notebooks/itip_fiab_main` | widgets par année (2023 / 2024), métriques table par table ; **la cellule d'export écrit dans le metastore** (viser un schéma de test pour expérimenter) |

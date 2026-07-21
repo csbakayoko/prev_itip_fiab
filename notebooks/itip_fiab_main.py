@@ -109,7 +109,7 @@ annee_inv = metrics._annee_inventaire(d)   # année dérivée de d["date_inventa
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Métriques — les 9 tables (une table = un sujet complet)
+# MAGIC ## 4. Métriques — les 10 tables (une table = un sujet complet)
 # MAGIC
 # MAGIC Des fonctions simples (`core.metrics`) : les tables scalaires prennent `d`
 # MAGIC (`dim_run`, `synthese`, `bilan_cas`, `consignes`, `couverture`) ; `chute`

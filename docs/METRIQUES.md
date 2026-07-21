@@ -302,14 +302,19 @@ référence `d["date_inventaire"]`.
   autour de la tranche « Écart nul », soit 2×4+3 = 11 tranches. Borne basse
   exclusive, haute inclusive. **Écart positif = sous-provisionné (risque),
   négatif = sur-provisionné (marge)** — même signe que le taux (§4).
-- **Sorties** : axe « Tranche d'écart » de la table `chute` — par tranche :
-  `NB_DOSSIERS` (la volumétrie des dossiers sur/sous-provisionnés par niveau
-  d'écart), PM des deux côtés, écart, taux et poids. Les tranches vides
-  restent présentes à zéro (axe stable en restitution) ; `ORDRE` trie du plus
-  sur-provisionné au plus sous-provisionné.
-- **Cohérence** : l'axe **partitionne** l'univers de chute → dans chaque bloc
-  `EXERCICE`, Σ des tranches (nb, PM, écart) == ligne « Ensemble »
-  (recoupement `controles_coherence`, comme les autres axes).
+- **Sorties** : table dédiée **`distribution_ecarts`** (sortie de la table
+  `chute`, qui ne garde que le taux et ses ventilations métier — la
+  distribution est un **histogramme**, pas une ventilation du taux). Une ligne
+  par `EXERCICE × TRANCHE_ECART` : `NB_DOSSIERS` (la volumétrie des dossiers
+  sur/sous-provisionnés par niveau d'écart), PM des deux côtés, écart, taux et
+  poids. Les tranches vides restent présentes à zéro (axe stable en
+  restitution) ; `ORDRE` trie du plus sur-provisionné au plus sous-provisionné
+  (`ORDRE 0` = la ligne **« Ensemble »** de référence). La table est
+  **autonome** : elle embarque sa ligne « Ensemble » (le taux officiel de
+  l'exercice), elle se lit et se contrôle seule.
+- **Cohérence** : les tranches **partitionnent** l'univers de chute → dans
+  chaque bloc `EXERCICE`, Σ des tranches (nb, PM, écart) == la ligne
+  « Ensemble » de la table (recoupement `controles_coherence`).
 - **Lecture** : « X dossiers sous-provisionnés dont Y au-delà de +20 k€ ;
   Z sur-provisionnés — le solde de −a M€ vient pour l'essentiel des tranches
   extrêmes ». Changer les seuils = une ligne de config, libellés et bornes en
@@ -321,8 +326,8 @@ référence `d["date_inventaire"]`.
 > 📊 **Illustrations du §4** — graphe 7 `7_kpi_chute.png` (LE taux, gros
 > chiffre + composantes PM), graphe 3 `3_chute_par_type_compte.png` (axe
 > « Type de compte »), graphe 10 `10_chute_par_anciennete.png` (axe
-> « Ancienneté »), graphe 12 `12_distribution_ecarts.png` (axe « Tranche
-> d'écart »), graphes 4 `4_chute_par_consigne.png` et 9
+> « Ancienneté »), graphe 12 `12_distribution_ecarts.png` (table
+> `distribution_ecarts`), graphes 4 `4_chute_par_consigne.png` et 9
 > `9_pm_par_consigne.png` (le par-consigne, §4.3).
 
 ---
@@ -391,7 +396,7 @@ référence `d["date_inventaire"]`.
 
 ## 6. Tables métriques exportées (core/metrics/__init__.py — toutes_metriques)
 
-Les **9 tables** pandas tidy écrites par `export_metriques` (8 tables-sujets
+Les **10 tables** pandas tidy écrites par `export_metriques` (9 tables-sujets
 + la dimension de run `dim_run`) — une table = un sujet complet ; les angles
 d'analyse sont des **colonnes** (`EXERCICE`, `AXE`, `SEGMENT`, `UNIVERS`),
 jamais des tables séparées : la restitution filtre, elle n'assemble pas.
@@ -462,7 +467,8 @@ jamais des tables séparées : la restitution filtre, elle n'assemble pas.
 | `synthese` | tous les KPI en 1 ligne / run (historisable) | univers de chaque ratio |
 | `bilan_cas` | LE bilan cas par cas : matchés (par clé — principale / affinée / récupération / **clé clause** —, total, base chute), retrouvés par tentatives (N+1, statut NON **ventilé exercice N / N+1 + total**), non retrouvés de part et d'autre, « à supprimer » encore au compte — nb, PM, taux quand il a un sens, EXPLICATION | tout df_result, un cas = une ligne |
 | `couverture` | les deux univers, colonne `UNIVERS` : **« Compte »** = décomposition du compte (retrouvés, N+1, repêchés, clos, anomalies — poids en nb et en PM) ; **« Revue MRM »** = part de la revue retrouvée + non retrouvés par consigne (+ « à supprimer » encore au compte). Colonnes : `UNIVERS`, `CATEGORIE`, `NB_DOSSIERS`, `PM_MRM`, `PM_CPT`, `PCT_NB`, `PCT_PM` | Compte : compte entier ; Revue : `MATCHÉS + MRM_MISSING` (+ DELETE retrouvées) |
-| `chute` | LE taux de chute sous tous ses angles, colonne `AXE` : **« Ensemble »** = le taux officiel + composantes PM de chaque exercice ; **« Type de compte »** (PB / HPB / …), **« Ancienneté »** (N / N-1 / N-2 et antérieur) et **« Tranche d'écart »** (distribution des écarts de PM, §4.5) = les ventilations — × `EXERCICE` (2 blocs : inventaire courant = stats globales / N+1 = analyse séparée). Dans chaque bloc `EXERCICE × AXE`, Σ des lignes = taux « Ensemble » (cf. §4.2). Colonnes : `EXERCICE`, `AXE`, `SEGMENT`, `TYPE_COMPTE` (renseigné sur l'axe « Type de compte » — cible des relations Power BI), `ORDRE` (tri des segments dans l'axe, stable par SEGMENT — « Trier par colonne » Power BI), `NB_DOSSIERS`, `NB_SOUS_PROVISION`, `NB_SUR_PROVISION`, `NB_ECART_NUL`, `PM_MRM`, `PM_CPT`, `ECART`, `TAUX_CHUTE_PCT`, `POIDS_PM_PCT` | univers de chute, par exercice |
+| `chute` | LE taux de chute et ses ventilations métier, colonne `AXE` : **« Ensemble »** = le taux officiel + composantes PM de chaque exercice ; **« Type de compte »** (PB / HPB / …) et **« Ancienneté »** (N / N-1 / N-2 et antérieur) = les ventilations — × `EXERCICE` (2 blocs : inventaire courant = stats globales / N+1 = analyse séparée). Dans chaque bloc `EXERCICE × AXE`, Σ des lignes = taux « Ensemble » (cf. §4.2). Colonnes : `EXERCICE`, `AXE`, `SEGMENT`, `TYPE_COMPTE` (renseigné sur l'axe « Type de compte » — cible des relations Power BI), `ORDRE` (tri des segments dans l'axe, stable par SEGMENT — « Trier par colonne » Power BI), `NB_DOSSIERS`, `NB_SOUS_PROVISION`, `NB_SUR_PROVISION`, `NB_ECART_NUL`, `PM_MRM`, `PM_CPT`, `ECART`, `TAUX_CHUTE_PCT`, `POIDS_PM_PCT` | univers de chute, par exercice |
+| `distribution_ecarts` | LA distribution des écarts de PM (§4.5) — table **autonome** (histogramme, sortie de `chute`). Une ligne par `EXERCICE × TRANCHE_ECART` : `TRANCHE_ECART` = « Ensemble » (`ORDRE 0`, le taux officiel de référence) puis les tranches de `SEUILS_ECART_PM` (`ORDRE 1` = la plus sur-provisionnée → la plus sous-provisionnée). × `EXERCICE` (2 blocs). Dans chaque bloc, Σ des tranches = ligne « Ensemble ». Colonnes : `EXERCICE`, `TRANCHE_ECART`, `ORDRE`, `NB_DOSSIERS`, `NB_SOUS_PROVISION`, `NB_SUR_PROVISION`, `NB_ECART_NUL`, `PM_MRM`, `PM_CPT`, `ECART`, `TAUX_CHUTE_PCT`, `POIDS_PM_PCT` | univers de chute, par exercice |
 | `consignes` | LE suivi des consignes, colonne `EXERCICE` : bloc **« Inventaire courant »** = conformité + PM + chute par consigne (exercice courant pur, §5) + ligne **« Sans consigne reconnue »** (matchés sans consigne exploitable : pas de conformité, mais base chute — §4.3) ; bloc **« Récupérés N+1 »** = suivi N+1 (analyse séparée, volumétries — retrouvé par construction ⇒ conforme sauf DELETE) | conformité : matchés + missing ; PM/chute : matchés inventaire courant ; N+1 : `CPT_LATE` hors statut NON |
 | `consignes_par_type_compte` | tableau de bord : suivi des consignes par TYPE_COMPTE × CONSIGNE (nb, suivies/non suivies, PM, `NB_NON_REMONTE_DF`) | mêmes règles que `consignes` (bloc inventaire), ventilées ; repêchés statut NON comptés à part, hors conformité |
 | `orphelins` | l'investigation des orphelins sous six angles, colonne `AXE` : **« Type de compte »**, **« Garantie »** (IT 60 / IP 64 / autre / non renseignée), **« Ancienneté »**, **« Mois de survenance »** (effet fin d'année) — ces quatre axes **partitionnent** (Σ nb = `def_nb` chacun) ; **« Clause (détail) »** = détail d'investigation des comptes PORTEURS d'une clause (`ORDRE` 1 = le plus représentatif, à investiguer avec le souscripteur — graphe 11 ; Σ nb ≤ `def_nb`, poids en part du total) ; **« Composante de clé nulle »** = fréquence de nullité de chaque composante de la clé (RPP, naissance, survenance, garantie, nom, clause — explique l'orphelinage ; non additif). Colonnes : `AXE`, `SEGMENT`, `TYPE_COMPTE`, `ORDRE`, `NB_DOSSIERS`, `PM_CPT`, `POIDS_NB_PCT`, `POIDS_PM_PCT` | `CPT_ONLY` |
@@ -490,8 +496,9 @@ jamais des tables séparées : la restitution filtre, elle n'assemble pas.
 - **Recoupements inter-tables** : `metrics.controles_coherence` vérifie à
   chaque export que les grandeurs partagées se recoupent d'une table à
   l'autre : dans `chute`, Σ de chaque axe ventilé (« Type de compte » /
-  « Ancienneté » / « Tranche d'écart ») == ligne « Ensemble » de son
-  exercice ; dans `orphelins`,
+  « Ancienneté ») == ligne « Ensemble » de son exercice ; dans
+  `distribution_ecarts` (table autonome), Σ des tranches == sa propre ligne
+  « Ensemble » par exercice ; dans `orphelins`,
   Σ de chaque axe partitionnant (« Type de compte » / « Garantie » /
   « Ancienneté » / « Mois de survenance ») == CPT_ONLY ; dans `consignes`,
   Σ des bases pertinentes (KAS + sans consigne) == base chute (et le bloc
@@ -525,7 +532,7 @@ run) :
 ### 8.2 Ce qui va en base — nomenclature
 - **Schéma unique** de l'application : `hive_metastore.itip_backtest`
   (`EXPORT_DELTA_SCHEMA`, créé au premier export).
-- Les 9 tables du §6, une table Delta par métrique : `<schema>.metrique_<nom>`
+- Les 10 tables du §6, une table Delta par métrique : `<schema>.metrique_<nom>`
   (connexion Power BI via SQL Warehouse) — `metrique_dim_run` comprise. Les
   noms de tables sont **stables** :
   le périmètre est une **colonne** (`PERIMETRE`), pas un suffixe de nom — une

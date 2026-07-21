@@ -158,19 +158,19 @@ display(pivot_taux.reset_index())
 # COMMAND ----------
 
 def _tranches_inv(annee: str) -> pd.DataFrame:
-    """Axe « Tranche d'écart » de la table chute, bloc inventaire courant."""
-    ch = resultats[annee]["tables"]["chute"]
-    tr = ch[(ch["AXE"] == metrics.AXE_TRANCHE_ECART)
-            & (ch["EXERCICE"] == metrics.EXERCICE_INV)].copy()
+    """Table `distribution_ecarts`, bloc inventaire courant (hors ligne Ensemble)."""
+    dist = resultats[annee]["tables"]["distribution_ecarts"]
+    tr = dist[(dist["EXERCICE"] == metrics.EXERCICE_INV)
+              & (dist["TRANCHE_ECART"] != metrics.AXE_ENSEMBLE)].copy()
     return tr.sort_values("ORDRE")
 
 
 pivot_tranches = pd.concat([
-    _tranches_inv(an).set_index("SEGMENT")[["NB_DOSSIERS"]].rename(
+    _tranches_inv(an).set_index("TRANCHE_ECART")[["NB_DOSSIERS"]].rename(
         columns={"NB_DOSSIERS": f"NB_{an}"})
     for an in ANNEES
 ], axis=1)
-display(pivot_tranches.reset_index().rename(columns={"SEGMENT": "TRANCHE_ECART"}))
+display(pivot_tranches.reset_index())
 
 # COMMAND ----------
 

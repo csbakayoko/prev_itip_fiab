@@ -1,7 +1,7 @@
 """
-Orchestration de la couche métriques — les 9 tables, et leur export.
+Orchestration de la couche métriques — les 10 tables, et leur export.
 
-toutes_metriques : les 9 tables pandas en un dict (8 tables-sujets + la
+toutes_metriques : les 10 tables pandas en un dict (9 tables-sujets + la
 dimension de run `dim_run`, contrôles inclus).
 export_metriques : écriture multi-format (Excel privilégié, CSV/JSON/Parquet
 DBFS, Delta si schéma) sous <EXPORT_BASE_PATH>/<CLIENT>_<PERIM>/metrics.
@@ -23,7 +23,7 @@ from core.synthese.kpi_export import compute_synthese
 from core.synthese.synthese_contract import SyntheseScalars
 from core.metrics.base import _PERIMETRE, _to_local, output_dir, _annee_inventaire
 from core.metrics.scalaires import dim_run, synthese, bilan_cas, consignes, couverture
-from core.metrics.agregats import chute, consignes_par_type_compte, orphelins
+from core.metrics.agregats import chute, distribution_ecarts, consignes_par_type_compte, orphelins
 from core.metrics.coherence import controles_coherence
 
 
@@ -32,7 +32,7 @@ from core.metrics.coherence import controles_coherence
 # ============================================================================
 
 def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) -> Dict[str, pd.DataFrame]:
-    """Les 9 tables métriques en un dict {nom: DataFrame pandas}.
+    """Les 10 tables métriques en un dict {nom: DataFrame pandas}.
 
     Une table = un sujet complet (contrat : docs/METRIQUES.md §6) ; les angles
     d'analyse sont des COLONNES (EXERCICE, AXE, SEGMENT, UNIVERS), jamais des
@@ -42,7 +42,8 @@ def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) 
         synthese                  — tous les KPI, une ligne par run
         bilan_cas                 — LE bilan cas par cas (avec explications)
         couverture                — les deux univers (Compte / Revue MRM)
-        chute                     — le taux de chute sous tous ses angles
+        chute                     — le taux de chute et ses ventilations métier
+        distribution_ecarts       — la distribution des écarts de PM (tranches)
         consignes                 — le suivi des consignes, les deux exercices
         consignes_par_type_compte — tableau de bord TYPE_COMPTE × CONSIGNE
         orphelins                 — l'investigation des orphelins, six angles
@@ -58,6 +59,7 @@ def toutes_metriques(df_result: DataFrame, d: Optional[SyntheseScalars] = None) 
         "bilan_cas"                : bilan_cas(d),
         "couverture"               : couverture(d),
         "chute"                    : chute(df_result, d),
+        "distribution_ecarts"      : distribution_ecarts(df_result, d),
         "consignes"                : consignes(d),
         "consignes_par_type_compte": consignes_par_type_compte(df_result),
         "orphelins"                : orphelins(df_result, _annee_inventaire(d)),

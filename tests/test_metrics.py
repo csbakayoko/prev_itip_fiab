@@ -23,7 +23,9 @@ from core.metrics import (
     AXE_GARANTIE, AXE_MOIS, AXE_CLAUSE, AXE_CLE_NULLE,
     SANS_CONSIGNE, TRANCHE_ECART_NUL, UNIVERS_COMPTE, UNIVERS_REVUE,
 )
-from core.metrics.agregats import _ensemble_chute
+from core.metrics.agregats import (
+    _ensemble_chute, _ensemble_distribution, _assemble_distribution,
+)
 from core.metrics.coherence import controles_coherence
 
 
@@ -305,7 +307,12 @@ def _chute_fixture(d):
          "NB_SOUS_PROVISION": 1, "NB_SUR_PROVISION": 0, "NB_ECART_NUL": 0,
          "PM_MRM": 60.0, "PM_CPT": 55.0, "ECART": 5.0},
     ]))
-    # Les écarts (20 € et 5 €) tombent dans la tranche « 0 à +1 k€ ».
+    return _assemble_chute(_ensemble_chute(d), tc, anc)
+
+
+def _distribution_fixture(d):
+    """La table distribution_ecarts (autonome) : ligne « Ensemble » + tranches
+    cohérentes avec d — les écarts (20 € et 5 €) tombent dans « 0 à +1 k€ »."""
     tr = _finalise_chute_par_tranche_ecart(pd.DataFrame([
         {"EXERCICE": EXERCICE_INV, "TRANCHE_ECART": "0 à +1 k€", "NB_DOSSIERS": 1,
          "NB_SOUS_PROVISION": 1, "NB_SUR_PROVISION": 0, "NB_ECART_NUL": 0,
@@ -314,14 +321,14 @@ def _chute_fixture(d):
          "NB_SOUS_PROVISION": 1, "NB_SUR_PROVISION": 0, "NB_ECART_NUL": 0,
          "PM_MRM": 60.0, "PM_CPT": 55.0, "ECART": 5.0},
     ]), tranches_ecart())
-    return _assemble_chute(_ensemble_chute(d), tc, anc, tr)
+    return _assemble_distribution(_ensemble_distribution(d), tr)
 
 
-def test_assemble_chute_quatre_axes_et_taux_officiels():
+def test_assemble_chute_axes_metier_et_taux_officiels():
     d   = _d()
     out = _chute_fixture(d)
-    assert list(out["AXE"].unique()) == [AXE_ENSEMBLE, AXE_TYPE_COMPTE,
-                                         AXE_ANCIENNETE, AXE_TRANCHE_ECART]
+    # La distribution est sortie de `chute` : ne restent que les axes métier.
+    assert list(out["AXE"].unique()) == [AXE_ENSEMBLE, AXE_TYPE_COMPTE, AXE_ANCIENNETE]
     ens_inv = out[(out["AXE"] == AXE_ENSEMBLE) & (out["EXERCICE"] == EXERCICE_INV)].iloc[0]
     # La ligne « Ensemble » porte le taux OFFICIEL de compute_synthese.
     assert ens_inv["TAUX_CHUTE_PCT"] == d["taux_chute_inventaire"]
@@ -330,6 +337,26 @@ def test_assemble_chute_quatre_axes_et_taux_officiels():
     # SEGMENT porte le même ORDRE dans les deux blocs EXERCICE.
     assert out["ORDRE"].notna().all()
     assert (out.groupby("SEGMENT")["ORDRE"].nunique() == 1).all()
+
+
+def test_distribution_ecarts_autonome_ensemble_et_tranches():
+    d   = _d()
+    out = _distribution_fixture(d)
+    # Table autonome : une ligne « Ensemble » de référence par exercice (ORDRE 0)
+    # en tête, puis les 11 tranches (axe stable, vides à zéro).
+    for exercice in (EXERCICE_INV, EXERCICE_N1):
+        bloc = out[out["EXERCICE"] == exercice].reset_index(drop=True)
+        assert bloc.iloc[0]["TRANCHE_ECART"] == AXE_ENSEMBLE
+        assert bloc.iloc[0]["ORDRE"] == 0
+        ens = bloc.iloc[0]
+        tr  = bloc.iloc[1:]
+        assert len(tr) == len(tranches_ecart())
+        # Σ des tranches redonne la ligne « Ensemble » (nb, PM).
+        assert int(tr["NB_DOSSIERS"].sum()) == int(ens["NB_DOSSIERS"])
+        assert round(float(tr["PM_MRM"].sum()), 2) == round(float(ens["PM_MRM"]), 2)
+    # La ligne « Ensemble » de l'inventaire porte le taux officiel.
+    ens_inv = out[(out["EXERCICE"] == EXERCICE_INV) & (out["ORDRE"] == 0)].iloc[0]
+    assert ens_inv["TAUX_CHUTE_PCT"] == d["taux_chute_inventaire"]
 
 
 def _orphelins_fixture():
@@ -369,7 +396,7 @@ def test_assemble_orphelins_six_angles():
 
 
 def test_controles_coherence_de_bout_en_bout():
-    """Les 9 tables construites sur le même scénario → tous les recoupements OK."""
+    """Les 10 tables construites sur le même scénario → tous les recoupements OK."""
     d   = _d()
     cpc = pd.DataFrame([
         {"TYPE_COMPTE": "PB", "CONSIGNE": "KEEP", "NB_DOSSIERS": 2,
@@ -385,6 +412,7 @@ def test_controles_coherence_de_bout_en_bout():
         "bilan_cas"                : bilan_cas(d),
         "couverture"               : couverture(d),
         "chute"                    : _chute_fixture(d),
+        "distribution_ecarts"      : _distribution_fixture(d),
         "consignes"                : consignes(d),
         "consignes_par_type_compte": cpc,
         "orphelins"                : _orphelins_fixture(),

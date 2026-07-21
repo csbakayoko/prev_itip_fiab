@@ -3,10 +3,10 @@ Export Excel multi-onglets — propre, lisible et prêt pour Power BI.
 
 Objectif : un seul classeur .xlsx qui RÉPOND À L'ÉTUDE, avec des onglets nommés
 en clair (pas de noms de variables bruts) — un onglet par table métrique
-(9 tables, une table = un sujet complet), organisés par axe :
+(10 tables, une table = un sujet complet), organisés par axe :
     1. Vue d'ensemble (synthèse, bilan cas par cas)
     2. Couverture des listes d'arrêts (les deux univers)
-    3. Niveau de provisionnement (le taux de chute sous tous ses angles)
+    3. Niveau de provisionnement (le taux de chute + la distribution des écarts)
     4. Suivi des consignes (détail + tableau de bord par type de compte)
     5. Investigation orphelins (six angles)
     6. Fiabilité (recoupements inter-onglets)
@@ -44,7 +44,9 @@ ONGLETS: Tuple[Tuple[str, str, str, str], ...] = (
     ("couverture",           "Couverture",              "Couverture des listes",
      "Les deux univers (colonne UNIVERS) : justification du compte / part de la revue MRM retrouvée."),
     ("chute",                "Taux de chute",           "Niveau de provisionnement",
-     "Le taux de chute sous tous ses angles (colonne AXE) : Ensemble, type de compte, ancienneté — × exercice."),
+     "Le taux de chute et ses ventilations métier (colonne AXE) : Ensemble, type de compte, ancienneté — × exercice."),
+    ("distribution_ecarts",  "Distribution des écarts", "Niveau de provisionnement",
+     "La distribution des écarts de PM par tranche de seuils (histogramme) — × exercice, avec ligne Ensemble de référence."),
     ("consignes",            "Consignes",               "Suivi des consignes",
      "Conformité + PM + taux de chute par consigne, les deux exercices (colonne EXERCICE)."),
     ("consignes_par_type_compte", "Consignes par type", "Suivi des consignes",
