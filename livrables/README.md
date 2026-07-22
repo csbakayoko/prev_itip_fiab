@@ -3,9 +3,12 @@
 Dernières versions de tous les documents du projet, organisées par
 dossier, prêtes pour le dépôt SharePoint. Chaque document existe en éditable +
 PDF ; chaque `.md` a son `.html` ; les contenus principaux se déclinent
-en niveaux **long → court**. Édition du 19/07/2026 : périmètre
-Lab/CORECO clarifié partout, slides finales en fond sombre, diagramme
-de Venn dans toutes les versions de deck.
+en niveaux **long → court**. Édition du 22/07/2026 : cartographie des
+anomalies portée en **v1.2** (éclairage à la source issu de l'échange
+Ali Ammar, nouvelle anomalie A14 « date de naissance chargée dans la
+date de survenance », causes confirmées sur A04/A08/A09-A10/A11) +
+nouveaux livrables de synthèse de cet échange (Word + support de
+présentation).
 
 ## `presentations/` — la restitution (chiffres réels)
 
@@ -17,6 +20,7 @@ de Venn dans toutes les versions de deck.
 | `Restitution_BackTest_ITIP_v2_COURTE.pptx` (+ `.pdf`) | **COURTE — 9 slides** |
 | `Restitution_Fiabilisation_ITIP.pptx` (+ `.pdf`) | deck phase fiabilisation (juin) — historique |
 | `Cartographie_Anomalies_ITIP.pptx` (+ `.pdf`) | support visuel cartographie (10 slides) |
+| `Synthese_Echange_Ali_Ammar_Champs_Obligatoires.pptx` (+ `.pdf`) | synthèse de l'échange Ali Ammar — alimentation CORECO → Lab & champs obligatoires (7 slides, restitution du 23/07) |
 | `Notes_Presentation_BackTest_ITIP.md` (+ `.html`) | notes orales slide par slide |
 
 Toutes les versions v2 incluent le **diagramme de Venn** (« ratios de
@@ -32,8 +36,9 @@ renumérotés par version.
 | `Documentation_BackTest_ITIP_SYNTHESE.docx` (+ `.pdf`) | **MOYENNE** — 2 pages |
 | `Documentation_BackTest_ITIP_RESUME.docx` (+ `.pdf`) | **COURTE** — 1 page |
 | `Rapport_Restitution_BackTest_ITIP_Audit_v1.1.docx` (+ `.pdf`) | rapport fonctions de contrôle (v1.1) |
-| `Cartographie_anomalies_orphelins_CPT_MRM.docx` (+ `.pdf`) | cartographie anomalies / orphelins |
+| `Cartographie_anomalies_orphelins_CPT_MRM.docx` (+ `.pdf`) | cartographie anomalies / orphelins — **v1.2 du 22/07** (13 fiches A01→A14, section « éclairage à la source » ; fiche « dossiers non retrouvés » retirée, code A07 non réattribué ; v1.1 en `archives/`) |
 | `Trame_entretien_Ali_Ammar_CoreCo_MRM.docx` (+ `.pdf`) | trame d'entretien CoreCo / MRM |
+| `Synthese_Echange_Ali_Ammar_Champs_Obligatoires.docx` (+ `.pdf`) | synthèse de l'échange Ali Ammar : alimentation CORECO → Lab, champs obligatoires/facultatifs, confrontation aux constats, prochaines étapes |
 | `RECETTE_ETUDE.docx` (+ `.pdf`) | export de `docs/RECETTE_ETUDE.md` (régénérer, ne pas éditer) |
 | `RECETTE_ETUDE.html` · `METRIQUES.html` · `GUIDE_KPI.html` · `POWERBI_MAQUETTE.html` | **versions HTML enrichies** des 4 contrats `docs/*.md` : sommaire navigable, titres émoji, tableaux stylés + illustration d'en-tête (chaîne du pipeline, formule/univers de la chute, cartes KPI fil rouge, modèle en étoile) — régénérer depuis les `.md`, ne pas éditer |
 
@@ -92,7 +97,8 @@ son `README.md`.
 ## `archives/` et `photos/`
 
 `archives/` : versions supplantées (Documentation base/v1.0/v1.1/v1.2,
-audit v1.0, decks v2 du 9/07, v3_epuree, v4_ordonnee, backups).
+audit v1.0, cartographie des anomalies v1.1, decks v2 du 9/07,
+v3_epuree, v4_ordonnee, backups).
 `photos/` : images IMG_* rapatriées de Downloads, à trier.
 
 ## Règles
