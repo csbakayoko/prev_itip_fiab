@@ -73,14 +73,32 @@ def write_delta_historise(
     """
     spark = df.sparkSession
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {table.rsplit('.', 1)[0]}")
-    (
-        df.write.format("delta")
-          .mode("overwrite")
-          .option("replaceWhere",
-                  f"DATE_INVENTAIRE = '{date_iso}' AND PERIMETRE = '{perimetre}'")
-          .partitionBy("DATE_INVENTAIRE")
-          .saveAsTable(table)
-    )
+    try:
+        (
+            df.write.format("delta")
+              .mode("overwrite")
+              .option("replaceWhere",
+                      f"DATE_INVENTAIRE = '{date_iso}' AND PERIMETRE = '{perimetre}'")
+              .partitionBy("DATE_INVENTAIRE")
+              .saveAsTable(table)
+        )
+    except Exception as exc:
+        # replaceWhere interdit tout changement de schéma : si la table existante
+        # date d'une version antérieure des exports, Delta refuse d'écrire. On
+        # nomme la table ET le remède — sinon l'export échoue au milieu de la
+        # boucle avec une AnalysisException illisible.
+        msg = str(exc)
+        if "schema" in msg.lower() or "replaceWhere" in msg or "not enough data columns" in msg:
+            raise RuntimeError(
+                f"Écriture Delta refusée pour {table} : la table existante a un "
+                "schéma différent des données du run (l'historisation replaceWhere "
+                "interdit tout changement de schéma). Remède, UNE FOIS : "
+                f"`DROP TABLE IF EXISTS {table}` — ou relancer le notebook "
+                "itip_fiab_powerbi avec le widget reinitialiser_tables = 'oui', "
+                "qui purge toutes les tables du schéma cible avant l'export. "
+                "La table se recrée ensuite automatiquement."
+            ) from exc
+        raise
     logger.info("Delta → %s (run %s / %s remplacé)", table, date_iso, perimetre)
     return table
 

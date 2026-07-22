@@ -109,6 +109,7 @@ surcharger n'importe lequel, un paramètre vide = le défaut de
 | `fichier_mrm_n1` | *(vide)*, `dbfs:/...csv` ou `aucun` | MRM N+1 ; `aucun` = run **sans** récupération tardive |
 | `types_compte` | `PB` (défaut) ; `PB,HPB` ; `*` | périmètre chargé (types de compte) |
 | `delta_schema` | `hive_metastore.itip_backtest` | schéma cible des tables ; **vide = pas d'écriture Delta** (fichiers seulement) |
+| `reinitialiser_tables` | `non` (défaut) ; `oui` | **migration en un clic** : `oui` purge les tables du schéma cible (`metrique_*`, anciennes `itip_metric_*`, `resultat_backtest`) avant l'export, qui les recrée proprement — à utiliser une fois après un changement de schéma des tables, puis repasser à `non` |
 
 Configuration minimale pour le run officiel 2023 : `annee_inventaire = 2023`
 et tout le reste vide (les défauts font foi).
@@ -192,7 +193,7 @@ inventaire). Dans l'onglet « Schedules & Triggers » du Job :
 | `❌ Lignes non classées : {...} — export interrompu` | un `TYPE_RECONCILIATION` inattendu (évolution de code incomplète) | corriger le code / resynchroniser le dossier Repos — rien n'a été écrit |
 | `❌ Taux de chute ≠ Σ consignes + hors consigne` | incohérence d'univers entre le taux principal et le par-consigne | anomalie de code à investiguer (voir les logs de synthèse) — rien n'a été écrit |
 | `✘ N contrôle(s) inter-tables KO` + assert final | deux tables ne racontent pas la même histoire | lire la table `controles_coherence` affichée au-dessus (colonnes ATTENDU / OBTENU) |
-| `A schema mismatch detected when writing to the Delta table` | le schéma d'une table a évolué (colonne ajoutée / renommée — ex. ajout de `CLE_RUN`, `ORDRE`) et l'écriture historisée refuse de le faire évoluer en silence | passer une fois `DROP TABLE <schema>.<table>` — la table se recrée au run suivant (seules les partitions non rejouées sont perdues) |
+| `A schema mismatch detected...` ou `Écriture Delta refusée pour <table>...` | le schéma d'une table a évolué (colonne ajoutée / renommée — ex. ajout de `CLE_RUN`, `ORDRE`, sortie de la distribution des écarts) et l'écriture historisée refuse de le faire évoluer en silence | relancer une fois avec `reinitialiser_tables = oui` (purge + recréation automatiques), ou passer manuellement `DROP TABLE <schema>.<table>` — seules les partitions non rejouées sont perdues |
 | `date_inventaire invalide (...) — impossible d'historiser le run` | date non résoluble (`auto`, `n/d`, faute de frappe) alors que l'export Delta exige une vraie date | renseigner `date_inventaire` au format `jj/mm/aaaa` (ou corriger la config) |
 | `Path does not exist` / lecture MRM en échec | fichier MRM absent du chemin `INVENTAIRES` / widget | déposer le fichier sur DBFS ou corriger le chemin (prérequis 3) |
 | Le run écrit dans le mauvais schéma | widget `delta_schema` surchargé (ex. schéma de test oublié) | vérifier les « base parameters » du Job ; vide = défaut `hive_metastore.itip_backtest` |

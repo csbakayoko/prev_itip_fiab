@@ -65,12 +65,13 @@
 # MAGIC | `fichier_mrm_n1` | MRM N+1 (`aucun` = run SANS récupération N+1) | `INVENTAIRES[annee]["mrm_n1"]` |
 # MAGIC | `types_compte` | périmètre (`PB,HPB…` ; `*` = tous) | clauses de la config client |
 # MAGIC | `delta_schema` | schéma Delta cible (vide = **pas d'écriture Hive**) | `EXPORT_DELTA_SCHEMA` |
+# MAGIC | `reinitialiser_tables` | `oui` = purge les tables du schéma cible avant l'export (migration après un changement de schéma des tables) — à repasser à `non` ensuite | `non` |
 
 # COMMAND ----------
 
 from config import (
     ANNEE_INVENTAIRE, CLIENT_NAME, CLIENT_TYPE_CLAUSES, EXPORT_DELTA_SCHEMA,
-    EXPORT_FORMATS, INVENTAIRES,
+    EXPORT_FORMATS, EXPORT_RESULT_TABLE, INVENTAIRES,
 )
 from core.io.save_result import save_result_delta
 from core.runtime import configurer_run, get_spark
@@ -91,6 +92,8 @@ dbutils.widgets.text("fichier_mrm_n1",  "", "MRM N+1 (vide = config, 'aucun' = s
 dbutils.widgets.text("types_compte",    ",".join(CLIENT_TYPE_CLAUSES or []) or "*",
                      "Types de compte (PB,HPB… ; * = tous)")
 dbutils.widgets.text("delta_schema",    EXPORT_DELTA_SCHEMA or "", "Schéma Delta (vide = pas de Delta)")
+dbutils.widgets.dropdown("reinitialiser_tables", "non", ["non", "oui"],
+                         "Réinitialiser les tables (migration)")
 
 
 def _param(nom: str, defaut: str) -> str:
@@ -207,6 +210,29 @@ print("✅ Contrôles de synthèse OK — export autorisé.")
 # MAGIC > `CLE_RUN`).
 # MAGIC >
 # MAGIC > Dans les deux cas, les 10 tables se (re)créent au run suivant.
+# MAGIC > **Le plus simple : widget `reinitialiser_tables` = `oui` (une fois)** —
+# MAGIC > la cellule ci-dessous purge toutes les tables du schéma cible
+# MAGIC > (`metrique_*`, anciennes `itip_metric_*`, `resultat_backtest`) et
+# MAGIC > l'export les recrée proprement dans la foulée. Repasser à `non` ensuite.
+
+# COMMAND ----------
+
+# Réinitialisation UNE FOIS (widget) : purge les tables dont le schéma a évolué
+# — l'historisation replaceWhere refuse tout changement de schéma, donc une
+# table d'ancienne génération bloque l'export au milieu de la boucle.
+if DELTA_SCHEMA and dbutils.widgets.get("reinitialiser_tables") == "oui":
+    try:
+        _existantes = [r.tableName for r in spark.sql(f"SHOW TABLES IN {DELTA_SCHEMA}").collect()]
+    except Exception:
+        _existantes = []  # schéma pas encore créé : rien à purger
+    _cibles = [t for t in _existantes
+               if t.startswith(("metrique_", "itip_metric_")) or t == EXPORT_RESULT_TABLE]
+    for _t in _cibles:
+        spark.sql(f"DROP TABLE IF EXISTS {DELTA_SCHEMA}.{_t}")
+        print(f"🧹 DROP {DELTA_SCHEMA}.{_t}")
+    print(f"🧹 Réinitialisation : {len(_cibles)} table(s) supprimée(s) — recréation par l'export ci-dessous.")
+elif DELTA_SCHEMA:
+    print("⏭️  Pas de réinitialisation (widget reinitialiser_tables = non).")
 
 # COMMAND ----------
 
