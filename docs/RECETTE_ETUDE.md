@@ -382,8 +382,9 @@ le cœur est `build_df_result` / `run` dans `main.py`.
 | Contexte | Entrée | Particularité |
 |---|---|---|
 | **Production** (Databricks Job) | `notebooks/itip_fiab_powerbi` | widgets / base parameters (`annee_inventaire`, `fichier_mrm_n1`, `types_compte`, `delta_schema`…) ; contrôles **bloquants** ; export des 10 tables + `resultat_backtest` — mise en place pas à pas : [`TUTORIEL_JOB_DATABRICKS.md`](TUTORIEL_JOB_DATABRICKS.md) |
-| **Recette vision CC2023** | `notebooks/itip_fiab_vision_cc2023` | l'exercice 2023 déroulé et commenté de bout en bout (tables + distribution des écarts + graphiques), **aucune écriture** |
+| **Recette vision CC2023** | `notebooks/itip_fiab_vision_cc2023` | l'exercice 2023 déroulé et commenté de bout en bout (tables + distribution des écarts + graphiques + **clauses PB à investiguer**, §4.7), **aucune écriture** |
 | **Recette vision CC2024** | `notebooks/itip_fiab_vision_cc2024` | idem pour 2024 — sans MRM N+1 (blocs N+1 vides, récupération « non mesurée »), **aucune écriture** |
+| Investigation clause | `notebooks/itip_fiab_exploration_clauses` | une clause en widget → lignes brutes du compte, colonnes de traçabilité (qui a réalisé le compte), balayage des tables du schéma `compteclient`, requêtes libres (read-only) |
 | Run interactif | `notebooks/itip_fiab_main` | widgets par année (2023 / 2024), métriques table par table ; **la cellule d'export écrit dans le metastore** (viser un schéma de test pour expérimenter) |
 | Comparaison | `notebooks/itip_fiab_comparaison` | 2023 vs 2024 côte à côte (via `configurer_run`, plusieurs inventaires dans une session) |
 | Smoke test | `notebooks/itip_fiab_smoke` | tout le pipeline après mise à jour du code via `build_df_result`, **aucune écriture** (ni Delta, ni fichier, ni PNG) |

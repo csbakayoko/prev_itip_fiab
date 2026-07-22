@@ -53,8 +53,9 @@ bout en bout (voir « Axe d'analyse » plus bas), élargir le périmètre est un
 | Notebook | Usage |
 |---|---|
 | `itip_fiab_powerbi` | **Production** : pipeline → contrôles bloquants → export des 9 tables (Delta + fichiers) — mise en place du Job : [`docs/TUTORIEL_JOB_DATABRICKS.md`](docs/TUTORIEL_JOB_DATABRICKS.md) |
-| `itip_fiab_vision_cc2023` | **Recette vision CC2023** : l'exercice 2023 déroulé et commenté de bout en bout (tables, distribution des écarts, graphiques), **sans écriture** |
+| `itip_fiab_vision_cc2023` | **Recette vision CC2023** : l'exercice 2023 déroulé et commenté de bout en bout (tables, distribution des écarts, graphiques, clauses PB à investiguer), **sans écriture** |
 | `itip_fiab_vision_cc2024` | **Recette vision CC2024** : idem 2024 — sans MRM N+1 (blocs N+1 vides), **sans écriture** |
+| `itip_fiab_exploration_clauses` | **Investigation d'une clause** dans les tables brutes du schéma `compteclient` (traçabilité de saisie, balayage des tables, requêtes libres) — read-only |
 | `itip_fiab_main` | Run interactif par année d'inventaire (widgets 2023/2024), métriques affichées table par table |
 | `itip_fiab_comparaison` | Comparaison côte à côte des inventaires 2023 vs 2024 |
 | `itip_fiab_smoke` | Smoke test après mise à jour du code : tout le pipeline, **sans export** |

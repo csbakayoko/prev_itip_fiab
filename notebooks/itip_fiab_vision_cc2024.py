@@ -227,7 +227,62 @@ display(metrics.orphelins(df_result, annee_inv))
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ### 4.7 Contrôles de cohérence + dimension de run
+# MAGIC ### 4.7 🎯 Clauses PB à investiguer — anomalies du compte
+# MAGIC
+# MAGIC Préparation des échanges avec **les préparateurs de comptes** : parmi les
+# MAGIC anomalies du compte (orphelins définitifs, sans contrepartie MRM), on
+# MAGIC isole les clauses **PB** les plus représentatives — les **2 premières en
+# MAGIC volumétrie de dossiers** et les **2 premières en poids de PM** (2 à
+# MAGIC 4 clauses selon recouvrement). Ce sont les comptes sur lesquels porter
+# MAGIC l'investigation au cas par cas, conformément au circuit de remontée
+# MAGIC (chaque anomalie revient à la personne qui a réalisé le compte).
+# MAGIC
+# MAGIC Les poids se lisent **en part du total des anomalies** (tous types de
+# MAGIC compte, porteuses de clause ou non) — cf. `orphelins_par_clause`.
+# MAGIC
+# MAGIC > ⚠ L'identité du **préparateur du compte** n'existe pas dans les données
+# MAGIC > chargées ici. Pour la retrouver (et tout le contexte de saisie), passer
+# MAGIC > par le notebook 🔍 `itip_fiab_exploration_clauses` : requêtes directes
+# MAGIC > sur les tables brutes du schéma `compteclient`, clause en widget.
+
+# COMMAND ----------
+
+import pandas as pd
+
+_clauses_orph = metrics.orphelins_par_clause(df_result)
+_pb_orph      = _clauses_orph[_clauses_orph["TYPE_COMPTE"] == "PB"].reset_index(drop=True)
+
+_top_nb = _pb_orph.nlargest(2, "NB_DOSSIERS").assign(CRITERE="Volumétrie dossiers")
+_top_pm = _pb_orph.nlargest(2, "PM_CPT").assign(CRITERE="Poids de PM")
+
+cibles_pb = (
+    pd.concat([_top_nb, _top_pm], ignore_index=True)
+      .groupby(["CLAUSE", "TYPE_COMPTE", "NB_DOSSIERS", "PM_CPT",
+                "POIDS_NB_PCT", "POIDS_PM_PCT"], as_index=False)["CRITERE"]
+      .agg(" + ".join)
+      .sort_values(["NB_DOSSIERS", "PM_CPT"], ascending=False)
+      .reset_index(drop=True)
+)
+
+print(f"🎯 {len(cibles_pb)} clause(s) PB cible(s) pour l'investigation :")
+for _, r in cibles_pb.iterrows():
+    print(f"   · Clause {r['CLAUSE']} — {int(r['NB_DOSSIERS']):,} dossiers"
+          f" ({r['POIDS_NB_PCT']} % des anomalies) · PM {r['PM_CPT']:,.0f} €"
+          f" ({r['POIDS_PM_PCT']} % de la PM des anomalies)"
+          f" · critère : {r['CRITERE']}")
+
+display(cibles_pb[["CLAUSE", "TYPE_COMPTE", "CRITERE", "NB_DOSSIERS", "PM_CPT",
+                   "POIDS_NB_PCT", "POIDS_PM_PCT"]])
+
+# COMMAND ----------
+
+# Contexte : les 10 premières clauses PB en anomalies (tri volumétrie).
+display(_pb_orph.head(10))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 4.8 Contrôles de cohérence + dimension de run
 # MAGIC
 # MAGIC `controles_coherence` : les recoupements inter-tables (attendu / obtenu /
 # MAGIC OK). `dim_run` : la dimension du run — noter `AVEC_MRM_N1 = false`, c'est
