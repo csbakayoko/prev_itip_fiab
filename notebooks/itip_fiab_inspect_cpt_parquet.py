@@ -8,8 +8,9 @@
 # MAGIC (`db_cfg.cpt_table`, `compteclient.tetepartete_itip`) — la bascule
 # MAGIC parquet du pipeline suppose *mêmes colonnes brutes*.
 # MAGIC
-# MAGIC ⚠ Piège connu : le fichier voisin `tetepartete_re.PARQUET` (même dossier
-# MAGIC `tetepartete_re/prepare/`) est un **autre flux** aux colonnes différentes —
+# MAGIC ⚠ Piège connu : le flux voisin `tetepartete_re.PARQUET` (dossier
+# MAGIC `tetepartete_re/prepare/`, à côté de `tetepartete_itip/prepare/`) est un
+# MAGIC **autre flux** aux colonnes différentes —
 # MAGIC ce notebook sert précisément à valider qu'on pointe le bon export.
 # MAGIC
 # MAGIC Le notebook :
