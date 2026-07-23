@@ -39,6 +39,7 @@ renumérotés par version.
 | `Cartographie_anomalies_orphelins_CPT_MRM.docx` (+ `.pdf`) | cartographie anomalies / orphelins — **v1.2 du 22/07** (13 fiches A01→A14, section « éclairage à la source » ; fiche « dossiers non retrouvés » retirée, code A07 non réattribué ; v1.1 en `archives/`) |
 | `Trame_entretien_Ali_Ammar_CoreCo_MRM.docx` (+ `.pdf`) | trame d'entretien CoreCo / MRM |
 | `Synthese_Echange_Ali_Ammar_Champs_Obligatoires.docx` (+ `.pdf`) | synthèse de l'échange Ali Ammar : alimentation CORECO → Lab, champs obligatoires/facultatifs, confrontation aux constats, prochaines étapes |
+| `Mails_Investigation_Clauses_CC2023.md` | trames des messages **individuels** aux préparateurs de comptes (une clause = un analyste = un message) : contexte du contrôle, mécanique du rapprochement, 6 questions, variante deux clauses, points de vigilance (données nominatives) — pièces jointes produites par le notebook `itip_fiab_extraction_anomalies` |
 | `RECETTE_ETUDE.docx` (+ `.pdf`) | export de `docs/RECETTE_ETUDE.md` (régénérer, ne pas éditer) |
 | `RECETTE_ETUDE.html` · `METRIQUES.html` · `GUIDE_KPI.html` · `POWERBI_MAQUETTE.html` | **versions HTML enrichies** des 4 contrats `docs/*.md` : sommaire navigable, titres émoji, tableaux stylés + illustration d'en-tête (chaîne du pipeline, formule/univers de la chute, cartes KPI fil rouge, modèle en étoile) — régénérer depuis les `.md`, ne pas éditer |
 

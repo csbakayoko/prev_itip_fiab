@@ -248,6 +248,10 @@ display(metrics.orphelins(df_result, annee_inv))
 # MAGIC > chargées ici. Pour la retrouver (et tout le contexte de saisie), passer
 # MAGIC > par le notebook 🔍 `itip_fiab_exploration_clauses` : requêtes directes
 # MAGIC > sur les tables brutes du schéma `compteclient`, clause en widget.
+# MAGIC >
+# MAGIC > 📎 Pour préparer l'échange lui-même, le notebook
+# MAGIC > `itip_fiab_extraction_anomalies` produit **un classeur par clause** avec
+# MAGIC > les lignes tête par tête concernées (la pièce jointe du message).
 
 # COMMAND ----------
 

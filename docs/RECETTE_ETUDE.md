@@ -385,6 +385,7 @@ le cœur est `build_df_result` / `run` dans `main.py`.
 | **Recette vision CC2023** | `notebooks/itip_fiab_vision_cc2023` | l'exercice 2023 déroulé et commenté de bout en bout (tables + distribution des écarts + graphiques + **clauses PB à investiguer**, §4.7), **aucune écriture** |
 | **Recette vision CC2024** | `notebooks/itip_fiab_vision_cc2024` | idem pour 2024 — sans MRM N+1 (blocs N+1 vides, récupération « non mesurée »), **aucune écriture** |
 | Investigation clause | `notebooks/itip_fiab_exploration_clauses` | une clause en widget → lignes brutes du compte, colonnes de traçabilité (qui a réalisé le compte), balayage des tables du schéma `compteclient`, requêtes libres (read-only) |
+| Pièces jointes d'investigation | `notebooks/itip_fiab_extraction_anomalies` | les clauses cibles de la §4.7 (ou une liste en widget) → **un classeur Excel par clause** : lignes tête par tête sans contrepartie MRM, motif probable, éléments d'identification manquants, onglet « Repères » (périmètre, volumétrie, PM, parts) — aucune écriture de table |
 | Run interactif | `notebooks/itip_fiab_main` | widgets par année (2023 / 2024), métriques table par table ; **la cellule d'export écrit dans le metastore** (viser un schéma de test pour expérimenter) |
 | Comparaison | `notebooks/itip_fiab_comparaison` | 2023 vs 2024 côte à côte (via `configurer_run`, plusieurs inventaires dans une session) |
 | Smoke test | `notebooks/itip_fiab_smoke` | tout le pipeline après mise à jour du code via `build_df_result`, **aucune écriture** (ni Delta, ni fichier, ni PNG) |
