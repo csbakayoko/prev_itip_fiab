@@ -3,12 +3,43 @@
 Dernières versions de tous les documents du projet, organisées par
 dossier, prêtes pour le dépôt SharePoint. Chaque document existe en éditable +
 PDF ; chaque `.md` a son `.html` ; les contenus principaux se déclinent
-en niveaux **long → court**. Édition du 22/07/2026 : cartographie des
-anomalies portée en **v1.2** (éclairage à la source issu de l'échange
-Ali Ammar, nouvelle anomalie A14 « date de naissance chargée dans la
-date de survenance », causes confirmées sur A04/A08/A09-A10/A11) +
-nouveaux livrables de synthèse de cet échange (Word + support de
-présentation).
+en niveaux **long → court**.
+
+**Édition du 10/09/2026** — dépôt de passation complété : nouveau dossier
+`09 - Mémoire et soutenance` (mémoire d'actuariat, note de synthèse,
+résumé FR/EN, support de soutenance) et guide du dépôt mis à jour en
+conséquence (plan, orientation par question, règles de confidentialité).
+
+Édition du 22/07/2026 : cartographie des anomalies portée en **v1.2**
+(éclairage à la source issu de l'échange Ali Ammar, nouvelle anomalie A14
+« date de naissance chargée dans la date de survenance », causes
+confirmées sur A04/A08/A09-A10/A11) + nouveaux livrables de synthèse de
+cet échange (Word + support de présentation).
+
+## `Depot_SharePoint_Backtest_ITIP/` — le dépôt de passation
+
+L'arborescence prête à déposer telle quelle, organisée par usage. Chaque
+dossier « matière » porte un `A_PROPOS.txt` qui rappelle ce qu'on y range
+et les conventions de nommage ; `00 - Guide du dépôt` donne le plan et la
+table « une question → le bon document ».
+
+| Dossier | Contenu |
+|---|---|
+| `00 - Guide du dépôt` | Le guide (Word + PDF) — plan du dépôt, orientation par question, conventions, confidentialité |
+| `01 - Présentations` | Supports de restitution (intégrale → longue → moyenne → courte), cartographie, synthèse de l'échange CoreCo, notes orales |
+| `02 - Documentation de référence` | Documentation v1.3 et ses déclinaisons, rapport pour les fonctions de contrôle |
+| `03 - Qualité des données` | Cartographie des anomalies v1.2 (A01→A14), synthèse de l'échange, trame d'entretien |
+| `04 - Méthode et indicateurs` | Les 4 contrats (métriques, guide des indicateurs, recette de l'étude, maquette du rapport) |
+| `05 - Tutoriels` | Relance de la production semestrielle, construction du rapport, jeu d'essai fictif |
+| `06 - Pièces jointes` | Pièces reçues des interlocuteurs + images et captures — à ne pas modifier |
+| `07 - Code du traitement` | Archives de livraison du code + notes de version (à alimenter au moment du dépôt) |
+| `08 - Power BI` | Fichier du rapport, thème, captures des pages, notes de connexion (à alimenter) |
+| `09 - Mémoire et soutenance` | Le mémoire d'actuariat, la note de synthèse, le résumé (FR/EN) et le support de soutenance — **chiffres entièrement fictifs, diffusables hors équipe** |
+
+⚠ Le dossier `09` est le seul, avec le jeu d'essai du `05`, à pouvoir
+sortir de l'équipe. En sens inverse, aucun de ses chiffres ne doit
+remonter dans les dossiers `01` à `04` : eux seuls portent les chiffres
+réels.
 
 ## `presentations/` — la restitution (chiffres réels)
 

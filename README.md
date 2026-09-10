@@ -46,7 +46,7 @@ bout en bout (voir « Axe d'analyse » plus bas), élargir le périmètre est un
 | `notebooks/` | Orchestration uniquement — aucune logique métier |
 | `tests/` | Tests unitaires (pytest) — lancés en CI |
 | `docs/` | `RECETTE_ETUDE.md` (fabrication de l'étude de bout en bout) · `METRIQUES.md` (contrat formel des métriques) · `GUIDE_KPI.md` (interprétation, exemples chiffrés) · `POWERBI_MAQUETTE.md` (maquette du rapport, branchement SQL Warehouse) · `TUTORIEL_JOB_DATABRICKS.md` (construire, lancer, planifier et dépanner le Job) |
-| `livrables/` | Documents générés, **dernières versions** (Word / PPT / PDF — seul l'index `README.md` est suivi avec le code) : tutoriels rapport Power BI et Job Databricks, recette de l'étude, cartographie des anomalies, trame d'entretien |
+| `livrables/` | Documents générés, **dernières versions** (Word / PPT / PDF — seul l'index `README.md` est suivi avec le code) : tutoriels rapport Power BI et Job Databricks, recette de l'étude, cartographie des anomalies, trame d'entretien. Contient `Depot_SharePoint_Backtest_ITIP/`, l'arborescence de passation prête à déposer (00 → 09) |
 
 ## Notebooks (Databricks Repos — la racine du repo est sur `sys.path`)
 
@@ -183,3 +183,37 @@ La CI rejoue lint + tests automatiquement.
 Les tests Spark ont besoin d'un JDK (Java) installé localement ; sans lui, ils
 échouent sur `JAVA_GATEWAY_EXITED` — les tests de logique pure (pandas)
 tournent, eux, sans rien de plus.
+
+## Passation — par où commencer
+
+Pour quelqu'un qui reprend le sujet, dans cet ordre :
+
+1. **Comprendre le pourquoi** — le résumé puis la note de synthèse du
+   mémoire (`livrables/Depot_SharePoint_Backtest_ITIP/09 - Mémoire et
+   soutenance/`). Chiffres fictifs, méthode réelle : c'est la lecture
+   suivie qui explique ce que le rapprochement cherche à établir et ce
+   que les indicateurs ne disent pas.
+2. **Comprendre le quoi** — [`docs/GUIDE_KPI.md`](docs/GUIDE_KPI.md) pour
+   l'interprétation des indicateurs, puis
+   [`docs/METRIQUES.md`](docs/METRIQUES.md) pour leur définition formelle
+   (c'est le contrat : toute évolution de table s'y arbitre).
+3. **Comprendre le comment** — [`docs/RECETTE_ETUDE.md`](docs/RECETTE_ETUDE.md),
+   la fabrication de l'étude de bout en bout.
+4. **Faire tourner** — [`docs/TUTORIEL_JOB_DATABRICKS.md`](docs/TUTORIEL_JOB_DATABRICKS.md)
+   pour construire, lancer, planifier et dépanner le Job ; puis
+   [`docs/POWERBI_MAQUETTE.md`](docs/POWERBI_MAQUETTE.md) pour le rapport.
+
+Pour prendre en main le code sans rien écrire : les notebooks
+`itip_fiab_vision_cc2023` et `itip_fiab_vision_cc2024` déroulent le
+pipeline complet, commenté, table par table.
+
+**Au prochain arrêté**, la marche à suivre tient en trois gestes :
+déposer le fichier d'inventaire MRM sur DBFS, ajouter son entrée dans
+`INVENTAIRES` (`config/profile.py`), lancer le Job avec la bonne année.
+Le run est bloquant sur les contrôles : s'il passe au vert, les tables
+sont cohérentes.
+
+**Les trois pièges à connaître** sont détaillés plus haut : l'écriture
+remplace la partition du run, un changement de colonnes impose une
+suppression de table à passer une fois, et l'export exige une
+`DATE_INVENTAIRE` résoluble.
