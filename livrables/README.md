@@ -17,7 +17,17 @@ en niveaux **long → court**.
 - **jeu d'essai fictif remis au schéma courant** — il lui manquait la table
   `distribution_ecarts` (la page P3 de la maquette n'avait donc pas de
   source) et sa table `chute` portait encore l'axe « Tranche d'écart »,
-  supprimé en production. 10 tables désormais, 63 contrôles au vert.
+  supprimé en production. 10 tables désormais, 63 contrôles au vert ;
+- **documentation de référence en v1.4**, rapport d'audit en v1.2 : annexe
+  des tables complétée de `dim_run` et `distribution_ecarts`, comptes
+  portés à 10 tables / 12 graphiques (les v1.3 et v1.1 sont en `archives/`) ;
+- **tutoriel du rapport entièrement refondu** (Word, PDF et support) — il
+  enseignait encore trois tables de dimension construites à la main dans
+  Power Query, alors que `metrique_dim_run` et la clé `CLE_RUN` les
+  remplacent. Désormais : 11 tables à importer, une seule dimension et dix
+  relations, tri des axes par `ORDRE`, et les pages vont jusqu'à **P8**
+  (nouvelle page P3 « Écarts par dossier », dans le document comme dans le
+  support, qui passe de 16 à 17 diapositives).
 
 Édition du 22/07/2026 : cartographie des anomalies portée en **v1.2**
 (éclairage à la source issu de l'échange Ali Ammar, nouvelle anomalie A14
@@ -116,7 +126,9 @@ mélanger avec le jeu du deck école ci-dessus ni avec celui du mémoire
 
 ## `tutoriels/` — guides techniques (chiffres fictifs)
 
-`Tutoriel_PowerBI_Backtest_ITIP` (docx + pdf + pptx + `_deck.pdf`),
+`Tutoriel_PowerBI_Backtest_ITIP` (docx + pdf + pptx + `_deck.pdf` — **refondu
+le 10/09** : 11 tables, modèle en étoile par `CLE_RUN`, tri par `ORDRE`,
+pages P1→P8 dont la nouvelle P3 « Écarts par dossier » ; 17 diapositives),
 `Tutoriel_Job_Databricks_ITIP` (docx + pdf — la source à jour est
 `docs/TUTORIEL_JOB_DATABRICKS.md`, régénérer les exports depuis elle),
 `PROMPT_CLAUDE_DESIGN.md` (+ `.html`) — **réécrit le 20/07** : prompt
