@@ -36,9 +36,9 @@ table « une question → le bon document ».
 |---|---|
 | `00 - Guide du dépôt` | Le guide (Word + PDF) — plan du dépôt, orientation par question, conventions, confidentialité |
 | `01 - Présentations` | Supports de restitution (intégrale → longue → moyenne → courte), cartographie, synthèse de l'échange CoreCo, notes orales |
-| `02 - Documentation de référence` | Documentation v1.3 et ses déclinaisons, rapport pour les fonctions de contrôle |
+| `02 - Documentation de référence` | Documentation v1.4 et ses déclinaisons, rapport pour les fonctions de contrôle |
 | `03 - Qualité des données` | Cartographie des anomalies v1.2 (A01→A14), synthèse de l'échange, trame d'entretien |
-| `04 - Méthode et indicateurs` | Les 4 contrats (métriques, guide des indicateurs, recette de l'étude, maquette du rapport) |
+| `04 - Méthode et indicateurs` | Les 4 contrats (métriques, guide des indicateurs, recette de l'étude, maquette du rapport) + le tutoriel du traitement, en HTML — plus la recette en Word/PDF |
 | `05 - Tutoriels` | Relance de la production semestrielle, construction du rapport, jeu d'essai fictif |
 | `06 - Pièces jointes` | Pièces reçues des interlocuteurs + images et captures — à ne pas modifier |
 | `07 - Code du traitement` | Archives de livraison du code + notes de version (à alimenter au moment du dépôt) |
@@ -49,6 +49,13 @@ table « une question → le bon document ».
 sortir de l'équipe. En sens inverse, aucun de ses chiffres ne doit
 remonter dans les dossiers `01` à `04` : eux seuls portent les chiffres
 réels.
+
+**Le dépôt fait foi.** Les dossiers à plat ci-dessous (`presentations/`,
+`documentation/`, `tutoriels/`, `ecole/`) sont l'atelier : c'est là qu'on
+fabrique et qu'on régénère. Le dépôt en est le miroir publié. Toute
+nouvelle version se recopie donc dans les deux — une correction faite d'un
+seul côté crée exactement la dérive qui a été rattrapée le 10/09 (des
+exports en retard d'un refactor annonçaient encore « 8 tables »).
 
 ## `presentations/` — la restitution (chiffres réels)
 
@@ -72,16 +79,16 @@ renumérotés par version.
 
 | Fichier | Niveau |
 |---|---|
-| `Documentation_BackTest_ITIP_FIAB_v1.3.docx` (+ `.pdf`) | **LONGUE** — la référence (v1.3 consolidée du 17/07) |
+| `Documentation_BackTest_ITIP_FIAB_v1.4.docx` (+ `.pdf`) | **LONGUE** — la référence (v1.4 du 10/09 : annexe C complétée de `dim_run` et `distribution_ecarts`, comptes portés à 10 tables / 12 graphiques ; v1.3 en `archives/`) |
 | `Documentation_BackTest_ITIP_SYNTHESE.docx` (+ `.pdf`) | **MOYENNE** — 2 pages |
 | `Documentation_BackTest_ITIP_RESUME.docx` (+ `.pdf`) | **COURTE** — 1 page |
-| `Rapport_Restitution_BackTest_ITIP_Audit_v1.1.docx` (+ `.pdf`) | rapport fonctions de contrôle (v1.1) |
+| `Rapport_Restitution_BackTest_ITIP_Audit_v1.2.docx` (+ `.pdf`) | rapport fonctions de contrôle (v1.2 du 10/09 : 10 tables ; v1.1 en `archives/`) |
 | `Cartographie_anomalies_orphelins_CPT_MRM.docx` (+ `.pdf`) | cartographie anomalies / orphelins — **v1.2 du 22/07** (13 fiches A01→A14, section « éclairage à la source » ; fiche « dossiers non retrouvés » retirée, code A07 non réattribué ; v1.1 en `archives/`) |
 | `Trame_entretien_Ali_Ammar_CoreCo_MRM.docx` (+ `.pdf`) | trame d'entretien CoreCo / MRM |
 | `Synthese_Echange_Ali_Ammar_Champs_Obligatoires.docx` (+ `.pdf`) | synthèse de l'échange Ali Ammar : alimentation CORECO → Lab, champs obligatoires/facultatifs, confrontation aux constats, prochaines étapes |
 | `Mails_Investigation_Clauses_CC2023.md` | trames des messages **individuels** aux préparateurs de comptes (une clause = un analyste = un message) : contexte du contrôle, mécanique du rapprochement, 6 questions, variante deux clauses, points de vigilance (données nominatives) — pièces jointes produites par le notebook `itip_fiab_extraction_anomalies` |
 | `RECETTE_ETUDE.docx` (+ `.pdf`) | export de `docs/RECETTE_ETUDE.md` (régénérer, ne pas éditer) |
-| `RECETTE_ETUDE.html` · `METRIQUES.html` · `GUIDE_KPI.html` · `POWERBI_MAQUETTE.html` | **versions HTML enrichies** des 4 contrats `docs/*.md` : sommaire navigable, titres émoji, tableaux stylés + illustration d'en-tête (chaîne du pipeline, formule/univers de la chute, cartes KPI fil rouge, modèle en étoile) — régénérer depuis les `.md`, ne pas éditer |
+| `RECETTE_ETUDE.html` · `METRIQUES.html` · `GUIDE_KPI.html` · `POWERBI_MAQUETTE.html` · `TUTORIEL_JOB_DATABRICKS.html` | versions HTML des contrats `docs/*.md` : page autonome, titre émoji, tableaux stylés, liens entre documents résolus vers les `.html` — **régénérées le 10/09 depuis les sources, ne pas éditer** (`pandoc -s fichier.md -o fichier.html --metadata title="…"`) |
 
 ## `ecole/` — version académique ANONYMISÉE
 
@@ -98,9 +105,9 @@ aucun chiffre réel résiduel. **Seule version à utiliser hors AXA**
 (mémoire / soutenance ISFA).
 
 `jeu_fictif_metriques/` — **le jeu de MÉTRIQUES fictives 2023 + 2024**
-(édition du 20/07) : générateur pandas (`genere_jeu_fictif_metriques.py`,
-volumes ≈ ÷2, pourcentages décalés, 54 contrôles de cohérence vérifiés),
-les 10 tables en CSV (années empilées, clé de liaison `CLE_RUN`) + classeur
+(édition du 20/07, complété le 10/09) : générateur pandas
+(`genere_jeu_fictif_metriques.py`, volumes ≈ ÷2, pourcentages décalés,
+63 contrôles de cohérence vérifiés), les 10 tables en CSV (années empilées, clé de liaison `CLE_RUN`) + classeur
 `jeu_fictif_metriques.xlsx` prêt pour l'outil de tableau de bord, et son
 `LISEZMOI.md` (chiffres de tête + garde-fous). C'est le jeu de la
 **maquette du tableau de bord** et des captures école — ⚠ ne pas le
@@ -137,8 +144,8 @@ son `README.md`.
 
 ## `archives/` et `photos/`
 
-`archives/` : versions supplantées (Documentation base/v1.0/v1.1/v1.2,
-audit v1.0, cartographie des anomalies v1.1, decks v2 du 9/07,
+`archives/` : versions supplantées (Documentation base/v1.0/v1.1/v1.2/v1.3,
+audit v1.0/v1.1, cartographie des anomalies v1.1, decks v2 du 9/07,
 v3_epuree, v4_ordonnee, backups).
 `photos/` : images IMG_* rapatriées de Downloads, à trier.
 
