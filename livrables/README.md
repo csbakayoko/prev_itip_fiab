@@ -5,10 +5,19 @@ dossier, prêtes pour le dépôt SharePoint. Chaque document existe en éditable
 PDF ; chaque `.md` a son `.html` ; les contenus principaux se déclinent
 en niveaux **long → court**.
 
-**Édition du 10/09/2026** — dépôt de passation complété : nouveau dossier
-`09 - Mémoire et soutenance` (mémoire d'actuariat, note de synthèse,
-résumé FR/EN, support de soutenance) et guide du dépôt mis à jour en
-conséquence (plan, orientation par question, règles de confidentialité).
+**Édition du 10/09/2026** — dépôt de passation complété et remis à niveau :
+- nouveau dossier `09 - Mémoire et soutenance` (mémoire d'actuariat, note
+  de synthèse, résumé FR/EN, support de soutenance) et guide du dépôt mis
+  à jour en conséquence (plan, orientation par question, confidentialité) ;
+- `07 - Code du traitement` : archive de livraison v2.0 + notes de version ;
+- **exports des contrats régénérés** — les HTML et les Word/PDF de `04` et
+  `05` dataient d'avant le passage à 10 tables : ils annonçaient encore
+  « 8 tables » et ignoraient la table `distribution_ecarts`. Ils sont
+  reconstruits depuis les sources `docs/*.md`, liens internes compris ;
+- **jeu d'essai fictif remis au schéma courant** — il lui manquait la table
+  `distribution_ecarts` (la page P3 de la maquette n'avait donc pas de
+  source) et sa table `chute` portait encore l'axe « Tranche d'écart »,
+  supprimé en production. 10 tables désormais, 63 contrôles au vert.
 
 Édition du 22/07/2026 : cartographie des anomalies portée en **v1.2**
 (éclairage à la source issu de l'échange Ali Ammar, nouvelle anomalie A14
@@ -91,7 +100,7 @@ aucun chiffre réel résiduel. **Seule version à utiliser hors AXA**
 `jeu_fictif_metriques/` — **le jeu de MÉTRIQUES fictives 2023 + 2024**
 (édition du 20/07) : générateur pandas (`genere_jeu_fictif_metriques.py`,
 volumes ≈ ÷2, pourcentages décalés, 54 contrôles de cohérence vérifiés),
-les 9 tables en CSV (années empilées, clé de liaison `CLE_RUN`) + classeur
+les 10 tables en CSV (années empilées, clé de liaison `CLE_RUN`) + classeur
 `jeu_fictif_metriques.xlsx` prêt pour l'outil de tableau de bord, et son
 `LISEZMOI.md` (chiffres de tête + garde-fous). C'est le jeu de la
 **maquette du tableau de bord** et des captures école — ⚠ ne pas le

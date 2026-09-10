@@ -3,7 +3,7 @@
 Backtesting entre la **revue d'inventaire MRM** (fichier Excel ou CSV déposé
 sur DBFS) et le **compte CPT** (table du Lab Databricks) : contrôles qualité,
 matching en cascade, calcul des KPI (chute, couverture, conformité,
-distribution des écarts), puis restitution — 9 tables métriques (Delta /
+distribution des écarts), puis restitution — 10 tables métriques (Delta /
 Excel / CSV / Parquet / JSON) consommées par Power BI en modèle en étoile
 (clé de liaison `CLE_RUN`, dimension `dim_run`), et 12 graphiques.
 
@@ -42,7 +42,7 @@ bout en bout (voir « Axe d'analyse » plus bas), élargir le périmètre est un
 | `core/prep/` | Contrôles qualité, nettoyage, dédoublonnage, clés de matching |
 | `core/match/` | Waterfall de matching, récupérations (N+1, statut NON), audit de clé |
 | `core/synthese/` | Synthèse : passe Spark unique (`compute_synthese`), contrat typé, rendu console |
-| `core/metrics/` | Les 9 tables métriques + contrôles de cohérence inter-tables ; `viz.py` = 12 graphiques |
+| `core/metrics/` | Les 10 tables métriques + contrôles de cohérence inter-tables ; `viz.py` = 12 graphiques |
 | `notebooks/` | Orchestration uniquement — aucune logique métier |
 | `tests/` | Tests unitaires (pytest) — lancés en CI |
 | `docs/` | `RECETTE_ETUDE.md` (fabrication de l'étude de bout en bout) · `METRIQUES.md` (contrat formel des métriques) · `GUIDE_KPI.md` (interprétation, exemples chiffrés) · `POWERBI_MAQUETTE.md` (maquette du rapport, branchement SQL Warehouse) · `TUTORIEL_JOB_DATABRICKS.md` (construire, lancer, planifier et dépanner le Job) |
@@ -52,7 +52,7 @@ bout en bout (voir « Axe d'analyse » plus bas), élargir le périmètre est un
 
 | Notebook | Usage |
 |---|---|
-| `itip_fiab_powerbi` | **Production** : pipeline → contrôles bloquants → export des 9 tables (Delta + fichiers) — mise en place du Job : [`docs/TUTORIEL_JOB_DATABRICKS.md`](docs/TUTORIEL_JOB_DATABRICKS.md) |
+| `itip_fiab_powerbi` | **Production** : pipeline → contrôles bloquants → export des 10 tables (Delta + fichiers) — mise en place du Job : [`docs/TUTORIEL_JOB_DATABRICKS.md`](docs/TUTORIEL_JOB_DATABRICKS.md) |
 | `itip_fiab_vision_cc2023` | **Recette vision CC2023** : l'exercice 2023 déroulé et commenté de bout en bout (tables, distribution des écarts, graphiques, clauses PB à investiguer), **sans écriture** |
 | `itip_fiab_vision_cc2024` | **Recette vision CC2024** : idem 2024 — sans MRM N+1 (blocs N+1 vides), **sans écriture** |
 | `itip_fiab_exploration_clauses` | **Investigation d'une clause** dans les tables brutes du schéma `compteclient` (traçabilité de saisie, balayage des tables, requêtes libres) — read-only |
@@ -80,7 +80,7 @@ et permet aussi de rejouer plusieurs inventaires dans une même session.
 
 **Qui écrit quoi — le Hive est la sortie de référence.** `EXPORT_ANALYSES = True`
 et `EXPORT_FORMATS = ("delta", "excel", "parquet", "csv")` (`config/profile.py`) :
-`main.run` — donc le Job comme un `spark-submit main.py` — écrit les 9 tables
+`main.run` — donc le Job comme un `spark-submit main.py` — écrit les 10 tables
 métriques **et** le détail `resultat_backtest` dans `EXPORT_DELTA_SCHEMA`
 (défaut `hive_metastore.itip_backtest`), puis les fichiers DBFS et les PNG en
 sortie **secondaire**.
