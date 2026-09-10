@@ -19,7 +19,7 @@ from core.metrics import (
     BLOC_N, BLOC_N1, BLOC_N2_PLUS,
     dim_run, consignes, couverture, synthese, bilan_cas,
     _assemble_chute, _assemble_orphelins,
-    AXE_ENSEMBLE, AXE_TYPE_COMPTE, AXE_ANCIENNETE, AXE_TRANCHE_ECART,
+    AXE_ENSEMBLE, AXE_TYPE_COMPTE, AXE_ANCIENNETE,
     AXE_GARANTIE, AXE_MOIS, AXE_CLAUSE, AXE_CLE_NULLE,
     SANS_CONSIGNE, TRANCHE_ECART_NUL, UNIVERS_COMPTE, UNIVERS_REVUE,
 )
